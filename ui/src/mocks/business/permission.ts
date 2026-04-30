@@ -1,5 +1,12 @@
 import { http, HttpResponse } from 'msw';
 
+const templateDemoPermissionPrefixes = ['default:dashboard', 'default:page-demo', 'default:feat', 'default:comp', 'default:level', 'blank:other-login'] as const;
+const templateDemoPermissionCodes = new Set(['default:about', 'blank:empty-page']);
+
+function isTemplateDemoPermissionCode(code: string): boolean {
+  return templateDemoPermissionCodes.has(code) || templateDemoPermissionPrefixes.some(prefix => code === prefix || code.startsWith(`${prefix}:`));
+}
+
 const rolePermissions: Record<number, string[]> = {
   1: [
     'default:dashboard',
@@ -128,29 +135,39 @@ const rolePermissions: Record<number, string[]> = {
     'default:system:dept:edit',
     'default:system:dept:del',
     'default:system:dept:addlowlevel',
-    'default:about',
+    'default:energy-rental',
+    'default:energy-rental:dashboard',
+    'default:energy-rental:bot-config',
+    'default:energy-rental:platform-config',
+    'default:energy-rental:platform-config:edit',
+    'default:energy-rental:link-test',
+    'default:energy-rental:packages',
+    'default:energy-rental:packages:add',
+    'default:energy-rental:packages:edit',
+    'default:energy-rental:packages:del',
+    'default:energy-rental:addresses',
+    'default:energy-rental:orders',
+    'default:energy-rental:orders:edit',
+    'default:energy-rental:wallet-transactions',
+    'default:energy-rental:return-tasks',
+    'default:energy-rental:return-tasks:retry',
+    'default:about'
   ],
-  2: [
-    'default:dashboard',
-    'default:dashboard:analysis',
-    'default:dashboard:monitor',
-    'default:dashboard:workbench',
-    'default:about',
-  ],
+  2: ['default:dashboard', 'default:dashboard:analysis', 'default:dashboard:monitor', 'default:dashboard:workbench', 'default:about']
 };
 
 export const permission = [
   // 获取角色的权限码列表
   http.get('/site/api/permission/list-role-resources/:roleId', ({ params }) => {
     const roleId = Number(params['roleId']);
-    const perms = rolePermissions[roleId] || [];
+    const perms = (rolePermissions[roleId] || []).filter(code => !isTemplateDemoPermissionCode(code));
     return HttpResponse.json({ code: 200, msg: 'SUCCESS', data: perms });
   }),
 
   // 更新角色权限
   http.post('/site/api/permission/assign-role-menu', async ({ request }) => {
-    const body = await request.json() as { roleId: number; permCodes: string[] };
-    rolePermissions[body.roleId] = body.permCodes;
+    const body = (await request.json()) as { roleId: number; permCodes: string[] };
+    rolePermissions[body.roleId] = body.permCodes.filter(code => !isTemplateDemoPermissionCode(code));
     return HttpResponse.json({ code: 200, msg: 'SUCCESS', data: null });
-  }),
+  })
 ];

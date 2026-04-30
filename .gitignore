@@ -6,11 +6,16 @@ ui/tmp
 ui/out-tsc
 ui/bazel-out
 nest-api/dist
+go-bot/bin
+go-bot/build
+deploy-artifacts
 # Node
 ui/node_modules
 nest-api/node_modules
 ui/npm-debug.log
 ui/yarn-error.log
+ui/*.log
+go-bot/*.log
 
 # IDEs and editors
 .idea/

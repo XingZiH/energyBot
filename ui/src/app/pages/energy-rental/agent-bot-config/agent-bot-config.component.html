@@ -1,0 +1,111 @@
+<app-page-header [pageHeaderInfo]="pageHeaderInfo" />
+
+<nz-spin [nzSpinning]="loading()">
+  <nz-alert
+    class="m-b-16"
+    nzMessage="Telegram Bot Token 留空时不会覆盖旧配置；这里配置当前账号的机器人。"
+    nzShowIcon
+    nzType="info"
+  ></nz-alert>
+
+  <nz-card class="m-b-16 runtime-card" [nzTitle]="botScopeLabel() + '运行状态'">
+    <div class="runtime-toolbar">
+      <div class="runtime-tags">
+        <nz-tag [nzColor]="serviceStatusColor(runtime()?.serviceStatus)">
+          服务{{ runtime()?.serviceStatusLabel || '离线' }}
+        </nz-tag>
+        <nz-tag [nzColor]="runtimeStatusColor(runtime()?.runtimeStatus)">
+          {{ runtimeStatusText(runtime()?.runtimeStatus) }}
+        </nz-tag>
+        <nz-tag [nzColor]="runtimeStatusColor(runtime()?.pollingStatus)">
+          {{ pollingStatusText(runtime()?.pollingStatus) }}
+        </nz-tag>
+        <nz-tag [nzColor]="statusColor(runtime()?.telegramBotTokenConfigured)">
+          Token {{ statusText(runtime()?.telegramBotTokenConfigured) }}
+        </nz-tag>
+      </div>
+      <div class="runtime-actions">
+        <button
+          nz-button
+          nzType="primary"
+          [disabled]="runtime()?.desiredStatus === 'enabled' || !runtime()?.canEnable"
+          [nzLoading]="toggling()"
+          (click)="toggleRuntime('enabled')"
+        >
+          <i nz-icon nzType="poweroff"></i>
+          开启机器人
+        </button>
+        <button
+          nz-button
+          nzDanger
+          [disabled]="runtime()?.desiredStatus === 'disabled'"
+          [nzLoading]="toggling()"
+          (click)="toggleRuntime('disabled')"
+        >
+          <i nz-icon nzType="pause-circle"></i>
+          关闭机器人
+        </button>
+      </div>
+    </div>
+
+    @if (runtime()?.desiredStatus !== 'enabled' && !runtime()?.canEnable) {
+      <nz-alert class="m-b-16" nzMessage="开启前请先保存 Telegram Bot Token。" nzShowIcon nzType="warning"></nz-alert>
+    }
+
+    <nz-descriptions nzSize="small" [nzColumn]="{ xxl: 3, xl: 3, lg: 2, md: 2, sm: 1, xs: 1 }">
+      <nz-descriptions-item nzTitle="期望状态">{{ runtime()?.desiredStatusLabel || '-' }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="最近心跳">{{ heartbeatText(runtime()) }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="实例">{{ runtime()?.instanceId || '-' }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="启动时间">{{ formatRuntimeTime(runtime()?.lastStartedAt) }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="停止时间">{{ formatRuntimeTime(runtime()?.lastStoppedAt) }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="最后错误">{{ runtime()?.lastError || '-' }}</nz-descriptions-item>
+    </nz-descriptions>
+  </nz-card>
+
+  <form nz-form [formGroup]="form">
+    <nz-card [nzTitle]="botScopeLabel() + '参数'">
+      <nz-form-item>
+        <nz-form-label nzRequired>机器人状态</nz-form-label>
+        <nz-form-control>
+          <nz-select formControlName="botStatus">
+            @for (item of botStatusOptions; track item.value) {
+              <nz-option [nzLabel]="item.label" [nzValue]="item.value"></nz-option>
+            }
+          </nz-select>
+        </nz-form-control>
+      </nz-form-item>
+
+      <nz-form-item>
+        <nz-form-label>Telegram Bot Token</nz-form-label>
+        <nz-form-control>
+          <nz-input-group [nzSuffix]="tokenStatus">
+            <input type="password" formControlName="telegramBotToken" nz-input placeholder="留空不修改，填写后覆盖旧 Token" />
+          </nz-input-group>
+          <ng-template #tokenStatus>
+            <nz-tag [nzColor]="statusColor(config()?.telegramBotTokenConfigured)">
+              {{ statusText(config()?.telegramBotTokenConfigured) }}
+            </nz-tag>
+          </ng-template>
+        </nz-form-control>
+      </nz-form-item>
+
+      @if (config()?.scope !== 'platform') {
+        <nz-form-item>
+          <nz-form-label>机器人用户名</nz-form-label>
+          <nz-form-control>
+            <input formControlName="telegramBotUsername" nz-input placeholder="@your_bot，可选" />
+          </nz-form-control>
+        </nz-form-item>
+
+        <nz-form-item>
+          <nz-form-label>备注</nz-form-label>
+          <nz-form-control>
+            <textarea formControlName="remark" nz-input rows="3" placeholder="可选"></textarea>
+          </nz-form-control>
+        </nz-form-item>
+      }
+
+      <button nz-button nzType="primary" [nzLoading]="saving()" (click)="submit()">保存</button>
+    </nz-card>
+  </form>
+</nz-spin>

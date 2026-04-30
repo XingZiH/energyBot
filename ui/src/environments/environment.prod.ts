@@ -1,7 +1,7 @@
-export const ip = 'huajian123.github.io';
-export const localUrl = `https://${ip}/site/api`;
+export const ip = 'localhost';
+export const localUrl = '/site/api';
 
 export const environment = {
   production: true,
-  mockEnabled: true
+  mockEnabled: false
 };

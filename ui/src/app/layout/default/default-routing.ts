@@ -1,5 +1,8 @@
 import { Route } from '@angular/router';
 
+import { JudgeAuthGuard } from '@core/services/common/guard/judgeAuth.guard';
+import { JudgeLoginGuard } from '@core/services/common/guard/judgeLogin.guard';
+
 import { DefaultComponent } from './default.component';
 
 export default [
@@ -7,9 +10,9 @@ export default [
     path: '',
     component: DefaultComponent,
     data: { shouldDetach: 'no', preload: true },
-    canActivateChild: [],
+    canActivateChild: [JudgeLoginGuard, JudgeAuthGuard],
     children: [
-      { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
+      { path: '', redirectTo: 'energy-rental/dashboard', pathMatch: 'full' },
       {
         path: 'dashboard',
         data: { preload: true },
@@ -40,6 +43,10 @@ export default [
       {
         path: 'system',
         loadChildren: () => import('../../pages/system/system-routing')
+      },
+      {
+        path: 'energy-rental',
+        loadChildren: () => import('../../pages/energy-rental/energy-rental-routing')
       },
       // 此路由用于tab刷新时占位组件
       {

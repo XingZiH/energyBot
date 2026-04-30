@@ -52,7 +52,7 @@ export default {
 
     // 2. --- 插件和框架兼容性规则 ---
     'plugin/declaration-block-no-ignored-properties': true, // 启用插件
-    'selector-type-no-unknown': [ // 忽略 Angular/Ant Design 等组件库的自定义标签
+    'selector-type-no-unknown': [ // 忽略 Angular/马 儿 能 量 等组件库的自定义标签
       true,
       {
         ignoreTypes: ['/^nz-/', '/^app-/', '/^g2-/'],

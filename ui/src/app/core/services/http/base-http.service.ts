@@ -1,7 +1,7 @@
-import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
-import { filter, map, finalize } from 'rxjs/operators';
+import { Observable, throwError } from 'rxjs';
+import { catchError, filter, map, finalize } from 'rxjs/operators';
 
 import { environment } from '@env/environment';
 import { localUrl } from '@env/environment.prod';
@@ -141,6 +141,7 @@ export class BaseHttpService {
   resultHandle<T>(config: HttpCustomConfig): (observable: Observable<ActionResult<T>>) => Observable<T> {
     return (observable: Observable<ActionResult<T>>) => {
       return observable.pipe(
+        catchError(error => this.handleHttpError(error)),
         filter(item => {
           return this.handleFilter(item, !!config.needSuccessInfo);
         }),
@@ -152,6 +153,78 @@ export class BaseHttpService {
         })
       );
     };
+  }
+
+  private handleHttpError(error: unknown): Observable<never> {
+    const errorMessage = this.extractErrorMessage(error);
+    this.message.error(errorMessage);
+    return throwError(() => (error instanceof Error ? error : new Error(errorMessage)));
+  }
+
+  private extractErrorMessage(error: unknown): string {
+    if (error instanceof HttpErrorResponse) {
+      return this.extractBodyErrorMessage(error.error) || error.message || '请求失败，请稍后重试';
+    }
+
+    if (typeof error === 'string') {
+      return error.trim() || '请求失败，请稍后重试';
+    }
+
+    if (error && typeof error === 'object') {
+      const record = error as Record<string, unknown>;
+      return (
+        this.getMessageValue(record['message']) ||
+        this.getMessageValue(record['msg']) ||
+        this.getMessageValue(record['error']) ||
+        '请求失败，请稍后重试'
+      );
+    }
+
+    return '请求失败，请稍后重试';
+  }
+
+  private extractBodyErrorMessage(body: unknown): string | null {
+    if (typeof body === 'string') {
+      const trimmed = body.trim();
+      if (!trimmed) {
+        return null;
+      }
+
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        return this.extractBodyErrorMessage(parsed) || trimmed;
+      } catch {
+        return trimmed;
+      }
+    }
+
+    if (body && typeof body === 'object') {
+      const record = body as Record<string, unknown>;
+      return this.getMessageValue(record['message']) || this.getMessageValue(record['msg']) || this.getMessageValue(record['error']);
+    }
+
+    return null;
+  }
+
+  private getMessageValue(value: unknown): string | null {
+    if (Array.isArray(value)) {
+      const message = value
+        .map(item => this.getMessageValue(item))
+        .filter((item): item is string => !!item)
+        .join('，');
+      return message || null;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || null;
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+
+    return null;
   }
 
   handleFilter<T>(item: ActionResult<T>, needSuccessInfo: boolean): boolean {

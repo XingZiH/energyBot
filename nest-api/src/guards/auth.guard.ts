@@ -13,8 +13,16 @@ import { reflector } from '../constants/reflector.constant';
 export class AuthGuard implements CanActivate {
   constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<{
+      user?: { userId?: number };
+    }>();
+    const userId = request.user?.userId;
+    const cacheKey =
+      userId === undefined || userId === null
+        ? ConfigEnum.AUTH_CODE
+        : `${ConfigEnum.AUTH_CODE}:${userId}`;
     const authCode: string[] =
-      (await this.cacheManager.get(ConfigEnum.AUTH_CODE)) || [];
+      (await this.cacheManager.get(cacheKey)) || [];
     const requiredPermission = reflector.get<string>(
       'permission',
       context.getHandler(),

@@ -1,0 +1,231 @@
+<app-page-header [pageHeaderInfo]="pageHeaderInfo" />
+
+<nz-spin [nzSpinning]="loading()">
+  <div nz-row [nzGutter]="16">
+    <div nz-col [nzLg]="6" [nzSm]="12" [nzXs]="24">
+      <nz-card>
+        <nz-statistic nzTitle="待支付订单" [nzValue]="value('pendingOrderCount')"></nz-statistic>
+      </nz-card>
+    </div>
+    <div nz-col [nzLg]="6" [nzSm]="12" [nzXs]="24">
+      <nz-card>
+        <nz-statistic nzTitle="租赁中订单" [nzValue]="value('activeRentalCount')"></nz-statistic>
+      </nz-card>
+    </div>
+    <div nz-col [nzLg]="6" [nzSm]="12" [nzXs]="24">
+      <nz-card>
+        <nz-statistic nzTitle="已结算收入" [nzValue]="sunToTrx(value('totalRevenueSun'))"></nz-statistic>
+      </nz-card>
+    </div>
+    <div nz-col [nzLg]="6" [nzSm]="12" [nzXs]="24">
+      <nz-card>
+        <nz-statistic [nzTitle]="isAgentDashboard() ? '用户余额' : '服务商余额'" [nzValue]="serviceBalanceValue()"></nz-statistic>
+      </nz-card>
+    </div>
+  </div>
+
+  @if (!isAgentDashboard()) {
+  <nz-card class="m-t-16 provider-monitor-panel" nzTitle="服务商余额监控">
+    @if (balanceMonitors().length > 0) {
+      <div class="provider-monitor-list">
+        @for (item of balanceMonitors(); track item.provider + item.channel) {
+          <div class="provider-monitor-item" [class.is-warning]="item.status === 'warning'" [class.is-error]="item.status === 'error'">
+            <div class="provider-monitor-head">
+              <span class="provider-monitor-icon">
+                <i nz-icon nzType="api"></i>
+              </span>
+              <div>
+                <strong>{{ item.providerLabel }}</strong>
+                <span>{{ item.channelLabel }}</span>
+              </div>
+              <div class="provider-monitor-status">
+                @if (providerBalancePolling() && item.provider === 'catfee' && item.channel === 'prod') {
+                  <nz-tag nzColor="processing">
+                    <i nz-icon nzType="sync" nzSpin></i>
+                    自动检测中
+                  </nz-tag>
+                }
+                <nz-tag [nzColor]="balanceStatusColor(item.status)">{{ balanceStatusText(item.status) }}</nz-tag>
+                <button nz-button nzSize="small" [nzLoading]="refreshingProviderBalance()" (click)="refreshProviderBalance()">
+                  <i nz-icon nzType="reload"></i>
+                  刷新余额
+                </button>
+              </div>
+            </div>
+
+            <div class="provider-monitor-grid">
+              <div class="provider-monitor-field">
+                <span>当前平台余额</span>
+                <strong>{{ formatTrx(item.balanceTrx) }}</strong>
+              </div>
+              <div class="provider-monitor-field">
+                <span>余额预警线</span>
+                <strong>{{ alertThresholdText(item) }}</strong>
+              </div>
+              <div class="provider-monitor-field">
+                <span>充值地址</span>
+                <strong>{{ shortAddress(item.rechargeAddress) }}</strong>
+              </div>
+            </div>
+
+            <div class="provider-monitor-message">
+              <i nz-icon nzType="info-circle"></i>
+              <span>{{ item.message }}</span>
+            </div>
+            @if (providerBalancePolling() && item.provider === 'catfee' && item.channel === 'prod') {
+              <div class="provider-monitor-message is-polling">
+                <i nz-icon nzType="sync" nzSpin></i>
+                <span>系统正在每 10 秒检测一次 CatFee 生产余额，检测到账后会自动停止。</span>
+              </div>
+            }
+
+            @if (item.provider === 'catfee' && item.channel === 'prod') {
+              <div class="provider-recharge-box">
+                <div>
+                  <strong>生产环境充值</strong>
+                  <span>从配置钱包向 CatFee 地址转账 TRX，到账后用于后续能量下发。</span>
+                </div>
+                <div class="provider-recharge-actions">
+                  <input
+                    nz-input
+                    type="number"
+                    min="0.000001"
+                    step="1"
+                    placeholder="充值 TRX 数量"
+                    [ngModel]="rechargeAmountTrx()"
+                    (ngModelChange)="onRechargeAmountChange($event)"
+                  />
+                  <button
+                    nz-button
+                    nzType="primary"
+                    [nzLoading]="previewingRecharge() || recharging()"
+                    [disabled]="!canRecharge(item)"
+                    (click)="confirmRechargeProvider(item)"
+                  >
+                    <i nz-icon nzType="thunderbolt"></i>
+                    一键充值
+                  </button>
+                </div>
+                @if (rechargePreview(); as preview) {
+                  <div class="provider-recharge-preview">
+                    <div>
+                      <span>充值金额</span>
+                      <strong>{{ formatTrx(preview.amountTrx) }}</strong>
+                    </div>
+                    <div>
+                      <span>预估手续费</span>
+                      <strong>{{ formatTrx(preview.estimatedFeeTrx) }}</strong>
+                    </div>
+                    <div>
+                      <span>预计扣款合计</span>
+                      <strong>{{ formatTrx(preview.estimatedTotalTrx) }}</strong>
+                    </div>
+                    <div>
+                      <span>平台钱包余额</span>
+                      <strong>{{ formatOptionalTrx(preview.walletBalanceTrx) }}</strong>
+                    </div>
+                    <div>
+                      <span>转账后余额</span>
+                      <strong>{{ formatRemainingWalletBalance(preview) }}</strong>
+                    </div>
+                    <div>
+                      <span>付款钱包</span>
+                      <strong>{{ shortAddress(preview.fromAddress) }}</strong>
+                    </div>
+                    <div>
+                      <span>扣款检查</span>
+                      <strong>{{ balanceCheckText(preview.hasEnoughBalance) }}</strong>
+                    </div>
+                    <div>
+                      <span>带宽估算</span>
+                      <strong>{{ preview.bandwidthBytes }} Bytes / 可用 {{ preview.availableBandwidth }}</strong>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
+    } @else {
+      <div class="provider-monitor-empty">
+        <i nz-icon nzType="info-circle"></i>
+        当前启用的服务商暂无可查询的平台余额接口。
+      </div>
+    }
+  </nz-card>
+  }
+
+  <nz-card class="m-t-16" nzTitle="运行指标">
+    <div class="summary-line">
+      <span>订单总数</span>
+      <strong>{{ value('totalOrderCount') }}</strong>
+    </div>
+    <div class="summary-line">
+      <span>已结算收入</span>
+      <strong>{{ sunToTrx(value('totalRevenueSun')) }}</strong>
+    </div>
+    <div class="summary-line">
+      <span>已结算能量</span>
+      <strong>{{ value('totalEnergyRented') }}</strong>
+    </div>
+    <div class="summary-line">
+      <span>收款钱包流水净流入</span>
+      <strong>{{ sunToTrx(value('netWalletSun')) }}</strong>
+    </div>
+    <div class="summary-line">
+      <span>启用套餐</span>
+      <nz-tag nzColor="green">{{ value('activePackageCount') }}</nz-tag>
+    </div>
+    <button nz-button nzType="link" (click)="reload()">
+      <i nz-icon nzType="reload"></i>
+      刷新
+    </button>
+  </nz-card>
+</nz-spin>
+
+<ng-template #rechargeConfirmTpl>
+  @if (rechargePreview(); as preview) {
+    <div class="recharge-confirm">
+      <div class="recharge-confirm-summary">
+        <nz-card nzSize="small" class="recharge-confirm-card">
+          <nz-statistic nzTitle="充值金额" [nzValue]="formatTrx(preview.amountTrx)"></nz-statistic>
+        </nz-card>
+        <nz-card nzSize="small" class="recharge-confirm-card">
+          <nz-statistic nzTitle="预估手续费" [nzValue]="formatTrx(preview.estimatedFeeTrx)"></nz-statistic>
+        </nz-card>
+        <nz-card nzSize="small" class="recharge-confirm-card is-total">
+          <nz-statistic nzTitle="预计扣款合计" [nzValue]="formatTrx(preview.estimatedTotalTrx)"></nz-statistic>
+        </nz-card>
+        <nz-card nzSize="small" class="recharge-confirm-card is-balance">
+          <nz-statistic nzTitle="转账后余额" [nzValue]="formatRemainingWalletBalance(preview)"></nz-statistic>
+        </nz-card>
+      </div>
+
+      <nz-descriptions nzBordered nzSize="small" [nzColumn]="1" class="recharge-confirm-desc">
+        <nz-descriptions-item nzTitle="付款钱包余额">
+          {{ formatOptionalTrx(preview.walletBalanceTrx) }}
+        </nz-descriptions-item>
+        <nz-descriptions-item nzTitle="付款钱包地址">
+          <span class="recharge-address">{{ preview.fromAddress }}</span>
+        </nz-descriptions-item>
+        <nz-descriptions-item nzTitle="CatFee 充值地址">
+          <span class="recharge-address">{{ preview.rechargeAddress }}</span>
+        </nz-descriptions-item>
+        <nz-descriptions-item nzTitle="带宽估算">
+          预计 {{ preview.bandwidthBytes }} Bytes，当前可用 {{ preview.availableBandwidth }} Bytes
+        </nz-descriptions-item>
+        <nz-descriptions-item nzTitle="扣款检查">
+          <nz-tag [nzColor]="preview.hasEnoughBalance === false ? 'red' : 'green'">
+            {{ balanceCheckText(preview.hasEnoughBalance) }}
+          </nz-tag>
+        </nz-descriptions-item>
+      </nz-descriptions>
+
+      <div class="recharge-confirm-note">
+        <i nz-icon nzType="info-circle"></i>
+        <span>手续费为预估值，最终扣费以链上交易结果为准；确认后会立即从付款钱包向 CatFee 生产充值地址转账。</span>
+      </div>
+    </div>
+  }
+</ng-template>

@@ -26,6 +26,7 @@ import { NzTooltipModule } from 'ng-zorro-antd/tooltip';
 import { TranslateModule, TranslateService } from '@ngx-translate/core';
 
 import { HomeNoticeComponent } from '../home-notice/home-notice.component';
+import { getHeaderUserDisplayName } from './layout-head-user-display';
 
 @Component({
   selector: 'app-layout-head-right-menu',
@@ -50,6 +51,7 @@ export class LayoutHeadRightMenuComponent {
   private translate = inject(TranslateService);
 
   userInfo = computed(() => this.userInfoService.$userInfo());
+  displayUserName = computed(() => getHeaderUserDisplayName(this.userInfo()));
   $currentLang = computed(() => this.languageService.$currentLang());
 
   changeLang(lang: Lang): void {

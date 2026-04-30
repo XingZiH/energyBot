@@ -1,9 +1,12 @@
 import {
   pgTable,
   integer,
+  bigint,
   varchar,
   boolean,
   timestamp,
+  numeric,
+  text,
 } from 'drizzle-orm/pg-core';
 
 const timestamps = {
@@ -27,6 +30,277 @@ export const userTable = pgTable('user', {
   telephone: varchar({ length: 20 }), // 电话号码
   departmentId: integer('department_id').notNull(), // 部门 ID
   lastLoginTime: timestamp('last_login_time').defaultNow(), // 最后登录时间
+  ...timestamps,
+});
+
+export const energyPackagesTable = pgTable('energy_packages', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  agentId: integer('agent_id'),
+  platformPackageId: integer('platform_package_id'),
+  packageKind: varchar('package_kind', { length: 32 })
+    .notNull()
+    .default('admin_package'),
+  packageName: varchar('package_name', { length: 100 }).notNull(),
+  energyAmount: integer('energy_amount').notNull(),
+  durationHours: integer('duration_hours').notNull(),
+  priceSun: numeric('price_sun', { precision: 20, scale: 0 }).notNull(),
+  idlePriceSun: numeric('idle_price_sun', { precision: 20, scale: 0 }),
+  busyPriceSun: numeric('busy_price_sun', { precision: 20, scale: 0 }),
+  status: varchar({ length: 32 }).notNull().default('active'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  description: text(),
+  ...timestamps,
+});
+
+export const energyOrdersTable = pgTable('energy_orders', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  agentId: integer('agent_id'),
+  orderNo: varchar('order_no', { length: 64 }).notNull(),
+  packageId: integer('package_id').notNull(),
+  packageName: varchar('package_name', { length: 100 }).notNull(),
+  buyerAddress: varchar('buyer_address', { length: 128 }).notNull(),
+  receiverAddress: varchar('receiver_address', { length: 128 }).notNull(),
+  energyAmount: integer('energy_amount').notNull(),
+  durationHours: integer('duration_hours').notNull(),
+  paymentAmountSun: numeric('payment_amount_sun', {
+    precision: 20,
+    scale: 0,
+  }).notNull(),
+  paymentExpiresAt: timestamp('payment_expires_at'),
+  paymentTxHash: varchar('payment_tx_hash', { length: 128 }),
+  rentTxHash: varchar('rent_tx_hash', { length: 128 }),
+  energyProvider: varchar('energy_provider', { length: 32 })
+    .notNull()
+    .default('justlend'),
+  externalOrderId: varchar('external_order_id', { length: 128 }),
+  externalProviderEnvironment: varchar('external_provider_environment', {
+    length: 32,
+  }),
+  externalStatus: varchar('external_status', { length: 64 }),
+  externalConfirmStatus: varchar('external_confirm_status', { length: 64 }),
+  providerCostSun: numeric('provider_cost_sun', {
+    precision: 20,
+    scale: 0,
+  }),
+  status: varchar({ length: 32 }).notNull().default('pending'),
+  returnStatus: varchar('return_status', { length: 32 })
+    .notNull()
+    .default('none'),
+  rentedAt: timestamp('rented_at'),
+  expiresAt: timestamp('expires_at'),
+  returnedAt: timestamp('returned_at'),
+  remark: text(),
+  ...timestamps,
+});
+
+export const energyUserAddressesTable = pgTable('energy_user_addresses', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  agentId: integer('agent_id'),
+  telegramChatId: bigint('telegram_chat_id', { mode: 'bigint' }).notNull(),
+  label: varchar({ length: 64 }).notNull(),
+  address: varchar({ length: 128 }).notNull(),
+  isDefault: boolean('is_default').notNull().default(false),
+  status: varchar({ length: 32 }).notNull().default('active'),
+  remark: text(),
+  ...timestamps,
+});
+
+export const energyWalletTransactionsTable = pgTable(
+  'energy_wallet_transactions',
+  {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    agentId: integer('agent_id'),
+    txHash: varchar('tx_hash', { length: 128 }).notNull(),
+    walletAddress: varchar('wallet_address', { length: 128 }).notNull(),
+    direction: varchar({ length: 16 }).notNull(),
+    transactionType: varchar('transaction_type', { length: 64 }).notNull(),
+    amountSun: numeric('amount_sun', { precision: 20, scale: 0 }).notNull(),
+    relatedOrderId: integer('related_order_id'),
+    status: varchar({ length: 32 }).notNull().default('pending'),
+    confirmedAt: timestamp('confirmed_at'),
+    remark: text(),
+    ...timestamps,
+  },
+);
+
+export const agentProfilesTable = pgTable('agent_profiles', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  userId: integer('user_id').notNull(),
+  agentName: varchar('agent_name', { length: 100 }).notNull(),
+  status: varchar({ length: 32 }).notNull().default('active'),
+  remark: text(),
+  ...timestamps,
+});
+
+export const agentBotConfigsTable = pgTable('agent_bot_configs', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  agentId: integer('agent_id').notNull(),
+  botStatus: varchar('bot_status', { length: 32 })
+    .notNull()
+    .default('disabled'),
+  telegramBotToken: text('telegram_bot_token'),
+  telegramBotUsername: varchar('telegram_bot_username', { length: 128 }),
+  remark: text(),
+  ...timestamps,
+});
+
+export const botRuntimeStatusTable = pgTable('bot_runtime_status', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  botScope: varchar('bot_scope', { length: 32 }).notNull(),
+  agentId: integer('agent_id'),
+  desiredStatus: varchar('desired_status', { length: 32 })
+    .notNull()
+    .default('disabled'),
+  runtimeStatus: varchar('runtime_status', { length: 32 })
+    .notNull()
+    .default('stopped'),
+  pollingStatus: varchar('polling_status', { length: 32 })
+    .notNull()
+    .default('stopped'),
+  instanceId: varchar('instance_id', { length: 128 }),
+  lastHeartbeatAt: timestamp('last_heartbeat_at'),
+  lastStartedAt: timestamp('last_started_at'),
+  lastStoppedAt: timestamp('last_stopped_at'),
+  lastError: text('last_error'),
+  ...timestamps,
+});
+
+export const agentWalletAccountsTable = pgTable('agent_wallet_accounts', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  agentId: integer('agent_id').notNull(),
+  balanceSun: numeric('balance_sun', { precision: 20, scale: 0 })
+    .notNull()
+    .default('0'),
+  totalRechargeSun: numeric('total_recharge_sun', {
+    precision: 20,
+    scale: 0,
+  })
+    .notNull()
+    .default('0'),
+  totalDeductedSun: numeric('total_deducted_sun', {
+    precision: 20,
+    scale: 0,
+  })
+    .notNull()
+    .default('0'),
+  status: varchar({ length: 32 }).notNull().default('active'),
+  remark: text(),
+  ...timestamps,
+});
+
+export const agentRechargeOrdersTable = pgTable('agent_recharge_orders', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  agentId: integer('agent_id').notNull(),
+  orderNo: varchar('order_no', { length: 64 }).notNull(),
+  requestedAmountSun: numeric('requested_amount_sun', {
+    precision: 20,
+    scale: 0,
+  }),
+  amountSun: numeric('amount_sun', { precision: 20, scale: 0 }).notNull(),
+  paymentGateway: varchar('payment_gateway', { length: 32 })
+    .notNull()
+    .default('bitcart'),
+  paymentAddress: varchar('payment_address', { length: 128 }).notNull(),
+  paymentTxHash: varchar('payment_tx_hash', { length: 128 }),
+  bitcartInvoiceId: varchar('bitcart_invoice_id', { length: 128 }),
+  bitcartInvoiceStatus: varchar('bitcart_invoice_status', { length: 64 }),
+  bitcartCheckoutUrl: text('bitcart_checkout_url'),
+  bitcartPaymentId: varchar('bitcart_payment_id', { length: 128 }),
+  bitcartPaymentUrl: text('bitcart_payment_url'),
+  bitcartPaymentCurrency: varchar('bitcart_payment_currency', { length: 32 }),
+  bitcartPaymentAmount: numeric('bitcart_payment_amount', {
+    precision: 36,
+    scale: 18,
+  }),
+  bitcartExceptionStatus: varchar('bitcart_exception_status', { length: 64 }),
+  bitcartSentAmount: numeric('bitcart_sent_amount', {
+    precision: 36,
+    scale: 18,
+  }),
+  bitcartPaidCurrency: varchar('bitcart_paid_currency', { length: 32 }),
+  status: varchar({ length: 32 }).notNull().default('pending'),
+  expiresAt: timestamp('expires_at'),
+  confirmedAt: timestamp('confirmed_at'),
+  remark: text(),
+  ...timestamps,
+});
+
+export const energyReturnTasksTable = pgTable('energy_return_tasks', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  orderId: integer('order_id').notNull(),
+  receiverAddress: varchar('receiver_address', { length: 128 }).notNull(),
+  energyAmount: integer('energy_amount').notNull(),
+  delegatedAmountSun: numeric('delegated_amount_sun', {
+    precision: 20,
+    scale: 0,
+  }),
+  status: varchar({ length: 32 }).notNull().default('pending'),
+  attempts: integer().notNull().default(0),
+  lastError: text('last_error'),
+  nextRetryAt: timestamp('next_retry_at'),
+  completedAt: timestamp('completed_at'),
+  ...timestamps,
+});
+
+export const energyPlatformConfigTable = pgTable('energy_platform_config', {
+  id: integer().primaryKey(),
+  botStatus: varchar('bot_status', { length: 32 })
+    .notNull()
+    .default('disabled'),
+  telegramBotToken: text('telegram_bot_token'),
+  tronApiBaseUrl: varchar('tron_api_base_url', { length: 255 })
+    .notNull()
+    .default('https://api.trongrid.io'),
+  tronApiKey: text('tron_api_key'),
+  justlendContractAddress: varchar('justlend_contract_address', {
+    length: 128,
+  }),
+  justlendPayerPrivateKey: text('justlend_payer_private_key'),
+  energyProvider: varchar('energy_provider', { length: 32 })
+    .notNull()
+    .default('justlend'),
+  catfeeEnvironment: varchar('catfee_environment', { length: 32 })
+    .notNull()
+    .default('nile'),
+  catfeeProdApiBaseUrl: varchar('catfee_prod_api_base_url', {
+    length: 255,
+  })
+    .notNull()
+    .default('https://api.catfee.io'),
+  catfeeProdApiKey: text('catfee_prod_api_key'),
+  catfeeProdApiSecret: text('catfee_prod_api_secret'),
+  catfeeNileApiBaseUrl: varchar('catfee_nile_api_base_url', {
+    length: 255,
+  })
+    .notNull()
+    .default('https://nile.catfee.io'),
+  catfeeNileApiKey: text('catfee_nile_api_key'),
+  catfeeNileApiSecret: text('catfee_nile_api_secret'),
+  catfeeAutoActivate: boolean('catfee_auto_activate').notNull().default(true),
+  orderPaymentTtlMinutes: integer('order_payment_ttl_minutes')
+    .notNull()
+    .default(10),
+  telegramPollingIntervalSeconds: integer('telegram_polling_interval_seconds')
+    .notNull()
+    .default(2),
+  workerIntervalSeconds: integer('worker_interval_seconds')
+    .notNull()
+    .default(60),
+  minTrxReserveSun: numeric('min_trx_reserve_sun', {
+    precision: 20,
+    scale: 0,
+  })
+    .notNull()
+    .default('0'),
+  bitcartApiBaseUrl: varchar('bitcart_api_base_url', { length: 255 }),
+  bitcartAdminBaseUrl: varchar('bitcart_admin_base_url', { length: 255 }),
+  bitcartApiToken: text('bitcart_api_token'),
+  bitcartStoreId: varchar('bitcart_store_id', { length: 128 }),
+  bitcartCurrency: varchar('bitcart_currency', { length: 32 })
+    .notNull()
+    .default('TRX'),
+  bitcartWebhookBaseUrl: varchar('bitcart_webhook_base_url', { length: 255 }),
+  bitcartWebhookSecret: text('bitcart_webhook_secret'),
   ...timestamps,
 });
 

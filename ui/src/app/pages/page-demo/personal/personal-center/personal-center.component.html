@@ -1,81 +1,157 @@
-<div class="content-wrap">
-  <div nz-row [nzGutter]="[16, 16]">
-    <div nz-col [nzLg]="24" [nzMd]="24" [nzSm]="24" [nzXl]="7" [nzXs]="24" [nzXXl]="7">
-      <nz-card>
-        <div class="avatar-wrap">
-          <div class="avatar">
-            <nz-avatar class="m-b-20" nzSrc="imgs/default_face.png" [nzSize]="104"></nz-avatar>
-            <h4 class="m-b-5" nz-typography>Serati Ma</h4>
-            <span nz-typography>海纳百川，有容乃大</span>
-          </div>
-          <div class="avatar-detail m-t-25">
-            <p>
-              <i nz-icon nzTheme="outline" nzType="contacts"></i>
-              交互专家
-            </p>
-            <p>
-              <i nz-icon nzTheme="outline" nzType="apartment"></i>
-              蚂蚁金服－某某某事业群－某某平台部－某某技术部－UED
-            </p>
-            <p>
-              <i nz-icon nzTheme="outline" nzType="home"></i>
-              浙江省杭州市
-            </p>
+<div class="content-wrap personal-center" [class.compact-overview]="preferences().compactOverview">
+  <nz-spin [nzSpinning]="loading()">
+    <div class="account-hero">
+      <div class="account-identity">
+        <nz-avatar nzSrc="imgs/default_face.png" [nzSize]="64"></nz-avatar>
+        <div>
+          <div class="eyebrow">当前登录账户</div>
+          <h3 nz-typography>{{ userInfo().userName || '未命名用户' }}</h3>
+          <div class="identity-meta">
+            <nz-tag nzColor="blue">{{ userRoleLabel() }}</nz-tag>
+            <span>账号 ID：{{ userInfo().userId > 0 ? userInfo().userId : '-' }}</span>
+            <span>权限项：{{ userInfo().authCode.length }}</span>
           </div>
         </div>
-        <nz-divider nzDashed></nz-divider>
-        <div class="tags">
-          <h5 class="m-b-10">标签</h5>
-          @for (item of tagArray(); track item) {
-            <nz-tag class="m-b-5">{{ item }}</nz-tag>
-          }
-          @if (!inputVisible()) {
-            <nz-tag class="editable-tag" nzNoAnimation (click)="showInput()">
-              <i nz-icon nzType="plus"></i>
-              New Tag
-            </nz-tag>
-          }
-          @if (inputVisible()) {
-            <input
-              #inputElement
-              type="text"
-              nz-input
-              nzSize="small"
-              style="width: 78px"
-              [ngModel]="inputValue()"
-              (blur)="handleInputConfirm()"
-              (keydown.enter)="handleInputConfirm()"
-              (ngModelChange)="inputValue.set($event)"
-            />
-          }
+      </div>
+      <div class="hero-actions">
+        <button nz-button nzType="primary" (click)="navigate('/default/energy-rental/agent-recharge')">
+          <i nz-icon nzType="plus-circle"></i>
+          充值 TRX
+        </button>
+        <button nz-button (click)="reload()">
+          <i nz-icon nzType="reload"></i>
+          刷新数据
+        </button>
+      </div>
+    </div>
+
+    <div nz-row [nzGutter]="[16, 16]" class="m-t-16">
+      <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+        <nz-card>
+          <nz-statistic nzTitle="账户余额" [nzValue]="sunToTrx(account()?.balanceSun ?? dashboard()?.agentWalletBalanceSun)"></nz-statistic>
+        </nz-card>
+      </div>
+      @if (preferences().orderStatus) {
+        <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+          <nz-card>
+            <nz-statistic nzTitle="待支付订单" [nzValue]="numberText(dashboard()?.pendingOrderCount)"></nz-statistic>
+          </nz-card>
         </div>
-        <nz-divider nzDashed></nz-divider>
-        <div class="team">
-          <h5 class="m-b-10">团队</h5>
-          <div nz-row>
-            @for (item of 5 | numberLoop; track $index) {
-              <div nz-col nzSpan="12" style="padding: 0 18px 0 0">
-                <a class="group">
-                  <nz-avatar nzSrc="https://gw.alipayobjects.com/zos/rmsportal/sfjbOqnsXXJgNCjCzDBL.png" [nzSize]="24"></nz-avatar>
-                  <span class="m-l-10">全组都是吴彦祖</span>
-                </a>
-              </div>
+        <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+          <nz-card>
+            <nz-statistic nzTitle="租赁中订单" [nzValue]="numberText(dashboard()?.activeRentalCount)"></nz-statistic>
+          </nz-card>
+        </div>
+      } @else {
+        <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+          <nz-card>
+            <nz-statistic nzTitle="累计订单" [nzValue]="numberText(dashboard()?.totalOrderCount)"></nz-statistic>
+          </nz-card>
+        </div>
+        <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+          <nz-card>
+            <nz-statistic nzTitle="启用套餐" [nzValue]="numberText(dashboard()?.activePackageCount)"></nz-statistic>
+          </nz-card>
+        </div>
+      }
+      <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+        <nz-card>
+          <nz-statistic nzTitle="已租能量" [nzValue]="numberText(dashboard()?.totalEnergyRented)"></nz-statistic>
+        </nz-card>
+      </div>
+    </div>
+
+    <div nz-row [nzGutter]="[16, 16]" class="m-t-16">
+      <div nz-col [nzLg]="8" [nzMd]="24" [nzXs]="24">
+        <nz-card nzTitle="账户状态">
+          <nz-descriptions nzSize="small" [nzColumn]="1">
+            <nz-descriptions-item nzTitle="机器人">
+              <nz-tag [nzColor]="botStatusColor()">{{ botStatusText() }}</nz-tag>
+              <span class="muted">{{ botConfig()?.telegramBotUsername || '未填写用户名' }}</span>
+            </nz-descriptions-item>
+            <nz-descriptions-item nzTitle="套餐">
+              已启用 {{ numberText(dashboard()?.activePackageCount) }} 个
+            </nz-descriptions-item>
+            <nz-descriptions-item nzTitle="地址">
+              可用 {{ activeAddressCount() }} 个，默认 {{ shortAddress(defaultAddress()?.address) }}
+            </nz-descriptions-item>
+            <nz-descriptions-item nzTitle="成交金额">
+              {{ sunToTrx(dashboard()?.totalRevenueSun) }}
+            </nz-descriptions-item>
+          </nz-descriptions>
+        </nz-card>
+      </div>
+
+      <div nz-col [nzLg]="16" [nzMd]="24" [nzXs]="24">
+        <nz-card nzTitle="常用入口">
+          <div class="quick-action-grid">
+            @for (item of quickActions(); track item.route) {
+              <button class="quick-action" type="button" (click)="navigate(item.route)">
+                <i nz-icon [nzType]="item.icon"></i>
+                <span class="action-text">
+                  <strong>{{ item.label }}</strong>
+                  <span>{{ item.description }}</span>
+                </span>
+              </button>
             }
           </div>
-        </div>
-      </nz-card>
+        </nz-card>
+      </div>
     </div>
-    <div nz-col [nzLg]="24" [nzMd]="24" [nzSm]="24" [nzXl]="17" [nzXs]="24" [nzXXl]="17">
-      <nz-card>
-        <nz-card-tab>
-          <nz-tabs nzSize="large">
-            @for (item of tabData; track item) {
-              <nz-tab [nzTitle]="item.label" (nzClick)="to(item)"></nz-tab>
-            }
-          </nz-tabs>
-        </nz-card-tab>
-        <ng-template appAd></ng-template>
-      </nz-card>
+
+    <div nz-row [nzGutter]="[16, 16]" class="m-t-16">
+      <div nz-col [nzLg]="16" [nzXs]="24">
+        <nz-card nzTitle="最近订单">
+          <nz-table [nzData]="recentOrders()" [nzFrontPagination]="false" nzSize="small">
+            <thead>
+              <tr>
+                <th>订单号</th>
+                <th>套餐</th>
+                <th>金额</th>
+                <th>状态</th>
+                <th>创建时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (item of recentOrders(); track item.id) {
+                <tr>
+                  <td>{{ item.orderNo }}</td>
+                  <td>{{ item.packageName }}</td>
+                  <td>{{ sunToTrx(item.paymentAmountSun) }}</td>
+                  <td><nz-tag [nzColor]="statusColor(item.status)">{{ statusText(item.status) }}</nz-tag></td>
+                  <td>{{ item.createdAt || '-' }}</td>
+                </tr>
+              }
+            </tbody>
+          </nz-table>
+          @if (recentOrders().length === 0) {
+            <div class="empty-state">暂无订单</div>
+          }
+        </nz-card>
+      </div>
+
+      <div nz-col [nzLg]="8" [nzXs]="24">
+        <nz-card nzTitle="充值与扣款">
+          <div class="balance-row">
+            <span>累计充值</span>
+            <strong>{{ sunToTrx(account()?.totalRechargeSun, 6) }}</strong>
+          </div>
+          <div class="balance-row">
+            <span>累计扣款</span>
+            <strong>{{ sunToTrx(account()?.totalDeductedSun, 6) }}</strong>
+          </div>
+          <nz-divider></nz-divider>
+          @if (preferences().rechargeHint) {
+            <p class="muted">
+              创建充值订单后，必须按订单显示的应付金额精确转账。系统会用金额尾数区分同金额充值订单。
+            </p>
+          }
+          <button class="full-width-action" nz-button nzType="primary" (click)="navigate('/default/energy-rental/agent-recharge')">
+            <i nz-icon nzType="wallet"></i>
+            查看充值订单
+          </button>
+        </nz-card>
+      </div>
     </div>
-  </div>
+  </nz-spin>
 </div>

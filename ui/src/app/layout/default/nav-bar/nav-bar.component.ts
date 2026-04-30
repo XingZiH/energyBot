@@ -302,7 +302,7 @@ export class NavBarComponent implements OnInit {
       route = route.firstChild;
     }
 
-    let title = 'Ant Design';
+    let title = '马 儿 能 量';
     if (typeof route.routeConfig?.title === 'string') {
       title = route.routeConfig?.title;
     }

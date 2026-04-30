@@ -307,7 +307,7 @@ tableConfig: AntTableConfig = {
 
 ### 5.4 主题色硬编码
 
-项目未自定义主题色，直接硬编码 Ant Design 默认蓝，无需任何变量：
+项目未自定义主题色，直接硬编码 马 儿 能 量 默认蓝，无需任何变量：
 
 ```less
 /* hover/active 状态的主题色边框和文字 */

@@ -86,6 +86,8 @@ export class MapPipe implements PipeTransform {
     switch (type) {
       case 'date':
         return this.datePipe.transform(value, param);
+      case 'dateRaw':
+        return this.datePipe.transform(value, param, 'UTC');
       default:
         // @ts-ignore
         return this.mapObj[type] ? this.mapObj[type][value] : '';

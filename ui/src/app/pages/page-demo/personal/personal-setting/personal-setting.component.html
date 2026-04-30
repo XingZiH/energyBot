@@ -1,21 +1,97 @@
-<div class="content-wrap">
-  <nz-card [nzBodyStyle]="{ padding: 0 }">
-    <div class="menu-wrap" [class.horizontal-model]="tabModel() === 'horizontal'">
-      <ul nz-menu nzTheme="light" [class.menu]="tabModel() !== 'horizontal'" [nzMode]="tabModel()">
-        @for (m of menus; track m) {
-          <li nz-menu-item [nzSelected]="m.selected" (click)="to(m)">{{ m.title }}</li>
+<div class="content-wrap personal-settings">
+  <div class="settings-shell" [class.horizontal-model]="tabModel() === 'horizontal'">
+    <aside class="settings-nav">
+      <ul nz-menu [nzMode]="tabModel()">
+        @for (section of sections; track section.key) {
+          <li nz-menu-item [nzSelected]="isActiveSection(section)" (click)="selectSection(section)">
+            <i nz-icon [nzType]="section.icon"></i>
+            <span>{{ section.title }}</span>
+          </li>
         }
       </ul>
-      <div class="context">
-        <nz-card [nzBordered]="false">
-          <div nz-row>
-            <h4 nz-col nz-typography nzSpan="24">{{ currentTitle }}</h4>
-            <div nz-col nzSpan="24">
-              <ng-template appAd></ng-template>
-            </div>
-          </div>
-        </nz-card>
+    </aside>
+
+    <section class="settings-content">
+      <div class="section-title">
+        <h3 nz-typography>{{ currentTitle() }}</h3>
+        <span>这些设置只面向当前登录账户。</span>
       </div>
-    </div>
-  </nz-card>
+
+      @if (activeSection() === 'profile') {
+        <div class="setting-panel">
+          <nz-descriptions nzBordered nzSize="middle" [nzColumn]="1">
+            <nz-descriptions-item nzTitle="账号名称">{{ userInfo().userName || '-' }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="账号 ID">{{ userInfo().userId > 0 ? userInfo().userId : '-' }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="账户类型">
+              <nz-tag nzColor="blue">{{ userRoleLabel() }}</nz-tag>
+            </nz-descriptions-item>
+            <nz-descriptions-item nzTitle="权限项">{{ userInfo().authCode.length }} 项</nz-descriptions-item>
+          </nz-descriptions>
+
+          <div class="action-strip">
+            <button nz-button nzType="primary" (click)="navigate('/default/energy-rental/dashboard')">
+              <i nz-icon nzType="dashboard"></i>
+              打开控制台
+            </button>
+            <button nz-button (click)="navigate('/default/energy-rental/bot-config')">
+              <i nz-icon nzType="robot"></i>
+              机器人配置
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (activeSection() === 'security') {
+        <div class="setting-panel">
+          <div class="security-row">
+            <div>
+              <strong>登录密码</strong>
+              <p>定期更新密码，修改成功后会自动退出并要求重新登录。</p>
+            </div>
+            <button nz-button nzType="primary" (click)="changePassword()">
+              <i nz-icon nzType="key"></i>
+              修改密码
+            </button>
+          </div>
+          <div class="security-row">
+            <div>
+              <strong>本机缓存</strong>
+              <p>清理当前浏览器保存的登录态、偏好和缓存数据。</p>
+            </div>
+            <button nz-button nzDanger (click)="clearLocalCache()">
+              <i nz-icon nzType="clear"></i>
+              清理缓存
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (activeSection() === 'preferences') {
+        <div class="setting-panel">
+          <div class="preference-row">
+            <div>
+              <strong>充值订单提示</strong>
+              <p>在个人中心展示精确转账和金额尾数提醒。</p>
+            </div>
+            <nz-switch [ngModel]="preferences().rechargeHint" (ngModelChange)="updatePreference('rechargeHint', $event)"></nz-switch>
+          </div>
+          <div class="preference-row">
+            <div>
+              <strong>订单状态提示</strong>
+              <p>在个人中心突出待支付和租赁中订单。</p>
+            </div>
+            <nz-switch [ngModel]="preferences().orderStatus" (ngModelChange)="updatePreference('orderStatus', $event)"></nz-switch>
+          </div>
+          <div class="preference-row">
+            <div>
+              <strong>紧凑概览</strong>
+              <p>减少个人中心统计区块高度，适合小屏幕或重复操作。</p>
+            </div>
+            <nz-switch [ngModel]="preferences().compactOverview" (ngModelChange)="updatePreference('compactOverview', $event)"></nz-switch>
+          </div>
+          <p class="preference-note">偏好仅保存在当前浏览器，不会写入平台配置，也不会影响其他用户。</p>
+        </div>
+      }
+    </section>
+  </div>
 </div>

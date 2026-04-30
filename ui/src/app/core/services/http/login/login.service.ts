@@ -11,6 +11,12 @@ export interface UserLogin {
   password: string;
 }
 
+export interface UserSignup extends UserLogin {
+  agentName?: string;
+  mobile?: string;
+  email?: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -20,6 +26,10 @@ export class LoginService {
 
   public login(params: UserLogin): Observable<string> {
     return this.http.post('/auth/signin', params, { needSuccessInfo: false });
+  }
+
+  public signup(params: UserSignup): Observable<{ userId: number; agentId: number }> {
+    return this.http.post('/auth/signup', params, { needSuccessInfo: true });
   }
 
   public loginOut(): Observable<string> {

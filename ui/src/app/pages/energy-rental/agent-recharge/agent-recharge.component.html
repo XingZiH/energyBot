@@ -1,0 +1,162 @@
+<app-page-header [pageHeaderInfo]="pageHeaderInfo" />
+
+<nz-spin [nzSpinning]="loading()">
+  <div nz-row [nzGutter]="16">
+    <div nz-col [nzLg]="8" [nzXs]="24">
+      <nz-card>
+        <nz-statistic nzTitle="当前用户余额" [nzValue]="formatSun(account()?.balanceSun)"></nz-statistic>
+      </nz-card>
+    </div>
+    <div nz-col [nzLg]="8" [nzXs]="24">
+      <nz-card>
+        <nz-statistic nzTitle="累计充值" [nzValue]="formatSun(account()?.totalRechargeSun)"></nz-statistic>
+      </nz-card>
+    </div>
+    <div nz-col [nzLg]="8" [nzXs]="24">
+      <nz-card>
+        <nz-statistic nzTitle="累计扣款" [nzValue]="formatSun(account()?.totalDeductedSun)"></nz-statistic>
+      </nz-card>
+    </div>
+  </div>
+
+  <nz-card class="m-t-16" nzTitle="创建充值订单">
+    <div class="recharge-form">
+      <nz-input-number
+        [ngModel]="amountTrx()"
+        (ngModelChange)="amountTrx.set($event)"
+        [nzMin]="0"
+        [nzStep]="1"
+        nzPlaceHolder="充值 TRX 数量"
+      ></nz-input-number>
+      <button nz-button nzType="primary" [nzLoading]="creating()" (click)="createRechargeOrder()">
+        <i nz-icon nzType="plus"></i>
+        创建订单
+      </button>
+    </div>
+    <div class="payable-note">每个用户最多同时保留 3 个待付款订单；相同金额未完成前不能重复创建。</div>
+  </nz-card>
+
+  <nz-card class="m-t-16" nzTitle="充值订单">
+    <nz-table [nzData]="rechargeOrders()" [nzFrontPagination]="false" nzSize="middle">
+      <thead>
+        <tr>
+          <th>订单号</th>
+          <th>金额</th>
+          <th>付款地址</th>
+          <th>收款状态</th>
+          <th>订单状态</th>
+          <th>过期时间</th>
+          <th>剩余时间</th>
+          <th>交易 Hash</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (item of rechargeOrders(); track item.id) {
+          <tr>
+            <td>{{ item.orderNo }}</td>
+            <td>{{ formatSun(item.amountSun) }}</td>
+            <td><span class="mono-text" [title]="item.paymentAddress || ''">{{ shortText(item.paymentAddress) }}</span></td>
+            <td>{{ invoiceStatusText(item.bitcartInvoiceStatus) }}</td>
+            <td><nz-tag [nzColor]="statusColor(effectiveStatus(item))">{{ statusText(effectiveStatus(item)) }}</nz-tag></td>
+            <td>{{ formatDateTime(item.expiresAt) }}</td>
+            <td>
+              <span [class.expired-text]="isExpired(item)">{{ remainingText(item) }}</span>
+            </td>
+            <td><span class="mono-text" [title]="item.paymentTxHash || ''">{{ shortText(item.paymentTxHash) }}</span></td>
+            <td>
+              <button nz-button nzType="link" [disabled]="!isPayable(item)" (click)="openCheckout(item)">付款信息</button>
+              <button
+                nz-button
+                nzType="link"
+                [nzLoading]="syncingOrderId() === item.id"
+                [disabled]="!canSync(item)"
+                (click)="syncRecharge(item)"
+              >
+                同步
+              </button>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </nz-table>
+  </nz-card>
+</nz-spin>
+
+<nz-modal
+  [nzVisible]="!!payOrder()"
+  nzTitle="充值付款"
+  [nzFooter]="paymentFooter"
+  (nzOnCancel)="closePaymentModal()"
+>
+  <ng-container *nzModalContent>
+    @if (payOrder(); as order) {
+      <div class="payment-modal">
+        <div class="payment-warning" [class.payment-warning-expired]="isExpired(order)">
+          @if (isExpired(order)) {
+            当前订单已过期，请不要继续向该订单转账。
+          } @else {
+            请在有效期内按下方金额完成转账。过期后订单失效，需要重新创建。
+          }
+        </div>
+
+        <div class="payment-qr-section">
+          <div class="payment-qr-box">
+            <nz-qrcode
+              nzType="svg"
+              [nzValue]="paymentQrValue(order)"
+              [nzSize]="176"
+              [nzBordered]="false"
+              [nzColor]="'#111111'"
+              [nzBgColor]="'#ffffff'"
+              [nzStatus]="isExpired(order) ? 'expired' : 'active'"
+              nzLevel="M"
+            ></nz-qrcode>
+          </div>
+          <div class="payment-qr-copy">
+            <strong>扫码付款</strong>
+            <span>扫码后请核对收款地址和付款金额；钱包未自动填写金额时，请按下方金额手动填写。</span>
+          </div>
+        </div>
+
+        <div class="payment-row">
+          <span>订单号</span>
+          <strong class="mono-text">{{ order.orderNo }}</strong>
+        </div>
+        <div class="payment-row">
+          <span>付款金额</span>
+          <strong>{{ formatSun(order.amountSun) }}</strong>
+          <button nz-button nzType="link" (click)="copyText('付款金额', formatTrxAmount(order.amountSun))">复制</button>
+        </div>
+        <div class="payment-row">
+          <span>收款地址</span>
+          <strong class="mono-text payment-address">{{ order.paymentAddress }}</strong>
+          <button nz-button nzType="link" (click)="copyText('收款地址', order.paymentAddress)">复制</button>
+        </div>
+        <div class="payment-row">
+          <span>有效期至</span>
+          <strong>{{ formatDateTime(order.expiresAt) }}</strong>
+        </div>
+        <div class="payment-row">
+          <span>剩余时间</span>
+          <strong [class.expired-text]="isExpired(order)">{{ remainingText(order) }}</strong>
+        </div>
+      </div>
+    }
+  </ng-container>
+</nz-modal>
+
+<ng-template #paymentFooter>
+  @if (payOrder(); as order) {
+    <button nz-button (click)="closePaymentModal()">关闭</button>
+    <button
+      nz-button
+      nzType="primary"
+      [nzLoading]="syncingOrderId() === order.id"
+      [disabled]="!canSync(order)"
+      (click)="syncRecharge(order)"
+    >
+      我已付款，同步状态
+    </button>
+  }
+</ng-template>

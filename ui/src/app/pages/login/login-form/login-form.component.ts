@@ -16,7 +16,6 @@ import { NzFormModule } from 'ng-zorro-antd/form';
 import { NzGridModule } from 'ng-zorro-antd/grid';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzInputModule } from 'ng-zorro-antd/input';
-import { NzNotificationService } from 'ng-zorro-antd/notification';
 import { NzTabsModule } from 'ng-zorro-antd/tabs';
 
 @Component({
@@ -31,7 +30,6 @@ export class LoginFormComponent implements OnInit {
   destroyRef = inject(DestroyRef);
 
   private fb = inject(FormBuilder);
-  private notification = inject(NzNotificationService);
   private router = inject(Router);
   private spinService = inject(SpinService);
   private dataService = inject(LoginService);
@@ -67,20 +65,10 @@ export class LoginFormComponent implements OnInit {
         this.loginInOutService
           .loginIn(userToken)
           .then(() => {
-            this.router.navigateByUrl('default/dashboard/analysis');
+            this.router.navigateByUrl('default/energy-rental/dashboard');
           })
           .finally(() => {
             this.spinService.$globalSpinStore.set(false);
-            this.notification.blank(
-              '温馨提示',
-              `
-                源码地址：<a href="https://github.com/huajian123/ng-antd-admin">在这里</a>
-            `,
-              {
-                nzPlacement: 'top',
-                nzDuration: 0
-              }
-            );
           });
       });
   }

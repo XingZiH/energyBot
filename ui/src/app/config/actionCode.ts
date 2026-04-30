@@ -26,5 +26,13 @@ export const ActionCode = {
   DeptAdd: 'default:system:dept:add', // 部门管理新增
   DeptEdit: 'default:system:dept:edit', // 部门管理编辑
   DeptDel: 'default:system:dept:del', // 部门管理删除
-  DeptAddLowLevel: 'default:system:dept:addlowlevel' // 部门管理添加下级
+  DeptAddLowLevel: 'default:system:dept:addlowlevel', // 部门管理添加下级
+
+  /*Energy rental*/
+  EnergyRentalPlatformConfigEdit: 'default:energy-rental:platform-config:edit',
+  EnergyRentalPackageAdd: 'default:energy-rental:packages:add',
+  EnergyRentalPackageEdit: 'default:energy-rental:packages:edit',
+  EnergyRentalPackageDel: 'default:energy-rental:packages:del',
+  EnergyRentalOrderEdit: 'default:energy-rental:orders:edit',
+  EnergyRentalReturnTaskRetry: 'default:energy-rental:return-tasks:retry'
 };

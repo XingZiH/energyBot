@@ -1,0 +1,370 @@
+<app-page-header [pageHeaderInfo]="pageHeaderInfo" />
+
+<nz-spin [nzSpinning]="loading()">
+  <nz-alert class="m-b-16" nzMessage="敏感字段留空时不会修改旧值；保存后页面只显示是否已配置，不回显 Token 或私钥。" nzShowIcon nzType="info"></nz-alert>
+
+  <form nz-form [formGroup]="form">
+    <nz-card class="m-b-16" nzTitle="基础链路配置">
+      <div nz-row [nzGutter]="16">
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>TRON API 地址</nz-form-label>
+            <nz-form-control>
+              <input formControlName="tronApiBaseUrl" nz-input placeholder="https://api.trongrid.io" />
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label>TRON API Key</nz-form-label>
+            <nz-form-control>
+              <nz-input-group [nzSuffix]="tronApiKeyStatus">
+                <input type="password" formControlName="tronApiKey" nz-input placeholder="留空不修改" />
+              </nz-input-group>
+              <ng-template #tronApiKeyStatus>
+                <nz-tag [nzColor]="statusColor(config()?.tronApiKeyConfigured)">{{ statusText(config()?.tronApiKeyConfigured) }}</nz-tag>
+              </ng-template>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label>平台付款私钥</nz-form-label>
+            <nz-form-control>
+              <nz-input-group [nzSuffix]="payerKeyStatus">
+                <input
+                  type="password"
+                  formControlName="justlendPayerPrivateKey"
+                  nz-input
+                  placeholder="用于向服务商充值和链上付款，支持 64 位私钥或 0x 开头私钥；留空不修改"
+                />
+              </nz-input-group>
+              <ng-template #payerKeyStatus>
+                <nz-tag [nzColor]="statusColor(config()?.justlendPayerPrivateKeyConfigured)">
+                  {{ statusText(config()?.justlendPayerPrivateKeyConfigured) }}
+                </nz-tag>
+              </ng-template>
+              <div class="field-help">
+                用于向服务商充值和链上付款；必须填写可签名付款钱包的原始私钥，不能填写助记词、钱包地址或 TRON API Key。
+              </div>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+      </div>
+    </nz-card>
+
+    <nz-card class="m-b-16" nzTitle="Bitcart 收款配置">
+      <div nz-row [nzGutter]="16">
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>API 地址</nz-form-label>
+            <nz-form-control>
+              <input formControlName="bitcartApiBaseUrl" nz-input placeholder="https://pay.example.com/api" />
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>收银台地址</nz-form-label>
+            <nz-form-control>
+              <input formControlName="bitcartAdminBaseUrl" nz-input placeholder="https://pay.example.com" />
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label>API Token</nz-form-label>
+            <nz-form-control>
+              <nz-input-group [nzSuffix]="bitcartTokenStatus">
+                <input type="password" formControlName="bitcartApiToken" nz-input placeholder="留空不修改" />
+              </nz-input-group>
+              <ng-template #bitcartTokenStatus>
+                <nz-tag [nzColor]="statusColor(config()?.bitcartApiTokenConfigured)">
+                  {{ statusText(config()?.bitcartApiTokenConfigured) }}
+                </nz-tag>
+              </ng-template>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>Store ID</nz-form-label>
+            <nz-form-control>
+              <input formControlName="bitcartStoreId" nz-input placeholder="Bitcart Store ID" />
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="8" [nzMd]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>币种</nz-form-label>
+            <nz-form-control>
+              <nz-select formControlName="bitcartCurrency">
+                <nz-option nzLabel="TRX" nzValue="TRX"></nz-option>
+              </nz-select>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="16" [nzMd]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>回调站点地址</nz-form-label>
+            <nz-form-control>
+              <input formControlName="bitcartWebhookBaseUrl" nz-input placeholder="https://maer.example.com/site/api" />
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label>回调密钥</nz-form-label>
+            <nz-form-control>
+              <nz-input-group [nzSuffix]="bitcartWebhookSecretStatus">
+                <input type="password" formControlName="bitcartWebhookSecret" nz-input placeholder="留空不修改" />
+              </nz-input-group>
+              <ng-template #bitcartWebhookSecretStatus>
+                <nz-tag [nzColor]="statusColor(config()?.bitcartWebhookSecretConfigured)">
+                  {{ statusText(config()?.bitcartWebhookSecretConfigured) }}
+                </nz-tag>
+              </ng-template>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+      </div>
+    </nz-card>
+
+    <nz-card class="m-b-16 provider-config-card" nzTitle="服务商配置">
+      <div class="provider-switch-grid">
+        @for (item of providerOptions; track item.value) {
+          <button type="button" class="provider-switch-card" [class.is-active]="activeProvider() === item.value" (click)="selectProvider(item.value)">
+            <span class="provider-switch-icon"><i nz-icon [nzType]="item.icon"></i></span>
+            <span class="provider-switch-main">
+              <span class="provider-switch-title">{{ item.label }}</span>
+              <span class="provider-switch-desc">{{ item.desc }}</span>
+            </span>
+            <nz-tag class="provider-switch-status" [nzColor]="activeProvider() === item.value ? 'blue' : 'default'">
+              {{ activeProvider() === item.value ? '当前使用' : '点击切换' }}
+            </nz-tag>
+          </button>
+        }
+      </div>
+
+      @if (activeProvider() === 'justlend') {
+        <div class="provider-panel">
+          <div class="provider-panel-title">
+            <i nz-icon nzType="deployment-unit"></i>
+            <span>JustLend 合约参数</span>
+          </div>
+
+          <div nz-row [nzGutter]="16">
+            <div nz-col [nzLg]="12" [nzXs]="24">
+              <nz-form-item>
+                <nz-form-label nzRequired>JustLend 合约地址</nz-form-label>
+                <nz-form-control>
+                  <input formControlName="justlendContractAddress" nz-input placeholder="能量租赁合约地址" />
+                </nz-form-control>
+              </nz-form-item>
+            </div>
+          </div>
+        </div>
+      }
+
+      @if (activeProvider() === 'catfee') {
+        <div class="provider-panel">
+          <div class="provider-panel-title">
+            <i nz-icon nzType="api"></i>
+            <span>CatFee API 参数</span>
+          </div>
+
+          <div nz-row [nzGutter]="16">
+            <div nz-col [nzLg]="8" [nzMd]="12" [nzXs]="24">
+              <nz-form-item>
+                <nz-form-label nzRequired>自动激活未激活地址</nz-form-label>
+                <nz-form-control>
+                  <nz-select formControlName="catfeeAutoActivate">
+                    @for (item of yesNoOptions; track item.value) {
+                      <nz-option [nzLabel]="item.label" [nzValue]="item.value"></nz-option>
+                    }
+                  </nz-select>
+                </nz-form-control>
+              </nz-form-item>
+            </div>
+          </div>
+
+          <div class="provider-env-grid">
+            @for (item of catFeeEnvironmentOptions; track item.value) {
+              <button
+                type="button"
+                class="provider-switch-card env-card"
+                [class.is-active]="activeCatFeeEnvironment() === item.value"
+                (click)="selectCatFeeEnvironment(item.value)"
+              >
+                <span class="provider-switch-icon"><i nz-icon [nzType]="item.icon"></i></span>
+                <span class="provider-switch-main">
+                  <span class="provider-switch-title">{{ item.label }}</span>
+                  <span class="provider-switch-desc">{{ item.desc }}</span>
+                </span>
+                <nz-tag class="provider-switch-status" [nzColor]="activeCatFeeEnvironment() === item.value ? 'blue' : 'default'">
+                  {{ activeCatFeeEnvironment() === item.value ? '当前环境' : '点击切换' }}
+                </nz-tag>
+              </button>
+            }
+          </div>
+
+          <nz-alert
+            class="m-b-16"
+            nzMessage="CatFee 生产环境和 Nile 测试环境的账号、API Key、API Secret 不互通；测试时先选择 Nile 环境，上线前再切换生产环境。"
+            nzShowIcon
+            nzType="warning"
+          ></nz-alert>
+
+          @if (activeCatFeeEnvironment() === 'prod') {
+            <div nz-row [nzGutter]="16">
+              <div nz-col [nzLg]="12" [nzXs]="24">
+                <nz-form-item>
+                  <nz-form-label nzRequired>生产 API Base URL</nz-form-label>
+                  <nz-form-control>
+                    <input formControlName="catfeeProdApiBaseUrl" nz-input placeholder="https://api.catfee.io" />
+                  </nz-form-control>
+                </nz-form-item>
+              </div>
+
+              <div nz-col [nzLg]="12" [nzXs]="24">
+                <nz-form-item>
+                  <nz-form-label>生产 API Key</nz-form-label>
+                  <nz-form-control>
+                    <nz-input-group [nzSuffix]="catfeeProdKeyStatus">
+                      <input type="password" formControlName="catfeeProdApiKey" nz-input placeholder="留空不修改生产 API Key" />
+                    </nz-input-group>
+                    <ng-template #catfeeProdKeyStatus>
+                      <nz-tag [nzColor]="statusColor(config()?.catfeeProdApiKeyConfigured)">
+                        {{ statusText(config()?.catfeeProdApiKeyConfigured) }}
+                      </nz-tag>
+                    </ng-template>
+                  </nz-form-control>
+                </nz-form-item>
+              </div>
+
+              <div nz-col [nzXs]="24">
+                <nz-form-item>
+                  <nz-form-label>生产 API Secret</nz-form-label>
+                  <nz-form-control>
+                    <nz-input-group [nzSuffix]="catfeeProdSecretStatus">
+                      <input type="password" formControlName="catfeeProdApiSecret" nz-input placeholder="留空不修改生产 API Secret" />
+                    </nz-input-group>
+                    <ng-template #catfeeProdSecretStatus>
+                      <nz-tag [nzColor]="statusColor(config()?.catfeeProdApiSecretConfigured)">
+                        {{ statusText(config()?.catfeeProdApiSecretConfigured) }}
+                      </nz-tag>
+                    </ng-template>
+                  </nz-form-control>
+                </nz-form-item>
+              </div>
+            </div>
+          }
+
+          @if (activeCatFeeEnvironment() === 'nile') {
+            <div nz-row [nzGutter]="16">
+              <div nz-col [nzLg]="12" [nzXs]="24">
+                <nz-form-item>
+                  <nz-form-label nzRequired>Nile API Base URL</nz-form-label>
+                  <nz-form-control>
+                    <input formControlName="catfeeNileApiBaseUrl" nz-input placeholder="https://nile.catfee.io" />
+                  </nz-form-control>
+                </nz-form-item>
+              </div>
+
+              <div nz-col [nzLg]="12" [nzXs]="24">
+                <nz-form-item>
+                  <nz-form-label>Nile API Key</nz-form-label>
+                  <nz-form-control>
+                    <nz-input-group [nzSuffix]="catfeeNileKeyStatus">
+                      <input type="password" formControlName="catfeeNileApiKey" nz-input placeholder="留空不修改 Nile API Key" />
+                    </nz-input-group>
+                    <ng-template #catfeeNileKeyStatus>
+                      <nz-tag [nzColor]="statusColor(config()?.catfeeNileApiKeyConfigured)">
+                        {{ statusText(config()?.catfeeNileApiKeyConfigured) }}
+                      </nz-tag>
+                    </ng-template>
+                  </nz-form-control>
+                </nz-form-item>
+              </div>
+
+              <div nz-col [nzXs]="24">
+                <nz-form-item>
+                  <nz-form-label>Nile API Secret</nz-form-label>
+                  <nz-form-control>
+                    <nz-input-group [nzSuffix]="catfeeNileSecretStatus">
+                      <input type="password" formControlName="catfeeNileApiSecret" nz-input placeholder="留空不修改 Nile API Secret" />
+                    </nz-input-group>
+                    <ng-template #catfeeNileSecretStatus>
+                      <nz-tag [nzColor]="statusColor(config()?.catfeeNileApiSecretConfigured)">
+                        {{ statusText(config()?.catfeeNileApiSecretConfigured) }}
+                      </nz-tag>
+                    </ng-template>
+                  </nz-form-control>
+                </nz-form-item>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </nz-card>
+
+    <nz-card class="m-b-16" nzTitle="订单与任务参数">
+      <div nz-row [nzGutter]="16">
+        <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>订单支付有效期</nz-form-label>
+            <nz-form-control>
+              <nz-input-number formControlName="orderPaymentTtlMinutes" nzAddonAfter="分钟" [nzMin]="1" [nzStep]="1"></nz-input-number>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>Telegram 轮询间隔</nz-form-label>
+            <nz-form-control>
+              <nz-input-number formControlName="telegramPollingIntervalSeconds" nzAddonAfter="秒" [nzMin]="1" [nzStep]="1"></nz-input-number>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="6" [nzMd]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label nzRequired>任务扫描间隔</nz-form-label>
+            <nz-form-control>
+              <nz-input-number formControlName="workerIntervalSeconds" nzAddonAfter="秒" [nzMin]="1" [nzStep]="1"></nz-input-number>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label>服务商余额预警线（SUN）</nz-form-label>
+            <nz-form-control>
+              <input formControlName="minTrxReserveSun" nz-input placeholder="例如 30000000 = 30 TRX，低于该值时控制台提示余额不足" />
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+      </div>
+    </nz-card>
+
+    <div class="text-right">
+      <button class="m-r-8" nz-button (click)="loadConfig()">
+        <i nz-icon nzType="reload"></i>
+        重新加载
+      </button>
+      <button *appAuth="ActionCode.EnergyRentalPlatformConfigEdit" nz-button nzType="primary" [nzLoading]="saving()" (click)="submit()">
+        <i nz-icon nzType="save"></i>
+        保存配置
+      </button>
+    </div>
+  </form>
+</nz-spin>

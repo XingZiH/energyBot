@@ -7,7 +7,7 @@ export const localUrl = `http://${ip}:${port}`;
 
 export const environment = {
   production: false,
-  mockEnabled: true
+  mockEnabled: false
 };
 
 /*

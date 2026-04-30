@@ -1,0 +1,36 @@
+:host {
+  display: block;
+}
+
+nz-card {
+  max-width: 860px;
+}
+
+.runtime-card {
+  max-width: 100%;
+}
+
+.runtime-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.runtime-tags,
+.runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-tags nz-tag {
+  margin-right: 0;
+}
+
+@media (max-width: 768px) {
+  .runtime-toolbar {
+    flex-direction: column;
+  }
+}

@@ -28,7 +28,7 @@ export class CustomPageTitleResolverService extends TitleStrategy {
     const titleKey = this.buildTitle(routerState);
     if (titleKey !== undefined) {
       const title = this.translate.instant(titleKey) || titleKey;
-      this.title.setTitle(`${title} - Ant Design`);
+      this.title.setTitle(`${title} - 马 儿 能 量`);
     }
   }
 }

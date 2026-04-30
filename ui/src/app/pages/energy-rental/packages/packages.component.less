@@ -1,0 +1,223 @@
+.provider-price-bar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 78px;
+  padding: 14px 18px;
+  margin-bottom: 10px;
+  background: transparent;
+  border: 1px solid rgb(127 127 127 / 28%);
+  border-radius: 6px;
+}
+
+.provider-price-heading,
+.provider-price-content,
+.admin-package-view-switch {
+  display: flex;
+  align-items: center;
+}
+
+.provider-price-heading {
+  min-width: 0;
+  gap: 12px;
+}
+
+.provider-price-icon {
+  display: inline-flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: #1890ff;
+  font-size: 20px;
+  background: rgb(24 144 255 / 10%);
+  border: 1px solid rgb(24 144 255 / 20%);
+  border-radius: 6px;
+}
+
+.provider-price-title-wrap {
+  min-width: 0;
+}
+
+.provider-price-title {
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.provider-price-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  line-height: 1.5;
+  opacity: 0.72;
+}
+
+.provider-price-content {
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.admin-package-view-switch {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.provider-price-metric {
+  min-width: 96px;
+}
+
+.provider-price-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  opacity: 0.68;
+}
+
+.provider-price-metric strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.provider-price-loading,
+.provider-price-error {
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+.provider-price-error {
+  color: #ff4d4f;
+}
+
+.package-estimate-wrap {
+  margin: 0 0 18px 25%;
+}
+
+.package-field-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.68;
+}
+
+.package-estimate-message {
+  padding: 12px 16px;
+  background: transparent;
+  border: 1px solid rgb(127 127 127 / 25%);
+  border-radius: 4px;
+}
+
+.package-estimate-message.is-error {
+  color: #ff4d4f;
+  border-color: #ff4d4f;
+}
+
+.package-estimate-card {
+  background: transparent;
+  border: 1px solid rgb(127 127 127 / 25%);
+  border-radius: 4px;
+}
+
+.package-estimate-card > div:first-child,
+.package-estimate-title {
+  padding: 12px 16px;
+  font-weight: 600;
+  border-bottom: 1px solid rgb(127 127 127 / 25%);
+}
+
+.package-estimate-summary {
+  padding: 14px 16px;
+}
+
+.package-estimate-section {
+  padding: 0 16px 14px;
+}
+
+.package-estimate-meta-row {
+  font-size: 12px;
+}
+
+.package-estimate-label,
+.package-estimate-section-title {
+  opacity: 0.68;
+}
+
+.package-estimate-section-title {
+  margin-bottom: 8px;
+}
+
+.package-estimate-main-value {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.package-estimate-value {
+  font-size: 16px;
+}
+
+.package-estimate-small-value {
+  font-size: 15px;
+}
+
+.profit-value {
+  color: #52c41a;
+}
+
+.profit-value.is-negative {
+  color: #ff4d4f;
+}
+
+.price-tier-cell {
+  display: grid;
+  gap: 2px;
+  line-height: 1.35;
+}
+
+.price-tier-cell span {
+  font-size: 12px;
+  opacity: 0.72;
+}
+
+.package-estimate-note {
+  padding: 0 16px 14px;
+  line-height: 1.6;
+  opacity: 0.72;
+}
+
+@media (max-width: 575px) {
+  .provider-price-bar,
+  .provider-price-content,
+  .admin-package-view-switch {
+    align-items: stretch;
+  }
+
+  .provider-price-bar {
+    flex-direction: column;
+  }
+
+  .provider-price-content {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .admin-package-view-switch {
+    width: 100%;
+  }
+
+  .admin-package-view-switch button {
+    flex: 1;
+  }
+
+  .provider-price-metric {
+    min-width: calc(50% - 8px);
+  }
+
+  .package-estimate-wrap {
+    margin-left: 0;
+  }
+}

@@ -1,30 +1,39 @@
-import { Component, ChangeDetectionStrategy, ElementRef, viewChild, signal, afterNextRender, inject, Injector } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { Component, ChangeDetectionStrategy, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
+import { catchError, finalize } from 'rxjs/operators';
+import { forkJoin, Observable, of } from 'rxjs';
 
-import { AdComponent, DynamicComponent } from '@core/services/types';
-import { AdDirective } from '@shared/directives/ad.directive';
-import { NumberLoopPipe } from '@shared/pipes/number-loop.pipe';
+import { WindowService } from '@core/services/common/window.service';
+import {
+  AgentAccount,
+  AgentBotConfig,
+  EnergyRentalDashboard,
+  EnergyRentalOrder,
+  EnergyRentalService,
+  EnergyUserAddressStats
+} from '@services/energy-rental/energy-rental.service';
+import { UserInfoStoreService } from '@store/common-store/userInfo-store.service';
 
 import { NzAvatarModule } from 'ng-zorro-antd/avatar';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzCardModule } from 'ng-zorro-antd/card';
+import { NzDescriptionsModule } from 'ng-zorro-antd/descriptions';
 import { NzDividerModule } from 'ng-zorro-antd/divider';
 import { NzGridModule } from 'ng-zorro-antd/grid';
 import { NzIconModule } from 'ng-zorro-antd/icon';
-import { NzInputModule } from 'ng-zorro-antd/input';
-import { NzTabsModule } from 'ng-zorro-antd/tabs';
+import { NzSpinModule } from 'ng-zorro-antd/spin';
+import { NzStatisticModule } from 'ng-zorro-antd/statistic';
+import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
 import { NzTypographyModule } from 'ng-zorro-antd/typography';
 
-import { ApplicationComponent } from './application/application.component';
-import { ArticleComponent } from './article/article.component';
-import { ProjectsComponent } from './projects/projects.component';
-import { NzNoAnimationDirective } from 'ng-zorro-antd/core/animation';
-
-interface TabInterface {
-  label: string;
-  component: DynamicComponent;
-}
+import {
+  DEFAULT_PERSONAL_PREFERENCES,
+  PERSONAL_PREFERENCE_STORAGE_KEY,
+  PersonalPreference,
+  getPersonalCenterQuickActions
+} from '../personal-business-config';
 
 @Component({
   selector: 'app-personal-center',
@@ -40,51 +49,136 @@ interface TabInterface {
     NzButtonModule,
     NzDividerModule,
     NzTagModule,
-    NzInputModule,
-    FormsModule,
-    NzTabsModule,
-    AdDirective,
-    NumberLoopPipe,
-    NzNoAnimationDirective
+    NzStatisticModule,
+    NzDescriptionsModule,
+    NzSpinModule,
+    NzTableModule
   ]
 })
-export class PersonalCenterComponent {
-  readonly tagArray = signal<string[]>(['很有想法的', '专注设计', '大长腿', '川妹子', '海纳百川']);
-  readonly inputVisible = signal(false);
-  readonly inputValue = signal('');
-  readonly inputElement = viewChild<ElementRef>('inputElement');
-  readonly adHost = viewChild.required(AdDirective);
+export class PersonalCenterComponent implements OnInit {
+  readonly loading = signal(false);
+  readonly dashboard = signal<EnergyRentalDashboard | null>(null);
+  readonly account = signal<AgentAccount | null>(null);
+  readonly botConfig = signal<AgentBotConfig | null>(null);
+  readonly recentOrders = signal<EnergyRentalOrder[]>([]);
+  readonly addresses = signal<EnergyUserAddressStats[]>([]);
+  readonly preferences = signal<PersonalPreference>({ ...DEFAULT_PERSONAL_PREFERENCES });
+  readonly userInfo = computed(() => this.userInfoService.$userInfo());
+  readonly quickActions = computed(() => getPersonalCenterQuickActions(this.userInfo().authCode || []));
 
-  readonly tabData: TabInterface[] = [
-    { label: '文章(8)', component: new DynamicComponent(ArticleComponent, {}) },
-    { label: '应用(8)', component: new DynamicComponent(ApplicationComponent, {}) },
-    { label: '项目(8)', component: new DynamicComponent(ProjectsComponent, {}) }
-  ];
+  private readonly dataService = inject(EnergyRentalService);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
+  private readonly userInfoService = inject(UserInfoStoreService);
+  private readonly windowService = inject(WindowService);
 
-  private readonly injector = inject(Injector);
-
-  constructor() {
-    afterNextRender(() => this.to(this.tabData[0]), { injector: this.injector });
+  userRoleLabel(): string {
+    const authCodes = this.userInfo().authCode || [];
+    return authCodes.some(code => code.includes('system') || code.includes('platform-config')) ? '管理员' : '用户';
   }
 
-  to(adItem: TabInterface): void {
-    const viewContainerRef = this.adHost().viewContainerRef;
-    viewContainerRef.clear();
-    const componentRef = viewContainerRef.createComponent<AdComponent>(adItem.component.component);
-    componentRef.instance.data = adItem.component.data;
+  botStatusText(): string {
+    if (!this.botConfig()) return '未加载';
+    if (this.botConfig()?.botStatus === 'enabled') return '已启用';
+    return '未启用';
   }
 
-  handleInputConfirm(): void {
-    const value = this.inputValue();
-    if (value && !this.tagArray().includes(value)) {
-      this.tagArray.update(tags => [...tags, value]);
+  botStatusColor(): string {
+    return this.botConfig()?.botStatus === 'enabled' ? 'green' : 'default';
+  }
+
+  defaultAddress(): EnergyUserAddressStats | null {
+    return this.addresses().find(item => item.isDefault) ?? this.addresses()[0] ?? null;
+  }
+
+  activeAddressCount(): number {
+    return this.addresses().filter(item => item.status !== 'disabled').length;
+  }
+
+  sunToTrx(value?: string | number | null, precision = 4): string {
+    const sun = Number(value || 0);
+    return `${(sun / 1_000_000).toFixed(precision)} TRX`;
+  }
+
+  numberText(value?: string | number | null): string {
+    return Number(value || 0).toLocaleString('zh-CN');
+  }
+
+  statusColor(status?: string): string {
+    const colorMap: Record<string, string> = {
+      pending: 'orange',
+      paid: 'blue',
+      renting: 'processing',
+      completed: 'green',
+      failed: 'red',
+      cancelled: 'default'
+    };
+    return status ? colorMap[status] || 'default' : 'default';
+  }
+
+  statusText(status?: string): string {
+    const textMap: Record<string, string> = {
+      pending: '待支付',
+      paid: '已支付',
+      renting: '租赁中',
+      completed: '已完成',
+      failed: '失败',
+      cancelled: '已取消'
+    };
+    return status ? textMap[status] || status : '-';
+  }
+
+  shortAddress(value?: string): string {
+    const address = String(value || '').trim();
+    return address.length > 18 ? `${address.slice(0, 8)}...${address.slice(-6)}` : address || '-';
+  }
+
+  navigate(route: string): void {
+    this.router.navigateByUrl(route);
+  }
+
+  reload(): void {
+    this.loadPreferences();
+    this.loading.set(true);
+    forkJoin({
+      dashboard: this.safeRequest(this.dataService.getDashboard(), null),
+      account: this.safeRequest(this.dataService.getAgentAccount(), null),
+      botConfig: this.safeRequest(this.dataService.getAgentBotConfig(), null),
+      orders: this.safeRequest(this.dataService.getOrders({ pageIndex: 1, pageSize: 5, filters: {} }), null),
+      addresses: this.safeRequest(this.dataService.getAddresses({ pageIndex: 1, pageSize: 5, filters: {} }), null)
+    })
+      .pipe(
+        finalize(() => this.loading.set(false)),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe(({ dashboard, account, botConfig, orders, addresses }) => {
+        this.dashboard.set(dashboard);
+        this.account.set(account);
+        this.botConfig.set(botConfig);
+        this.recentOrders.set(orders?.list ?? []);
+        this.addresses.set(addresses?.list ?? []);
+      });
+  }
+
+  ngOnInit(): void {
+    this.reload();
+  }
+
+  private safeRequest<T>(request$: Observable<T>, fallback: T): Observable<T> {
+    return request$.pipe(catchError(() => of(fallback)));
+  }
+
+  private loadPreferences(): void {
+    const raw = this.windowService.getStorage(PERSONAL_PREFERENCE_STORAGE_KEY);
+    if (!raw) {
+      this.preferences.set({ ...DEFAULT_PERSONAL_PREFERENCES });
+      return;
     }
-    this.inputValue.set('');
-    this.inputVisible.set(false);
-  }
-
-  showInput(): void {
-    this.inputVisible.set(true);
-    afterNextRender(() => this.inputElement()?.nativeElement.focus(), { injector: this.injector });
+    try {
+      this.preferences.set({ ...DEFAULT_PERSONAL_PREFERENCES, ...(JSON.parse(raw) as Partial<PersonalPreference>) });
+    } catch {
+      this.windowService.removeStorage(PERSONAL_PREFERENCE_STORAGE_KEY);
+      this.preferences.set({ ...DEFAULT_PERSONAL_PREFERENCES });
+    }
   }
 }

@@ -156,7 +156,11 @@ export class UserService {
     data.forEach((item) => {
       autoCodeArray.push(item.permCode);
     });
-    await this.cacheManager.set(ConfigEnum.AUTH_CODE, autoCodeArray || [], 0);
+    await this.cacheManager.set(
+      `${ConfigEnum.AUTH_CODE}:${id}`,
+      autoCodeArray || [],
+      0,
+    );
     return autoCodeArray;
   }
 

@@ -1,0 +1,160 @@
+<app-page-header [pageHeaderInfo]="pageHeaderInfo" />
+
+<nz-alert
+  class="m-b-16"
+  nzType="info"
+  nzShowIcon
+  nzMessage="该页面只测试 CatFee Nile 环境"
+  nzDescription="默认只读取配置、查询账户和预估价格；开启真实下单测试后，会在 Nile 环境创建 CatFee 订单并向测试地址下发能量。"
+></nz-alert>
+
+<nz-spin [nzSpinning]="loading()">
+  <div nz-row [nzGutter]="16">
+    <div nz-col [nzLg]="8" [nzMd]="24" [nzXs]="24">
+      <nz-card nzTitle="测试参数">
+        <form nz-form [formGroup]="form">
+          <nz-form-item>
+            <nz-form-label nzRequired>能量数量</nz-form-label>
+            <nz-form-control nzErrorTip="请输入不低于 65000 的能量数量">
+              <nz-input-number
+                formControlName="energyAmount"
+                [nzMin]="65000"
+                [nzStep]="1000"
+                [nzPrecision]="0"
+                style="width: 100%"
+              ></nz-input-number>
+            </nz-form-control>
+          </nz-form-item>
+
+          <nz-form-item>
+            <nz-form-label nzRequired>租赁时长</nz-form-label>
+            <nz-form-control>
+              <nz-input-number formControlName="durationHours" [nzMin]="1" [nzMax]="1" [nzPrecision]="0" style="width: 100%"></nz-input-number>
+            </nz-form-control>
+          </nz-form-item>
+
+          <nz-form-item>
+            <nz-form-label>真实下单</nz-form-label>
+            <nz-form-control>
+              <nz-switch formControlName="createOrder" nzCheckedChildren="开启" nzUnCheckedChildren="关闭"></nz-switch>
+              <div class="link-test-tip">开启后会真实调用 CatFee Nile 的下单接口，消耗测试环境余额。</div>
+            </nz-form-control>
+          </nz-form-item>
+
+          @if (createOrderEnabled()) {
+            <nz-form-item>
+              <nz-form-label nzRequired>接收地址</nz-form-label>
+              <nz-form-control nzErrorTip="请输入接收 Nile 能量的 TRON 地址">
+                <input formControlName="receiverAddress" nz-input placeholder="接收测试能量的 TRON 地址" />
+              </nz-form-control>
+            </nz-form-item>
+
+            <nz-form-item>
+              <nz-form-label>客户端订单号</nz-form-label>
+              <nz-form-control>
+                <input formControlName="clientOrderId" nz-input maxlength="64" placeholder="可选，留空系统自动生成" />
+                <div class="link-test-tip">用于 CatFee 幂等请求；重复订单号不会重复创建订单。</div>
+              </nz-form-control>
+            </nz-form-item>
+          }
+
+          <button nz-button nzType="primary" [nzLoading]="loading()" (click)="runTest()">
+            <i nz-icon nzType="experiment"></i>
+            开始链路测试
+          </button>
+        </form>
+      </nz-card>
+    </div>
+
+    <div nz-col [nzLg]="16" [nzMd]="24" [nzXs]="24">
+      <nz-card nzTitle="测试结果">
+        @if (result(); as data) {
+          <div class="result-head">
+            <nz-tag [nzColor]="statusColor(data.overallStatus)">{{ statusText(data.overallStatus) }}</nz-tag>
+            <span>{{ environmentText(data.environment) }}</span>
+            <span>{{ data.energyAmount }} 能量 / {{ data.durationHours }} 小时</span>
+            <span>{{ data.order ? '已执行真实下单' : '安全模式' }}</span>
+            <span>{{ data.testedAt }}</span>
+          </div>
+
+          <nz-steps [nzCurrent]="currentStep()" [nzStatus]="stepsStatus()">
+            @for (step of data.steps; track step.key) {
+              <nz-step [nzTitle]="step.title" [nzDescription]="step.message"></nz-step>
+            }
+          </nz-steps>
+        } @else {
+          <div class="empty-state">
+            <i nz-icon nzType="experiment"></i>
+            <span>点击左侧按钮后开始测试 Nile API 链路。</span>
+          </div>
+        }
+      </nz-card>
+    </div>
+  </div>
+
+  @if (result(); as data) {
+    <div nz-row [nzGutter]="16" class="m-t-16">
+      <div nz-col [nzLg]="12" [nzMd]="24" [nzXs]="24">
+        <nz-card nzTitle="账户信息">
+          <nz-descriptions nzBordered nzSize="small" [nzColumn]="1">
+            <nz-descriptions-item nzTitle="API 地址">{{ data.apiBaseUrl }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="账户钱包">{{ data.account?.wallet || '-' }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="充值地址">{{ data.account?.rechargeAddress || '-' }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="TRX 余额">{{ formatTrx(data.account?.balanceTrx) }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="USDT 余额">{{ data.account?.balanceUsdt ?? 0 }}</nz-descriptions-item>
+          </nz-descriptions>
+        </nz-card>
+      </div>
+
+      <div nz-col [nzLg]="12" [nzMd]="24" [nzXs]="24">
+        <nz-card nzTitle="预估价格">
+          <nz-descriptions nzBordered nzSize="small" [nzColumn]="1">
+            <nz-descriptions-item nzTitle="测试能量">{{ data.energyAmount }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="预估成本">{{ formatTrx(data.estimate?.costTrx) }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="请求路径">{{ data.estimate?.requestPath || '-' }}</nz-descriptions-item>
+            <nz-descriptions-item nzTitle="测试模式">{{ data.order ? '真实下单测试' : '安全模式，不创建订单' }}</nz-descriptions-item>
+          </nz-descriptions>
+        </nz-card>
+      </div>
+    </div>
+
+    @if (data.order) {
+      <nz-card class="m-t-16" nzTitle="测试订单">
+        <nz-descriptions nzBordered nzSize="small" [nzColumn]="{ xxl: 3, xl: 3, lg: 2, md: 2, sm: 1, xs: 1 }">
+          <nz-descriptions-item nzTitle="订单 ID">{{ data.order.id }}</nz-descriptions-item>
+          <nz-descriptions-item nzTitle="客户端订单号">{{ data.order.clientOrderId || '-' }}</nz-descriptions-item>
+          <nz-descriptions-item nzTitle="接收地址">{{ data.order.receiver || '-' }}</nz-descriptions-item>
+          <nz-descriptions-item nzTitle="能量数量">{{ data.order.quantity }}</nz-descriptions-item>
+          <nz-descriptions-item nzTitle="扣费">{{ formatTrx(data.order.payAmountTrx) }}</nz-descriptions-item>
+          <nz-descriptions-item nzTitle="激活费">{{ formatTrx(data.order.activateAmountTrx) }}</nz-descriptions-item>
+          <nz-descriptions-item nzTitle="订单状态">{{ data.order.status || '-' }}</nz-descriptions-item>
+          <nz-descriptions-item nzTitle="确认状态">
+            <nz-tag [nzColor]="data.order.confirmStatus === 'DELEGATION_CONFIRMED' ? 'success' : 'warning'">
+              {{ data.order.confirmStatus || '-' }}
+            </nz-tag>
+          </nz-descriptions-item>
+          <nz-descriptions-item nzTitle="委托哈希">{{ data.order.delegateHash || '-' }}</nz-descriptions-item>
+        </nz-descriptions>
+      </nz-card>
+    }
+
+    <nz-card class="m-t-16" nzTitle="步骤明细">
+      @for (step of data.steps; track step.key) {
+        <div class="step-detail">
+          <div class="step-detail-title">
+            <nz-tag [nzColor]="statusColor(step.status)">{{ statusText(step.status) }}</nz-tag>
+            <strong>{{ step.title }}</strong>
+            <span>{{ step.message }}</span>
+          </div>
+          @if (detailEntries(step).length) {
+            <nz-descriptions nzBordered nzSize="small" [nzColumn]="{ xxl: 3, xl: 3, lg: 2, md: 2, sm: 1, xs: 1 }">
+              @for (item of detailEntries(step); track item.label) {
+                <nz-descriptions-item [nzTitle]="item.label">{{ item.value }}</nz-descriptions-item>
+              }
+            </nz-descriptions>
+          }
+        </div>
+      }
+    </nz-card>
+  }
+</nz-spin>

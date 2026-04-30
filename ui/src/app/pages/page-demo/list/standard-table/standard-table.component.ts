@@ -86,7 +86,7 @@ export class StandardTableComponent {
     },
     {
       id: 3,
-      name: 'Ant Design',
+      name: '马 儿 能 量',
       desc: '生命就像一盒巧克力，结果往往出人意料',
       avatar: 'https://gw.alipayobjects.com/zos/rmsportal/dURIMkkrRFpPgTuzkwnB.png',
       owner: '林东东',
@@ -97,7 +97,7 @@ export class StandardTableComponent {
     },
     {
       id: 4,
-      name: 'Ant Design Pro',
+      name: '马儿能量',
       desc: '城镇中有那么多的酒馆，她却偏偏走进了我的酒馆',
       avatar: 'https://gw.alipayobjects.com/zos/rmsportal/sfjbOqnsXXJgNCjCzDBL.png',
       owner: '周星星',

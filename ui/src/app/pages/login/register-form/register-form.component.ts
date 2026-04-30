@@ -1,7 +1,9 @@
-import { Component, OnInit, ChangeDetectionStrategy, inject } from '@angular/core';
+import { Component, OnInit, ChangeDetectionStrategy, inject, signal } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { finalize } from 'rxjs/operators';
 
+import { LoginService } from '@core/services/http/login/login.service';
 import { fnCheckForm } from '@utils/tools';
 
 import { NzButtonModule } from 'ng-zorro-antd/button';
@@ -10,51 +12,56 @@ import { NzFormModule } from 'ng-zorro-antd/form';
 import { NzGridModule } from 'ng-zorro-antd/grid';
 import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzMessageService } from 'ng-zorro-antd/message';
-import { NzSelectModule } from 'ng-zorro-antd/select';
 
 @Component({
   selector: 'app-register-form',
   templateUrl: './register-form.component.html',
   styleUrl: './register-form.component.less',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, NzFormModule, ReactiveFormsModule, NzGridModule, NzButtonModule, NzInputModule, NzSelectModule, NzWaveModule, RouterLink]
+  imports: [FormsModule, NzFormModule, ReactiveFormsModule, NzGridModule, NzButtonModule, NzInputModule, NzWaveModule, RouterLink]
 })
 export class RegisterFormComponent implements OnInit {
   validateForm!: FormGroup;
+  submitting = signal(false);
   messageService = inject(NzMessageService);
   private fb = inject(FormBuilder);
   private router = inject(Router);
-
-  // checkPassword: [null, [Validators.required, this.confirmationValidator]],
-
-  /*  confirmationValidator = (control: FormControl): { [s: string]: boolean } => {
-      if (!control.value) {
-        return {required: true};
-      } else if (control.value !== this.validateForm.controls.password.value) {
-        return {confirm: true, error: true};
-      }
-      return {};
-    };*/
+  private loginService = inject(LoginService);
 
   submitForm(): void {
     const invalid = fnCheckForm(this.validateForm);
     if (!invalid) {
       return;
     }
-    this.messageService.success('注册成功，请重新登录');
-    this.router.navigateByUrl('login/login-form');
     const param = this.validateForm.getRawValue();
-
-    /* this.dataService.login(param).subscribe((res) => {
-       this.router.navigateByUrl('hazard');
-     });*/
+    if (param.password !== param.confirmPassword) {
+      this.messageService.warning('两次输入的密码不一致');
+      return;
+    }
+    this.submitting.set(true);
+    this.loginService
+      .signup({
+        userName: param.userName,
+        password: param.password,
+        agentName: param.agentName,
+        mobile: param.mobile,
+        email: param.email
+      })
+      .pipe(finalize(() => this.submitting.set(false)))
+      .subscribe(() => {
+        this.messageService.success('注册成功，请登录');
+        this.router.navigateByUrl('login/login-form');
+      });
   }
 
   ngOnInit(): void {
     this.validateForm = this.fb.group({
-      name: [null, [Validators.required]],
-      password: [null, [Validators.required]],
-      remember: [null]
+      userName: [null, [Validators.required]],
+      agentName: [null, [Validators.required]],
+      email: [null],
+      mobile: [null],
+      password: [null, [Validators.required, Validators.minLength(6)]],
+      confirmPassword: [null, [Validators.required]]
     });
   }
 }

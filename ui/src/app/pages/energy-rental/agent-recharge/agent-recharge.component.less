@@ -1,0 +1,129 @@
+:host {
+  display: block;
+}
+
+.recharge-form {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.recharge-form nz-input-number {
+  width: 220px;
+}
+
+.payable-note {
+  margin-top: 10px;
+  line-height: 1.6;
+  opacity: 0.72;
+}
+
+.mono-text {
+  font-family: Consolas, monospace;
+  word-break: break-all;
+}
+
+.expired-text {
+  color: #ff4d4f;
+}
+
+.payment-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.payment-warning {
+  padding: 10px 12px;
+  border: 1px solid rgba(250, 173, 20, 0.35);
+  border-radius: 4px;
+  color: #d48806;
+  background: rgba(250, 173, 20, 0.08);
+  line-height: 1.6;
+}
+
+.payment-warning-expired {
+  border-color: rgba(255, 77, 79, 0.4);
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.08);
+}
+
+.payment-qr-section {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid rgba(120, 120, 120, 0.28);
+  border-radius: 6px;
+}
+
+.payment-qr-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 192px;
+  min-height: 192px;
+  padding: 8px;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.payment-qr-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  line-height: 1.6;
+}
+
+.payment-qr-copy strong {
+  font-size: 16px;
+}
+
+.payment-qr-copy span {
+  opacity: 0.72;
+}
+
+.payment-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 36px;
+  line-height: 1.5;
+}
+
+.payment-row > span {
+  opacity: 0.72;
+}
+
+.payment-address {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 575px) {
+  .recharge-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recharge-form nz-input-number {
+    width: 100%;
+  }
+
+  .payment-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .payment-qr-section {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .payment-qr-box {
+    width: 100%;
+  }
+}

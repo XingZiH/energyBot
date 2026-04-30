@@ -4,6 +4,7 @@ import { RoleModule } from './role/role.module';
 import { DepartmentModule } from './department/department.module';
 import { MenuModule } from './menu/menu.module';
 import { PermissionModule } from './permission/permission.module';
+import { EnergyRentalModule } from './energy-rental/energy-rental.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { PermissionModule } from './permission/permission.module';
     DepartmentModule,
     MenuModule,
     PermissionModule,
+    EnergyRentalModule,
   ],
 })
 export class ApiModulesModule {}

@@ -1,0 +1,138 @@
+.provider-switch-grid,
+.provider-env-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.provider-switch-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 88px;
+  padding: 14px 16px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgb(127 127 127 / 35%);
+  border-radius: 6px;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.provider-switch-card:hover,
+.provider-switch-card.is-active {
+  border-color: #1890ff;
+}
+
+.provider-switch-card.is-active {
+  background: rgb(24 144 255 / 8%);
+  box-shadow: 0 0 0 2px rgb(24 144 255 / 10%);
+}
+
+.provider-switch-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  color: #1890ff;
+  font-size: 20px;
+  background: rgb(24 144 255 / 10%);
+  border: 1px solid rgb(24 144 255 / 20%);
+  border-radius: 6px;
+}
+
+.provider-switch-main {
+  min-width: 0;
+}
+
+.provider-switch-title,
+.provider-switch-desc {
+  display: block;
+}
+
+.provider-switch-title {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.provider-switch-desc {
+  line-height: 1.5;
+  opacity: 0.68;
+}
+
+.provider-switch-status {
+  margin-right: 0;
+}
+
+.provider-panel {
+  padding-top: 16px;
+  border-top: 1px solid rgb(127 127 127 / 25%);
+}
+
+.provider-panel-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.provider-panel-title i {
+  color: #1890ff;
+}
+
+.field-help {
+  margin-top: 6px;
+  color: inherit;
+  line-height: 1.5;
+  opacity: 0.68;
+}
+
+.runtime-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.runtime-tags,
+.runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-tags nz-tag {
+  margin-right: 0;
+}
+
+@media (max-width: 768px) {
+  .provider-switch-grid,
+  .provider-env-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-toolbar {
+    flex-direction: column;
+  }
+
+  .provider-switch-card {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .provider-switch-status {
+    grid-column: 2;
+    width: fit-content;
+  }
+}

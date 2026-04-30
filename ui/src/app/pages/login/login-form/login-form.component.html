@@ -3,18 +3,18 @@
     <nz-tabs [nzAnimated]="false">
       <nz-tab nzTitle="账户密码登录">
         <nz-form-item>
-          <nz-form-control nzErrorTip="账号名：admin">
+          <nz-form-control nzErrorTip="请输入账号">
             <nz-input-wrapper>
               <i nzInputPrefix nz-icon nzType="user"></i>
-              <input type="text" formControlName="userName" nz-input nzSize="large" placeholder="用户名" [placeholder]="'账号名：admin'" />
+              <input type="text" formControlName="userName" nz-input nzSize="large" placeholder="用户名" [placeholder]="'账号'" />
             </nz-input-wrapper>
           </nz-form-control>
         </nz-form-item>
         <nz-form-item>
-          <nz-form-control nzErrorTip="密码：a123456">
+          <nz-form-control nzErrorTip="请输入密码">
             <nz-input-wrapper>
               <i nzInputPrefix nz-icon nzType="lock"></i>
-              <input type="password" autocomplete="on" formControlName="password" nz-input nzSize="large" placeholder="密码" [placeholder]="'密码：a123456'" />
+              <input type="password" autocomplete="on" formControlName="password" nz-input nzSize="large" placeholder="密码" [placeholder]="'密码'" />
             </nz-input-wrapper>
           </nz-form-control>
         </nz-form-item>
