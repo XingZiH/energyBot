@@ -86,14 +86,17 @@ type DesignerMenuRow struct {
 }
 
 type DesignerMenuButton struct {
-	ID           string              `json:"id"`
-	Text         string              `json:"text"`
-	Action       ButtonAction        `json:"action"`
-	Style        *ButtonStyle        `json:"style,omitempty"`
-	URL          string              `json:"url,omitempty"`
-	Message      string              `json:"message,omitempty"`
-	Command      string              `json:"command,omitempty"`
-	PackageID    int                 `json:"packageId,omitempty"` // 保留兼容旧字段（已废弃但不移除避免编译错误）
+	ID      string       `json:"id"`
+	Text    string       `json:"text"`
+	Action  ButtonAction `json:"action"`
+	Style   *ButtonStyle `json:"style,omitempty"`
+	URL     string       `json:"url,omitempty"`
+	Message string       `json:"message,omitempty"`
+	Command string       `json:"command,omitempty"`
+	// PackageID 是 v1 遗留字段，v2 已由 PackageGroup 替代。
+	// 目前 bot.go 中 v1 解析路径（parseMenuRows 与 executeDesignerButton 的
+	// "package" 分支）仍在读此字段。任务 10 完成 v1 路径清理后即可移除。
+	PackageID    int                 `json:"packageId,omitempty"`
 	Submenu      []DesignerMenuRow   `json:"submenu,omitempty"`
 	PackageGroup *PackageGroupConfig `json:"packageGroup,omitempty"`
 }

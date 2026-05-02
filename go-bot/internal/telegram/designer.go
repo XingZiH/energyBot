@@ -1,3 +1,15 @@
+// Package telegram 的 designer.go 提供设计器 v2 的数据结构和解析逻辑。
+//
+// v1 与 v2 的关系：
+//   - v1 解析逻辑（parseMenuRows / parseMessageConfig）位于 bot.go，
+//     对应按钮 action 字符串 "package"/"address"/"wallet" 等；
+//   - v2 解析逻辑（本文件）对应新 9 种 ButtonAction 枚举；
+//   - 两者目前并存以维持向后兼容，v1 数据走旧路径，v2 数据走新路径；
+//   - 完整迁移与 v1 旧代码移除计划见任务 10。
+//
+// 修改本文件的字段或 JSON tag 时，务必同步更新：
+//   - 前端：ui/src/app/pages/energy-rental/agent-bot-config/designer/types.ts
+//   - NestJS：nest-api/src/modules/energy-rental/dto/ui-config.dto.ts
 package telegram
 
 import (
@@ -5,6 +17,10 @@ import (
 	"fmt"
 	"strings"
 )
+
+// MaxMenuDepth 是菜单允许的最大嵌套深度（根菜单 + 2 层 submenu）。
+// 该值与前端 MAX_MENU_DEPTH、NestJS 深度校验保持一致。
+const MaxMenuDepth = 3
 
 // ButtonAction 表示设计器 v2 按钮的行为类型。
 // 常量字符串值与前端 types.ts 的 ButtonAction 枚举保持一致。
@@ -72,7 +88,7 @@ func parseMenuRowsV2(raw string) ([]DesignerMenuRow, error) {
 	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
 		return nil, fmt.Errorf("menu_config 非法 JSON: %w", err)
 	}
-	if err := validateMenuRows(rows, 1, 3); err != nil {
+	if err := validateMenuRows(rows, 1, MaxMenuDepth); err != nil {
 		return nil, err
 	}
 	return rows, nil

@@ -48,7 +48,36 @@ func TestParseMenuRows_EmptyString(t *testing.T) {
 	}
 }
 
-func TestParseMessageConfig_V2(t *testing.T) {
+func TestParseMenuRows_NullLiteral(t *testing.T) {
+	rows, err := parseMenuRowsV2("null")
+	if err != nil {
+		t.Fatalf("null literal should not error: %v", err)
+	}
+	if rows != nil {
+		t.Errorf("expected nil rows for null literal, got %+v", rows)
+	}
+}
+
+func TestParseMenuRows_MalformedJSON(t *testing.T) {
+	_, err := parseMenuRowsV2(`[{"id":"r","buttons":[`) // 截断
+	if err == nil {
+		t.Fatal("expected error for malformed JSON")
+	}
+}
+
+func TestParseMenuRows_DepthExceeded(t *testing.T) {
+	// 构造 4 层嵌套 submenu，应被深度校验拒绝（最大深度 3）
+	raw := `[{"id":"r1","buttons":[{"id":"b1","text":"l1","action":"submenu","submenu":` +
+		`[{"id":"r2","buttons":[{"id":"b2","text":"l2","action":"submenu","submenu":` +
+		`[{"id":"r3","buttons":[{"id":"b3","text":"l3","action":"submenu","submenu":` +
+		`[{"id":"r4","buttons":[{"id":"b4","text":"l4","action":"url","url":"https://x"}]}]}]}]}]}]}]`
+	_, err := parseMenuRowsV2(raw)
+	if err == nil {
+		t.Fatal("expected depth-exceeded error for 4-level nested menu")
+	}
+}
+
+func TestParseMessageTemplates(t *testing.T) {
 	raw := `{"welcome":"欢迎","orderCreated":"订单 {orderNo}","paySuccess":"成功"}`
 	cfg, err := parseMessageTemplates(raw)
 	if err != nil {
@@ -56,6 +85,23 @@ func TestParseMessageConfig_V2(t *testing.T) {
 	}
 	if cfg.Welcome != "欢迎" || cfg.OrderCreated != "订单 {orderNo}" {
 		t.Errorf("unexpected cfg: %+v", cfg)
+	}
+}
+
+func TestParseMessageTemplates_MalformedJSON(t *testing.T) {
+	_, err := parseMessageTemplates(`{invalid`)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON in message templates")
+	}
+}
+
+func TestParseMessageTemplates_Empty(t *testing.T) {
+	cfg, err := parseMessageTemplates("")
+	if err != nil {
+		t.Fatalf("empty string should not error: %v", err)
+	}
+	if cfg != (MessageTemplates{}) {
+		t.Errorf("expected zero-value templates, got %+v", cfg)
 	}
 }
 
