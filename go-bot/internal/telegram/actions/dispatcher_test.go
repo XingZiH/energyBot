@@ -333,8 +333,8 @@ func TestDispatch_Routing(t *testing.T) {
 		if got := msg.rows[3][0].Text; got != "🔙 返回" {
 			t.Errorf("back text: got %q", got)
 		}
-		if got := msg.rows[3][0].CallbackData; got != "menu:back" {
-			t.Errorf("back callback_data: got %q", got)
+		if got := msg.rows[3][0].CallbackData; got != "menu:back:" {
+			t.Errorf("back callback_data: got %q (want %q, 套餐组 spec.Path 空 → parent 空 → menu:back:)", got, "menu:back:")
 		}
 	})
 
@@ -442,8 +442,8 @@ func TestDispatch_Routing(t *testing.T) {
 		if got := msg.rows[2][0].Text; got != "🔙 返回" {
 			t.Errorf("back button text: got %q", got)
 		}
-		if got := msg.rows[2][0].CallbackData; got != "menu:back" {
-			t.Errorf("back button callback_data: got %q", got)
+		if got := msg.rows[2][0].CallbackData; got != "menu:back:" {
+			t.Errorf("back button callback_data: got %q (want %q, spec.Path=row0.btn1 → parent 空 → menu:back:)", got, "menu:back:")
 		}
 	})
 
@@ -847,8 +847,8 @@ func TestDispatch_PackageGroup_Sorting(t *testing.T) {
 						c.wantDesc, i, want, got[i][1], got)
 				}
 			}
-			// 最后一行：返回按钮
-			if got[len(c.wantCBs)][1] != "menu:back" {
+			// 最后一行：返回按钮（套餐组 spec.Path 空 → parent 空 → "menu:back:"）
+			if got[len(c.wantCBs)][1] != "menu:back:" {
 				t.Errorf("[%s] last row should be back, got %q", c.wantDesc, got[len(c.wantCBs)][1])
 			}
 		})
@@ -1151,6 +1151,118 @@ func TestFilterOrderByIDs(t *testing.T) {
 		got := filterOrderByIDs(packages, []int{99, 100})
 		if len(got) != 0 {
 			t.Errorf("want empty, got %v", got)
+		}
+	})
+}
+
+// TestParentOfPath 验证 menu path 父路径计算。
+// 约定（任务 8）：path 由 ".rowI.btnJ" 段串联，剥离最后一段得父路径；根层单段父为空串。
+func TestParentOfPath(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"根层单段", "row0.btn1", ""},
+		{"二级嵌套", "row0.btn1.row0.btn2", "row0.btn1"},
+		{"三级嵌套", "row1.btn0.row2.btn3.row0.btn1", "row1.btn0.row2.btn3"},
+		{"空串", "", ""},
+		{"空白字符串", "   ", ""},
+		{"无 .row 前缀的脏数据", "xyz", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := parentOfPath(c.in); got != c.want {
+				t.Errorf("parentOfPath(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestBuildBackCallbackData 验证返回按钮 callback_data 的构造。
+func TestBuildBackCallbackData(t *testing.T) {
+	t.Run("空父路径 → menu:back:", func(t *testing.T) {
+		got, err := buildBackCallbackData("")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "menu:back:" {
+			t.Errorf("got %q, want %q", got, "menu:back:")
+		}
+	})
+	t.Run("非空父路径", func(t *testing.T) {
+		got, err := buildBackCallbackData("row0.btn1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "menu:back:row0.btn1" {
+			t.Errorf("got %q, want %q", got, "menu:back:row0.btn1")
+		}
+	})
+	t.Run("超长父路径触发 ErrCallbackTooLong", func(t *testing.T) {
+		// 64 - len("menu:back:") = 54，构造 55 字节的父路径
+		long := strings.Repeat("a", 55)
+		_, err := buildBackCallbackData(long)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !errors.Is(err, ErrCallbackTooLong) {
+			t.Errorf("want ErrCallbackTooLong, got %v", err)
+		}
+	})
+}
+
+// TestDispatch_Submenu_BackDataParentPath 补充：
+//   - 根层 submenu（Path="row0.btn1"）→ back callback "menu:back:"（返回根）
+//   - 深层 submenu（Path="row0.btn1.row0.btn2"）→ back callback "menu:back:row0.btn1"（退回上一级 submenu）
+func TestDispatch_Submenu_BackDataParentPath(t *testing.T) {
+	const chatID int64 = 42
+
+	t.Run("根层 submenu 返回指向根", func(t *testing.T) {
+		bot := &mockBot{}
+		d := NewDispatcher(bot)
+		err := d.Dispatch(context.Background(), chatID, ButtonSpec{
+			Action: ActionSubmenu,
+			Text:   "请选择",
+			Path:   "row0.btn1",
+			Submenu: []RowSpec{
+				{Buttons: []ButtonSpec{{Action: ActionText, Text: "A", Message: "a"}}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		msg, ok := bot.lastInline()
+		if !ok {
+			t.Fatal("expected inline message")
+		}
+		back := msg.rows[len(msg.rows)-1][0]
+		if back.CallbackData != "menu:back:" {
+			t.Errorf("back callback_data: got %q, want %q", back.CallbackData, "menu:back:")
+		}
+	})
+
+	t.Run("二级 submenu 返回指向父 submenu", func(t *testing.T) {
+		bot := &mockBot{}
+		d := NewDispatcher(bot)
+		err := d.Dispatch(context.Background(), chatID, ButtonSpec{
+			Action: ActionSubmenu,
+			Text:   "二级",
+			Path:   "row0.btn1.row0.btn2",
+			Submenu: []RowSpec{
+				{Buttons: []ButtonSpec{{Action: ActionText, Text: "A", Message: "a"}}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		msg, ok := bot.lastInline()
+		if !ok {
+			t.Fatal("expected inline message")
+		}
+		back := msg.rows[len(msg.rows)-1][0]
+		if back.CallbackData != "menu:back:row0.btn1" {
+			t.Errorf("back callback_data: got %q, want %q", back.CallbackData, "menu:back:row0.btn1")
 		}
 	})
 }

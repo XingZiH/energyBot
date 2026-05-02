@@ -131,3 +131,115 @@ func TestMarshalRoundtrip(t *testing.T) {
 		t.Errorf("URL field lost: %+v", parsed)
 	}
 }
+
+// TestResolveMenuPath 覆盖路径定位的 5 个分支：根层命中、二级命中、越界、格式错、空路径。
+func TestResolveMenuPath(t *testing.T) {
+	rows := []DesignerMenuRow{
+		{Buttons: []DesignerMenuButton{
+			{Text: "A", Action: ActionText, Message: "ma"},
+			{Text: "B", Action: ActionSubmenu, Submenu: []DesignerMenuRow{
+				{Buttons: []DesignerMenuButton{
+					{Text: "B1", Action: ActionText, Message: "mb1"},
+					{Text: "B2", Action: ActionText, Message: "mb2"},
+				}},
+			}},
+		}},
+		{Buttons: []DesignerMenuButton{
+			{Text: "C", Action: ActionURL, URL: "https://c"},
+		}},
+	}
+
+	t.Run("根层按钮命中", func(t *testing.T) {
+		btn, ok := resolveMenuPath(rows, "row0.btn0")
+		if !ok {
+			t.Fatal("want ok=true")
+		}
+		if btn.Text != "A" {
+			t.Errorf("got text %q, want %q", btn.Text, "A")
+		}
+	})
+
+	t.Run("二级子按钮命中", func(t *testing.T) {
+		btn, ok := resolveMenuPath(rows, "row0.btn1.row0.btn1")
+		if !ok {
+			t.Fatal("want ok=true")
+		}
+		if btn.Text != "B2" {
+			t.Errorf("got text %q, want %q", btn.Text, "B2")
+		}
+	})
+
+	t.Run("第二行根层按钮", func(t *testing.T) {
+		btn, ok := resolveMenuPath(rows, "row1.btn0")
+		if !ok {
+			t.Fatal("want ok=true")
+		}
+		if btn.Text != "C" {
+			t.Errorf("got text %q, want %q", btn.Text, "C")
+		}
+	})
+
+	t.Run("行越界返回 false", func(t *testing.T) {
+		_, ok := resolveMenuPath(rows, "row9.btn0")
+		if ok {
+			t.Error("want ok=false")
+		}
+	})
+
+	t.Run("按钮越界返回 false", func(t *testing.T) {
+		_, ok := resolveMenuPath(rows, "row0.btn9")
+		if ok {
+			t.Error("want ok=false")
+		}
+	})
+
+	t.Run("二级路径在无 submenu 的按钮上", func(t *testing.T) {
+		// A 没有 submenu，深入 row0.btn0.rowX.btnY 必定越界
+		_, ok := resolveMenuPath(rows, "row0.btn0.row0.btn0")
+		if ok {
+			t.Error("want ok=false（A 没有 submenu）")
+		}
+	})
+
+	t.Run("格式错误：非 row/btn 前缀", func(t *testing.T) {
+		_, ok := resolveMenuPath(rows, "xyz.abc")
+		if ok {
+			t.Error("want ok=false")
+		}
+	})
+
+	t.Run("格式错误：段数为奇数", func(t *testing.T) {
+		_, ok := resolveMenuPath(rows, "row0")
+		if ok {
+			t.Error("want ok=false")
+		}
+	})
+
+	t.Run("格式错误：非数字索引", func(t *testing.T) {
+		_, ok := resolveMenuPath(rows, "rowA.btn0")
+		if ok {
+			t.Error("want ok=false")
+		}
+	})
+
+	t.Run("空 path", func(t *testing.T) {
+		_, ok := resolveMenuPath(rows, "")
+		if ok {
+			t.Error("want ok=false")
+		}
+	})
+
+	t.Run("空白 path", func(t *testing.T) {
+		_, ok := resolveMenuPath(rows, "   ")
+		if ok {
+			t.Error("want ok=false")
+		}
+	})
+
+	t.Run("nil rows + 非空 path", func(t *testing.T) {
+		_, ok := resolveMenuPath(nil, "row0.btn0")
+		if ok {
+			t.Error("want ok=false")
+		}
+	})
+}

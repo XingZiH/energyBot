@@ -14,6 +14,7 @@ package telegram
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -125,4 +126,47 @@ func parseMessageTemplates(raw string) (MessageTemplates, error) {
 		return MessageTemplates{}, fmt.Errorf("message_config 非法 JSON: %w", err)
 	}
 	return tpl, nil
+}
+
+// resolveMenuPath 按 path 在嵌套 MenuRows 中定位按钮。
+//
+// path 格式约定（任务 8、任务 11）：
+//
+//	"row{i}.btn{j}"                              // 根层按钮
+//	"row{i}.btn{j}.row{k}.btn{l}"                // 二级（submenu 内）
+//	"row{i}.btn{j}.row{k}.btn{l}.row{m}.btn{n}"  // 三级（MaxMenuDepth=3 封顶）
+//
+// 返回定位到的按钮和 ok=true；任何格式/越界/字段异常都返回零值 + false，不 panic。
+//
+// 纯函数，无副作用，可在单测中独立验证。
+func resolveMenuPath(rows []DesignerMenuRow, path string) (DesignerMenuButton, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return DesignerMenuButton{}, false
+	}
+	segments := strings.Split(path, ".")
+	// 段数必须是偶数（row / btn 成对）。
+	if len(segments) == 0 || len(segments)%2 != 0 {
+		return DesignerMenuButton{}, false
+	}
+	currentRows := rows
+	var current DesignerMenuButton
+	for i := 0; i < len(segments); i += 2 {
+		rowSeg := segments[i]
+		btnSeg := segments[i+1]
+		if !strings.HasPrefix(rowSeg, "row") || !strings.HasPrefix(btnSeg, "btn") {
+			return DesignerMenuButton{}, false
+		}
+		rowIdx, err := strconv.Atoi(strings.TrimPrefix(rowSeg, "row"))
+		if err != nil || rowIdx < 0 || rowIdx >= len(currentRows) {
+			return DesignerMenuButton{}, false
+		}
+		btnIdx, err := strconv.Atoi(strings.TrimPrefix(btnSeg, "btn"))
+		if err != nil || btnIdx < 0 || btnIdx >= len(currentRows[rowIdx].Buttons) {
+			return DesignerMenuButton{}, false
+		}
+		current = currentRows[rowIdx].Buttons[btnIdx]
+		currentRows = current.Submenu
+	}
+	return current, true
 }

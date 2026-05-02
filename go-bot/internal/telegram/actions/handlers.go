@@ -23,9 +23,17 @@ const (
 	// 任务 11 的 callback_query 处理器通过此前缀识别 v2 菜单点击事件。
 	callbackPrefix = "menu:"
 
-	// callbackBack 是"返回上一级"按钮的 callback_data。
-	// 任务 11 接入时通过此常量识别返回意图（无需携带父 path，由会话状态回退）。
-	callbackBack = "menu:back"
+	// callbackBackPrefix 是"返回上一级"按钮 callback_data 的前缀。
+	//
+	// 完整格式：menu:back:<parentPath>
+	//   - parentPath 为父 submenu 触发按钮自身 Path 的父路径（见 parentOfPath）。
+	//   - 特例：根菜单下的 submenu 按钮触发，parentPath 为空字符串 →
+	//     callback_data = "menu:back:"（解析时空父路径视为"返回根菜单"，
+	//     由 bot.go:navigateToMenuPath 调用 sendPackageMenu）。
+	//
+	// 设计动机：v2 菜单是无状态分发，返回按钮必须自带目标路径，才能在 callback_query
+	// 中重新定位按钮并重新展开；不依赖任何会话存储。
+	callbackBackPrefix = "menu:back:"
 
 	// callbackMaxBytes 是 Telegram Bot API 对 callback_data 的协议硬限：1-64 字节。
 	// 参见 https://core.telegram.org/bots/api#inlinekeyboardbutton
@@ -66,6 +74,41 @@ const (
 // 若最终字节数超过 callbackMaxBytes 则返回 ErrCallbackTooLong（包装了具体字节数和完整字符串）。
 func buildCallbackData(parentPath string, childRow, childBtn int) (string, error) {
 	s := fmt.Sprintf("%s%s.row%d.btn%d", callbackPrefix, parentPath, childRow, childBtn)
+	if len(s) > callbackMaxBytes {
+		return "", fmt.Errorf("%w: %d 字节（上限 %d）: %s", ErrCallbackTooLong, len(s), callbackMaxBytes, s)
+	}
+	return s, nil
+}
+
+// parentOfPath 返回一个 menu path 的父路径。
+//
+// 约定（任务 8）：path 由 ".row{i}.btn{j}" 段拼接而成，例如：
+//   - "row0.btn1" → ""（父为根，空串）
+//   - "row0.btn1.row0.btn2" → "row0.btn1"
+//   - "" → ""（已经在根，父仍为根）
+//
+// 实现：剥离最后一个 ".row" 之后的内容即可得到父路径。
+// 找不到 ".row" 说明是顶层单段（如 "row0.btn1"），父为根，返回空串。
+func parentOfPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	idx := strings.LastIndex(path, ".row")
+	if idx < 0 {
+		// 顶层单段（"rowI.btnJ"），父是根。
+		return ""
+	}
+	return path[:idx]
+}
+
+// buildBackCallbackData 构造返回按钮的 callback_data。
+//
+// parentPath 为空时返回 "menu:back:"（代表返回根菜单）。
+// 长度超过 64 字节返回 ErrCallbackTooLong；实际上 parentPath 总是子 path 的前缀，
+// 而子 path 已经通过 buildCallbackData 的长度校验，因此这里几乎不会触发。
+func buildBackCallbackData(parentPath string) (string, error) {
+	s := callbackBackPrefix + parentPath
 	if len(s) > callbackMaxBytes {
 		return "", fmt.Errorf("%w: %d 字节（上限 %d）: %s", ErrCallbackTooLong, len(s), callbackMaxBytes, s)
 	}
@@ -113,7 +156,7 @@ func (d *Dispatcher) handleStart(ctx context.Context, chatID int64, _ ButtonSpec
 //   - 遍历 spec.Submenu 每行每按钮，生成 InlineButton{Text, CallbackData}
 //   - CallbackData = "menu:<spec.Path>.row{i}.btn{j}"，超过 64 字节返回 ErrCallbackTooLong
 //   - 按钮 Text 为空/全空白时回落为 "(未命名)"
-//   - 末尾自动追加一行 "🔙 返回"（callback_data = "menu:back"）
+//   - 末尾自动追加一行 "🔙 返回"（callback_data = "menu:back:<parentOfPath(spec.Path)>"）
 //   - 消息文本用 spec.Text；为空时回落为 "请选择："
 //
 // 严格无状态：callback_data 完整自包含 path 信息，任务 11 解析后重新加载 menu_config 查按钮。
@@ -142,8 +185,12 @@ func (d *Dispatcher) handleSubmenu(ctx context.Context, chatID int64, spec Butto
 		rows = append(rows, line)
 	}
 
-	// 追加返回按钮：单独一行。
-	rows = append(rows, []InlineButton{{Text: submenuBackText, CallbackData: callbackBack}})
+	// 追加返回按钮：单独一行。callback_data 携带父路径（根层 → 空）。
+	backData, err := buildBackCallbackData(parentOfPath(spec.Path))
+	if err != nil {
+		return err
+	}
+	rows = append(rows, []InlineButton{{Text: submenuBackText, CallbackData: backData}})
 
 	prompt := strings.TrimSpace(spec.Text)
 	if prompt == "" {
@@ -161,7 +208,8 @@ func (d *Dispatcher) handleSubmenu(ctx context.Context, chatID int64, spec Butto
 //  3. 对每个套餐用 spec.PackageGroup.TextTemplate 渲染按钮文本
 //     （空模板回落 "{name} - {price} TRX"）
 //  4. 组装 Inline Keyboard 每行 1 按钮，callback_data = "pkg:<packageId>"
-//  5. 末尾追加 "🔙 返回"（callback_data = "menu:back"），与 submenu 共用返回语义
+//  5. 末尾追加 "🔙 返回"（callback_data = "menu:back:<parentOfPath(spec.Path)>"），
+//     与 submenu 共用返回语义；spec.Path 为空（根菜单直接挂套餐组）时回落 "menu:back:"（返回根）
 //
 // 错误处理：
 //   - LoadPackagesByIDs 返回 error：原样冒泡
@@ -214,7 +262,13 @@ func (d *Dispatcher) handleEnergyPackageGroup(ctx context.Context, chatID int64,
 			CallbackData: fmt.Sprintf("%s%d", callbackPackagePrefix, pkg.ID),
 		}})
 	}
-	rows = append(rows, []InlineButton{{Text: submenuBackText, CallbackData: callbackBack}})
+	// 套餐组不强校验 spec.Path：根菜单挂载时 Path 可能为空，此时
+	// parentOfPath("") 仍为 ""，返回按钮 callback_data = "menu:back:"（返回根）。
+	backData, err := buildBackCallbackData(parentOfPath(spec.Path))
+	if err != nil {
+		return err
+	}
+	rows = append(rows, []InlineButton{{Text: submenuBackText, CallbackData: backData}})
 
 	return d.bot.SendMessageWithInline(ctx, chatID, packageGroupPrompt, rows)
 }

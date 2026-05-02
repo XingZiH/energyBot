@@ -478,6 +478,23 @@ func (b *Bot) handleCallback(ctx context.Context, query CallbackQuery) error {
 		}
 		packages, _ := b.listPackages(ctx)
 		return b.sendMessage(ctx, chatID, order.PaymentText, mainReplyKeyboard(packages))
+	case strings.HasPrefix(query.Data, "menu:back:"):
+		// v2 返回按钮：callback_data = "menu:back:<parentPath>"（见 actions/handlers.go 常量）。
+		// parentPath 空 → 返回根菜单；非空 → 重新定位并 Dispatch 父按钮（重新展开父 submenu）。
+		// 必须排在 "menu:" 分支之前，否则会被更长前缀的 `menu:` 误捕获。
+		parentPath := strings.TrimPrefix(query.Data, "menu:back:")
+		if err := b.answerCallback(ctx, query.ID, "返回"); err != nil {
+			return err
+		}
+		return b.navigateToMenuPath(ctx, chatID, parentPath)
+	case strings.HasPrefix(query.Data, "menu:"):
+		// v2 子菜单按钮点击：callback_data = "menu:<path>"（path 形如 "row0.btn1.row0.btn2"）。
+		// 通过 resolveMenuPath 在当前 menu_config 中定位按钮，再交由 Dispatcher 分发。
+		path := strings.TrimPrefix(query.Data, "menu:")
+		if err := b.answerCallback(ctx, query.ID, ""); err != nil {
+			return err
+		}
+		return b.dispatchMenuPath(ctx, chatID, path)
 	case strings.HasPrefix(query.Data, "pkg:"):
 		rawID := strings.TrimPrefix(query.Data, "pkg:")
 		packageID, err := strconv.Atoi(rawID)
@@ -544,6 +561,48 @@ func (b *Bot) handleCustomMenuButton(ctx context.Context, chatID int64, text str
 		b.logger.Printf("dispatch designer button failed: %v", err)
 	}
 	return true
+}
+
+// navigateToMenuPath 重新展示某个 menu path 对应的内容。
+//
+// 语义：
+//   - path 为空（trim 后）：返回根菜单（sendPackageMenu）；
+//     对应 "menu:back:" 和根层 submenu 的返回语义。
+//   - path 非空：走 dispatchMenuPath，重新定位并 Dispatch 该路径的按钮；
+//     常见场景是该按钮本身是 submenu / energy_package_group，Dispatch 会重新展开它。
+func (b *Bot) navigateToMenuPath(ctx context.Context, chatID int64, path string) error {
+	if strings.TrimSpace(path) == "" {
+		return b.sendPackageMenu(ctx, chatID)
+	}
+	return b.dispatchMenuPath(ctx, chatID, path)
+}
+
+// dispatchMenuPath 解析 menu path 定位按钮并通过 Dispatcher 分发。
+//
+// 行为：
+//   - 加载设计器配置；失败 → 发送兜底文本 "菜单配置加载失败"
+//   - resolveMenuPath 解析失败（格式/越界/按钮已移除）→ 发送 "按钮已失效，请重新打开菜单"
+//   - dispatcher 为 nil（防御性）→ 仅记日志，不发消息
+//   - 其他情况：buildButtonSpec → dispatcher.Dispatch
+//
+// path 格式见 resolveMenuPath 文档。
+func (b *Bot) dispatchMenuPath(ctx context.Context, chatID int64, path string) error {
+	config, err := b.loadDesignerConfig(ctx)
+	if err != nil {
+		b.logger.Printf("load designer config for path %q failed: %v", path, err)
+		return b.sendMessage(ctx, chatID, "菜单配置加载失败", nil)
+	}
+	button, ok := resolveMenuPath(config.MenuRows, path)
+	if !ok {
+		b.logger.Printf("menu path %q not found in config", path)
+		return b.sendMessage(ctx, chatID, "按钮已失效，请重新打开菜单", nil)
+	}
+	if b.dispatcher == nil {
+		b.logger.Printf("dispatcher is nil, cannot navigate to %q", path)
+		return nil
+	}
+	spec := buildButtonSpec(button, path)
+	return b.dispatcher.Dispatch(ctx, chatID, spec)
 }
 
 func (b *Bot) handlePackageButton(ctx context.Context, chatID int64, text string) bool {
