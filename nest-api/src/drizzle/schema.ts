@@ -140,6 +140,9 @@ export const agentBotConfigsTable = pgTable('agent_bot_configs', {
     .default('disabled'),
   telegramBotToken: text('telegram_bot_token'),
   telegramBotUsername: varchar('telegram_bot_username', { length: 128 }),
+  welcomeText: text('welcome_text'),
+  messageConfig: text('message_config'),
+  menuConfig: text('menu_config'),
   remark: text(),
   ...timestamps,
 });
@@ -248,6 +251,9 @@ export const energyPlatformConfigTable = pgTable('energy_platform_config', {
     .notNull()
     .default('disabled'),
   telegramBotToken: text('telegram_bot_token'),
+  welcomeText: text('welcome_text'),
+  messageConfig: text('message_config'),
+  menuConfig: text('menu_config'),
   tronApiBaseUrl: varchar('tron_api_base_url', { length: 255 })
     .notNull()
     .default('https://api.trongrid.io'),

@@ -74,6 +74,27 @@ type WalletSnapshot struct {
 	Activated                  bool
 }
 
+type BotDesignerConfig struct {
+	WelcomeText   string
+	MessageConfig map[string]string
+	MenuRows      []DesignerMenuRow
+}
+
+type DesignerMenuRow struct {
+	ID      string               `json:"id"`
+	Buttons []DesignerMenuButton `json:"buttons"`
+}
+
+type DesignerMenuButton struct {
+	ID        string `json:"id"`
+	Text      string `json:"text"`
+	Action    string `json:"action"`
+	PackageID int    `json:"packageId"`
+	URL       string `json:"url"`
+	Message   string `json:"message"`
+	Command   string `json:"command"`
+}
+
 type tronAddressRequest struct {
 	Address string `json:"address"`
 	Visible bool   `json:"visible"`
@@ -326,6 +347,8 @@ func (b *Bot) handleMessage(ctx context.Context, message Message) error {
 		return b.handleAddressInput(ctx, message.Chat.ID, text)
 	case isMenuCommand(text):
 		return b.sendPackageMenu(ctx, message.Chat.ID)
+	case b.handleCustomMenuButton(ctx, message.Chat.ID, text):
+		return nil
 	case isAddressButton(text):
 		return b.sendAddressManagement(ctx, message.Chat.ID)
 	case isWalletButton(text):
@@ -471,11 +494,75 @@ func (b *Bot) sendPackageMenu(ctx context.Context, chatID int64) error {
 	if err != nil {
 		return err
 	}
+	designerConfig, _ := b.loadDesignerConfig(ctx)
 	if len(packages) == 0 {
-		return b.sendMessage(ctx, chatID, "当前没有启用的能量套餐，请联系管理员。", mainReplyKeyboard(nil))
+		text := designerConfig.MessageConfig["noPackage"]
+		if strings.TrimSpace(text) == "" {
+			text = "当前没有启用的能量套餐，请联系管理员。"
+		}
+		return b.sendMessage(ctx, chatID, text, designerConfig.replyKeyboard(packages))
+	}
+	if designerConfig.hasCustomMenu() {
+		text := strings.TrimSpace(designerConfig.WelcomeText)
+		if text == "" {
+			text = packageMenuText(packages, b.orderPaymentTTL)
+		}
+		return b.sendMessage(ctx, chatID, text, designerConfig.replyKeyboard(packages))
 	}
 
 	return b.sendMessage(ctx, chatID, packageMenuText(packages, b.orderPaymentTTL), mainReplyKeyboard(packages))
+}
+
+func (b *Bot) handleCustomMenuButton(ctx context.Context, chatID int64, text string) bool {
+	designerConfig, err := b.loadDesignerConfig(ctx)
+	if err != nil || !designerConfig.hasCustomMenu() {
+		return false
+	}
+	button, ok := designerConfig.findButton(text, b.packageButtonTextByID(ctx))
+	if !ok {
+		return false
+	}
+	if err := b.executeDesignerButton(ctx, chatID, button); err != nil {
+		b.logger.Printf("execute designer button failed: %v", err)
+	}
+	return true
+}
+
+func (b *Bot) executeDesignerButton(ctx context.Context, chatID int64, button DesignerMenuButton) error {
+	switch strings.TrimSpace(button.Action) {
+	case "package":
+		if button.PackageID <= 0 {
+			return b.sendPackageMenu(ctx, chatID)
+		}
+		pkg, err := b.findPackage(ctx, button.PackageID)
+		if err != nil {
+			return b.sendMessage(ctx, chatID, "套餐不存在或已下架，请重新选择。", nil)
+		}
+		return b.sendAddressSelection(ctx, chatID, pkg)
+	case "address":
+		return b.sendAddressManagement(ctx, chatID)
+	case "wallet":
+		return b.sendWalletQueryMenu(ctx, chatID)
+	case "text":
+		message := strings.TrimSpace(button.Message)
+		if message == "" {
+			message = "已收到。"
+		}
+		return b.sendMessage(ctx, chatID, message, nil)
+	case "url":
+		url := strings.TrimSpace(button.URL)
+		if url == "" {
+			url = "链接暂未配置。"
+		}
+		return b.sendMessage(ctx, chatID, url, nil)
+	case "start", "refresh":
+		return b.sendPackageMenu(ctx, chatID)
+	default:
+		if strings.TrimSpace(button.Command) == "/start" {
+			return b.sendPackageMenu(ctx, chatID)
+		}
+		return b.sendMessage(ctx, chatID, "暂不支持该按钮动作。", nil)
+	}
 }
 
 func (b *Bot) handlePackageButton(ctx context.Context, chatID int64, text string) bool {
@@ -494,6 +581,47 @@ func (b *Bot) handlePackageButton(ctx context.Context, chatID int64, text string
 		}
 	}
 	return false
+}
+
+func (b *Bot) packageButtonTextByID(ctx context.Context) map[int]string {
+	packages, err := b.listPackages(ctx)
+	if err != nil {
+		return nil
+	}
+	result := make(map[int]string, len(packages))
+	for _, pkg := range packages {
+		result[pkg.ID] = packageButtonText(pkg)
+	}
+	return result
+}
+
+func (b *Bot) loadDesignerConfig(ctx context.Context) (BotDesignerConfig, error) {
+	var welcomeText, messageConfigRaw, menuConfigRaw string
+	var err error
+	if b.agentID > 0 {
+		err = b.db.QueryRow(ctx, `
+select coalesce(welcome_text, ''), coalesce(message_config, ''), coalesce(menu_config, '')
+from agent_bot_configs
+where agent_id = $1
+  and deleted_at is null
+limit 1`, b.agentID).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
+	} else {
+		err = b.db.QueryRow(ctx, `
+select coalesce(welcome_text, ''), coalesce(message_config, ''), coalesce(menu_config, '')
+from energy_platform_config
+where id = 1
+  and deleted_at is null
+limit 1`).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
+	}
+	if err != nil {
+		return BotDesignerConfig{}, err
+	}
+	config := BotDesignerConfig{
+		WelcomeText:   strings.TrimSpace(welcomeText),
+		MessageConfig: parseMessageConfig(messageConfigRaw),
+		MenuRows:      parseMenuRows(menuConfigRaw),
+	}
+	return config, nil
 }
 
 func (b *Bot) sendAddressSelection(ctx context.Context, chatID int64, pkg EnergyPackage) error {
@@ -1159,6 +1287,119 @@ func mainReplyKeyboard(packages []EnergyPackage) *replyKeyboardMarkup {
 		IsPersistent:          true,
 		InputFieldPlaceholder: "请输入接收能量的 TRON 地址",
 	}
+}
+
+func (c BotDesignerConfig) hasCustomMenu() bool {
+	for _, row := range c.MenuRows {
+		if len(row.Buttons) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (c BotDesignerConfig) replyKeyboard(packages []EnergyPackage) *replyKeyboardMarkup {
+	if !c.hasCustomMenu() {
+		return mainReplyKeyboard(packages)
+	}
+	packageTextByID := make(map[int]string, len(packages))
+	for _, pkg := range packages {
+		packageTextByID[pkg.ID] = packageButtonText(pkg)
+	}
+	rows := make([][]keyboardButton, 0, len(c.MenuRows))
+	for _, menuRow := range c.MenuRows {
+		row := make([]keyboardButton, 0, len(menuRow.Buttons))
+		for _, button := range menuRow.Buttons {
+			text := designerButtonText(button, packageTextByID)
+			if text == "" {
+				continue
+			}
+			row = append(row, keyboardButton{Text: text})
+		}
+		if len(row) > 0 {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		return mainReplyKeyboard(packages)
+	}
+	return &replyKeyboardMarkup{
+		Keyboard:              rows,
+		ResizeKeyboard:        true,
+		IsPersistent:          true,
+		InputFieldPlaceholder: "请输入接收能量的 TRON 地址",
+	}
+}
+
+func (c BotDesignerConfig) findButton(text string, packageTextByID map[int]string) (DesignerMenuButton, bool) {
+	text = strings.TrimSpace(text)
+	for _, row := range c.MenuRows {
+		for _, button := range row.Buttons {
+			if strings.EqualFold(text, designerButtonText(button, packageTextByID)) {
+				return button, true
+			}
+		}
+	}
+	return DesignerMenuButton{}, false
+}
+
+func designerButtonText(button DesignerMenuButton, packageTextByID map[int]string) string {
+	text := strings.TrimSpace(button.Text)
+	if text != "" {
+		return text
+	}
+	if strings.TrimSpace(button.Action) == "package" && button.PackageID > 0 {
+		if packageTextByID != nil {
+			if packageText := strings.TrimSpace(packageTextByID[button.PackageID]); packageText != "" {
+				return packageText
+			}
+		}
+		return fmt.Sprintf("套餐 %d", button.PackageID)
+	}
+	switch strings.TrimSpace(button.Action) {
+	case "address":
+		return buttonAddress
+	case "wallet":
+		return buttonWallet
+	case "text":
+		return "提示"
+	case "url":
+		return "链接"
+	case "start":
+		return "首页"
+	case "refresh":
+		return buttonRefresh
+	default:
+		return ""
+	}
+}
+
+func parseMessageConfig(raw string) map[string]string {
+	config := map[string]string{}
+	if strings.TrimSpace(raw) == "" {
+		return config
+	}
+	_ = json.Unmarshal([]byte(raw), &config)
+	return config
+}
+
+func parseMenuRows(raw string) []DesignerMenuRow {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var rows []DesignerMenuRow
+	if err := json.Unmarshal([]byte(raw), &rows); err == nil {
+		return rows
+	}
+	var buttons []DesignerMenuButton
+	if err := json.Unmarshal([]byte(raw), &buttons); err != nil {
+		return nil
+	}
+	legacyRows := make([]DesignerMenuRow, 0, len(buttons))
+	for _, button := range buttons {
+		legacyRows = append(legacyRows, DesignerMenuRow{Buttons: []DesignerMenuButton{button}})
+	}
+	return legacyRows
 }
 
 func packageButtonText(pkg EnergyPackage) string {

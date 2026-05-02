@@ -1,5 +1,10 @@
 # See https://docs.github.com/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
 
+# Claude Code / OpenCode 本地配置
+.claude/
+CLAUDE.md
+
+
 # Compiled output
 ui/dist
 ui/tmp

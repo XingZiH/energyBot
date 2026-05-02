@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS public.agent_bot_configs (
   bot_status varchar(32) NOT NULL DEFAULT 'disabled',
   telegram_bot_token text,
   telegram_bot_username varchar(128),
+  welcome_text text,
+  message_config text,
+  menu_config text,
   remark text,
   updated_at timestamp,
   created_at timestamp NOT NULL DEFAULT now(),
@@ -160,6 +163,11 @@ ALTER TABLE public.agent_recharge_orders
   ADD COLUMN IF NOT EXISTS bitcart_sent_amount numeric(36, 18),
   ADD COLUMN IF NOT EXISTS bitcart_paid_currency varchar(32);
 
+ALTER TABLE public.agent_bot_configs
+  ADD COLUMN IF NOT EXISTS welcome_text text,
+  ADD COLUMN IF NOT EXISTS message_config text,
+  ADD COLUMN IF NOT EXISTS menu_config text;
+
 CREATE TABLE IF NOT EXISTS public.energy_return_tasks (
   id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   order_id integer NOT NULL,
@@ -180,6 +188,9 @@ CREATE TABLE IF NOT EXISTS public.energy_platform_config (
   id integer PRIMARY KEY DEFAULT 1,
   bot_status varchar(32) NOT NULL DEFAULT 'disabled',
   telegram_bot_token text,
+  welcome_text text,
+  message_config text,
+  menu_config text,
   tron_api_base_url varchar(255) NOT NULL DEFAULT 'https://api.trongrid.io',
   tron_api_key text,
   justlend_contract_address varchar(128),
@@ -259,6 +270,9 @@ ALTER TABLE public.energy_wallet_transactions
 
 ALTER TABLE public.energy_platform_config
   ADD COLUMN IF NOT EXISTS energy_provider varchar(32) NOT NULL DEFAULT 'justlend',
+  ADD COLUMN IF NOT EXISTS welcome_text text,
+  ADD COLUMN IF NOT EXISTS message_config text,
+  ADD COLUMN IF NOT EXISTS menu_config text,
   ADD COLUMN IF NOT EXISTS catfee_environment varchar(32) NOT NULL DEFAULT 'nile',
   ADD COLUMN IF NOT EXISTS catfee_prod_api_base_url varchar(255) NOT NULL DEFAULT 'https://api.catfee.io',
   ADD COLUMN IF NOT EXISTS catfee_prod_api_key text,

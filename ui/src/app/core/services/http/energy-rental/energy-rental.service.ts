@@ -202,6 +202,9 @@ export interface AgentBotConfig {
   telegramBotToken: string;
   telegramBotTokenConfigured: boolean;
   telegramBotUsername: string;
+  welcomeText?: string;
+  messageConfig?: string;
+  menuConfig?: string;
   remark?: string;
 }
 

@@ -764,6 +764,9 @@ export class EnergyRentalService {
         telegramBotToken: '',
         telegramBotTokenConfigured: hasValue(row?.telegramBotToken),
         telegramBotUsername: '',
+        welcomeText: row?.welcomeText ?? '',
+        messageConfig: row?.messageConfig ?? '',
+        menuConfig: row?.menuConfig ?? '',
         remark: '',
       };
     }
@@ -776,6 +779,9 @@ export class EnergyRentalService {
       telegramBotToken: '',
       telegramBotTokenConfigured: hasValue(row?.telegramBotToken),
       telegramBotUsername: row?.telegramBotUsername ?? '',
+      welcomeText: row?.welcomeText ?? '',
+      messageConfig: row?.messageConfig ?? '',
+      menuConfig: row?.menuConfig ?? '',
       remark: row?.remark ?? '',
     };
   }
@@ -787,6 +793,9 @@ export class EnergyRentalService {
       const values: Row = {};
       setTrimmed(values, 'botStatus', data.botStatus);
       setSecret(values, 'telegramBotToken', data.telegramBotToken);
+      setTrimmed(values, 'welcomeText', data.welcomeText);
+      setTrimmed(values, 'messageConfig', data.messageConfig);
+      setTrimmed(values, 'menuConfig', data.menuConfig);
 
       if (current) {
         await this.conn
@@ -805,6 +814,9 @@ export class EnergyRentalService {
     setTrimmed(values, 'botStatus', data.botStatus);
     setSecret(values, 'telegramBotToken', data.telegramBotToken);
     setTrimmed(values, 'telegramBotUsername', data.telegramBotUsername);
+    setTrimmed(values, 'welcomeText', data.welcomeText);
+    setTrimmed(values, 'messageConfig', data.messageConfig);
+    setTrimmed(values, 'menuConfig', data.menuConfig);
     setTrimmed(values, 'remark', data.remark);
 
     const rows = await this.getRows<Row>(agentBotConfigsTable);

@@ -420,6 +420,21 @@ export class UpdateAgentBotConfigDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  welcomeText?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  messageConfig?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  menuConfig?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
   remark?: string;
 }
 
