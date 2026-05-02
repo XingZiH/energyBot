@@ -1,14 +1,25 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { throwError } from 'rxjs';
+
+import { NZ_ICONS } from 'ng-zorro-antd/icon';
+import {
+  CheckCircleOutline,
+  CloseCircleOutline,
+  ExclamationCircleOutline,
+  EyeOutline,
+  InfoCircleOutline
+} from '@ant-design/icons-angular/icons';
 
 import { AgentBotConfig, BotRuntimeStatus, EnergyRentalService } from '@services/energy-rental/energy-rental.service';
 import { UiConfig, UiConfigService } from '@services/energy-rental/ui-config.service';
 import { of } from 'rxjs';
 
 import { EnergyRentalAgentBotConfigComponent } from './agent-bot-config.component';
-import type { MenuRow } from './designer/types';
+import { MessageTemplateEditorComponent } from './designer/message-template-editor/message-template-editor.component';
+import type { MenuRow, MessageTemplates } from './designer/types';
 
 /**
  * 组件单元测试（任务 22B）。
@@ -281,8 +292,236 @@ describe('EnergyRentalAgentBotConfigComponent', () => {
     expect(text).toContain('（30 秒前）');
   });
 
+  it('onTemplatesChange 调用 saveUiConfig，payload 保留当前 menu/welcomeText 并更新 messageConfig，且带 If-Unmodified-Since', () => {
+    component.ngOnInit();
+    const newTemplates: MessageTemplates = {
+      ...mockUiConfig.messageConfig,
+      welcome: '新欢迎文案',
+      orderCreated: '新订单文案'
+    };
+    component.onTemplatesChange(newTemplates);
+
+    expect(uiConfigService.saveUiConfig).toHaveBeenCalledTimes(1);
+    const [payload, ifUnmodifiedSince] = uiConfigService.saveUiConfig.calls.mostRecent().args;
+    expect(payload).toEqual({
+      welcomeText: mockUiConfig.welcomeText,
+      menuConfig: mockUiConfig.menuConfig,
+      messageConfig: newTemplates
+    });
+    expect(ifUnmodifiedSince).toBe(mockUiConfig.updatedAt);
+  });
+
+  it('onTemplatesChange 保存成功后 uiConfig.messageConfig 与 updatedAt 更新，且 initialMenu 不被影响', () => {
+    component.ngOnInit();
+    const originalMenuRef = component.initialMenu();
+    const newTemplates: MessageTemplates = {
+      ...mockUiConfig.messageConfig,
+      welcome: '更新后的欢迎'
+    };
+    component.onTemplatesChange(newTemplates);
+
+    const ui = component.uiConfig();
+    expect(ui?.messageConfig).toEqual(newTemplates);
+    expect(ui?.updatedAt).toBe('2026-05-02T11:00:00.000Z');
+    // 模板保存不应触发 initialMenu 重置（避免误触发 MenuDesigner 的 effect）
+    expect(component.initialMenu()).toBe(originalMenuRef);
+
+    // 乐观锁：下一次保存用新 updatedAt
+    component.onTemplatesChange({ ...newTemplates, welcome: '再次修改' });
+    const secondIfUnmodified = uiConfigService.saveUiConfig.calls.mostRecent().args[1];
+    expect(secondIfUnmodified).toBe('2026-05-02T11:00:00.000Z');
+  });
+
+  it('uiConfig 为 null 时 onTemplatesChange 直接返回不调 saveUiConfig', () => {
+    uiConfigService.getUiConfig.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 500 }))
+    );
+    component.ngOnInit();
+    expect(component.uiConfig()).toBeNull();
+
+    component.onTemplatesChange({
+      welcome: 'x',
+      orderCreated: '',
+      payPending: '',
+      paySuccess: '',
+      payFailed: '',
+      addressInvalid: '',
+      unknownCommand: '',
+      packageUnavailable: '',
+      walletQueryResult: ''
+    });
+    expect(uiConfigService.saveUiConfig).not.toHaveBeenCalled();
+  });
+
   // 防止 TS 未使用变量警告
   it('componentRef 可用', () => {
     expect(componentRef.instance).toBe(component);
+  });
+});
+
+/**
+ * 独立 describe：验证第 3 tab 在真实模板渲染下正确挂载 MessageTemplateEditor。
+ *
+ * 上面的主 describe 用 `overrideComponent({ set: { template: '' } })` 绕开了整套模板
+ * 渲染（因为 MenuDesigner 的依赖链会拖慢测试），只能断言组件方法行为。要验证模板里
+ * `<app-message-template-editor>` selector 真实存在，需要保留模板。这里通过：
+ * 1. 把模板替换成只含"第 3 tab 内容"的精简版（去掉 MenuDesigner、Tabs、表单等）；
+ * 2. 注入 NZ_ICONS provider 让 MessageTemplateEditor 的图标可渲染；
+ * 让真实 MessageTemplateEditor 挂载到 DOM，用 By.directive 查询。
+ */
+describe('EnergyRentalAgentBotConfigComponent 第 3 tab 模板集成', () => {
+  let dataService: jasmine.SpyObj<EnergyRentalService>;
+  let uiConfigService: jasmine.SpyObj<UiConfigService>;
+
+  const mockConfig: AgentBotConfig = {
+    scope: 'agent',
+    agentId: 42,
+    botStatus: 'enabled',
+    telegramBotToken: '',
+    telegramBotTokenConfigured: true,
+    telegramBotUsername: '@my_bot',
+    welcomeText: '',
+    menuConfig: '',
+    messageConfig: '',
+    remark: ''
+  };
+
+  const mockRuntime: BotRuntimeStatus = {
+    scope: 'agent',
+    agentId: 42,
+    desiredStatus: 'enabled',
+    desiredStatusLabel: '已启用',
+    serviceStatus: 'online',
+    serviceStatusLabel: '在线',
+    runtimeStatus: 'running',
+    pollingStatus: 'polling',
+    lastHeartbeatAt: null,
+    heartbeatAgeSeconds: null,
+    lastStartedAt: null,
+    lastStoppedAt: null,
+    lastError: '',
+    instanceId: 'inst-1',
+    telegramBotTokenConfigured: true,
+    canEnable: true
+  };
+
+  const mockUiConfig: UiConfig = {
+    welcomeText: 'w',
+    menuConfig: [{ id: 'row-1', buttons: [] }] as MenuRow[],
+    messageConfig: {
+      welcome: 'w',
+      orderCreated: 'oc',
+      payPending: 'pp',
+      paySuccess: 'ps',
+      payFailed: 'pf',
+      addressInvalid: 'ai',
+      unknownCommand: 'uc',
+      packageUnavailable: 'pu',
+      walletQueryResult: 'wqr'
+    },
+    updatedAt: '2026-05-02T10:00:00.000Z'
+  };
+
+  // 精简模板：只保留第 3 tab 的降级/渲染逻辑。MenuDesigner 不出现，避免 DI 爆炸。
+  const MINIMAL_TAB3_TEMPLATE = `
+    @if (uiConfigLoadError()) {
+      <nz-alert nzType="error" nzMessage="消息模板数据加载失败" data-testid="tpl-load-error"></nz-alert>
+    } @else if (uiConfig(); as ui) {
+      <app-message-template-editor
+        [initialTemplates]="ui.messageConfig"
+        (templatesChange)="onTemplatesChange($event)"
+      ></app-message-template-editor>
+    }
+  `;
+
+  beforeEach(() => {
+    dataService = jasmine.createSpyObj<EnergyRentalService>('EnergyRentalService', [
+      'getAgentBotConfig',
+      'updateAgentBotConfig',
+      'getBotRuntimeStatus',
+      'updateBotRuntimeStatus'
+    ]);
+    uiConfigService = jasmine.createSpyObj<UiConfigService>('UiConfigService', [
+      'getUiConfig',
+      'saveUiConfig'
+    ]);
+
+    dataService.getAgentBotConfig.and.returnValue(of(mockConfig));
+    dataService.getBotRuntimeStatus.and.returnValue(of(mockRuntime));
+    dataService.updateAgentBotConfig.and.returnValue(of(undefined));
+    dataService.updateBotRuntimeStatus.and.returnValue(of(undefined));
+    uiConfigService.getUiConfig.and.returnValue(of(mockUiConfig));
+    uiConfigService.saveUiConfig.and.returnValue(of({ updatedAt: '2026-05-02T11:00:00.000Z' }));
+
+    TestBed.configureTestingModule({
+      imports: [EnergyRentalAgentBotConfigComponent],
+      providers: [
+        { provide: EnergyRentalService, useValue: dataService },
+        { provide: UiConfigService, useValue: uiConfigService },
+        {
+          provide: NZ_ICONS,
+          useValue: [
+            CheckCircleOutline,
+            CloseCircleOutline,
+            ExclamationCircleOutline,
+            EyeOutline,
+            InfoCircleOutline
+          ]
+        }
+      ]
+    });
+
+    TestBed.overrideComponent(EnergyRentalAgentBotConfigComponent, {
+      set: { template: MINIMAL_TAB3_TEMPLATE }
+    });
+  });
+
+  it('uiConfig 加载成功时第 3 tab 真实渲染 MessageTemplateEditor', () => {
+    const fixture = TestBed.createComponent(EnergyRentalAgentBotConfigComponent);
+    fixture.detectChanges();
+
+    const editorDebug = fixture.debugElement.query(By.directive(MessageTemplateEditorComponent));
+    expect(editorDebug).toBeTruthy();
+    const editorInstance = editorDebug.componentInstance as MessageTemplateEditorComponent;
+    expect(editorInstance.initialTemplates()).toEqual(mockUiConfig.messageConfig);
+  });
+
+  it('uiConfig 加载失败时不渲染 editor，降级显示错误 alert', () => {
+    uiConfigService.getUiConfig.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 500 }))
+    );
+    const fixture = TestBed.createComponent(EnergyRentalAgentBotConfigComponent);
+    fixture.detectChanges();
+
+    const editorDebug = fixture.debugElement.query(By.directive(MessageTemplateEditorComponent));
+    expect(editorDebug).toBeNull();
+
+    const errorAlert = fixture.debugElement.query(By.css('[data-testid="tpl-load-error"]'));
+    expect(errorAlert).toBeTruthy();
+  });
+
+  it('MessageTemplateEditor 的 templatesChange 冒泡触发 saveUiConfig', () => {
+    const fixture = TestBed.createComponent(EnergyRentalAgentBotConfigComponent);
+    fixture.detectChanges();
+
+    const editorDebug = fixture.debugElement.query(By.directive(MessageTemplateEditorComponent));
+    expect(editorDebug).toBeTruthy();
+    const editorInstance = editorDebug.componentInstance as MessageTemplateEditorComponent;
+
+    const nextTemplates: MessageTemplates = {
+      ...mockUiConfig.messageConfig,
+      welcome: '来自 editor 的新值'
+    };
+    editorInstance.templatesChange.emit(nextTemplates);
+
+    expect(uiConfigService.saveUiConfig).toHaveBeenCalledTimes(1);
+    const [payload] = uiConfigService.saveUiConfig.calls.mostRecent().args;
+    expect(payload).toEqual(
+      jasmine.objectContaining({
+        welcomeText: mockUiConfig.welcomeText,
+        menuConfig: mockUiConfig.menuConfig,
+        messageConfig: nextTemplates
+      })
+    );
   });
 });

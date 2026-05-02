@@ -10,8 +10,9 @@ import { UiConfig, UiConfigService } from '@services/energy-rental/ui-config.ser
 import { PageHeaderComponent, PageHeaderType } from '@shared/components/page-header/page-header.component';
 import { fnCheckForm } from '@utils/tools';
 
-import type { MenuRow } from './designer/types';
+import type { MenuRow, MessageTemplates } from './designer/types';
 import { MenuDesignerComponent } from './designer/menu-designer/menu-designer.component';
+import { MessageTemplateEditorComponent } from './designer/message-template-editor/message-template-editor.component';
 
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzButtonModule } from 'ng-zorro-antd/button';
@@ -43,9 +44,8 @@ import { NzTagModule } from 'ng-zorro-antd/tag';
  *   其中 getUiConfig 失败不阻塞其他两项（catchError 吞错 + uiConfig 置 null 降级）。
  * - onSaveBot 只提交 bot 层字段，不传 menuConfig / messageConfig（这两个字段由 UiConfigService 管理，
  *   避免新旧双写导致数据冲突）。
- * - onMenuChange 收到 MenuDesigner 的保存信号后，调 uiConfigService.saveUiConfig，
- *   messageConfig / welcomeText 原样回传当前 uiConfig 快照（PR4 任务 23 再补模板编辑 UI）。
- *   保存成功后更新 uiConfig.updatedAt，否则下次保存会 409。
+ * - onMenuChange / onTemplatesChange 共享 saveUiConfigPatch helper，合并当前 uiConfig 快照与
+ *   局部补丁后整体 PUT，保存成功后同步更新 uiConfig.updatedAt（乐观锁基线）。
  */
 @Component({
   selector: 'app-energy-rental-agent-bot-config',
@@ -58,6 +58,7 @@ import { NzTagModule } from 'ng-zorro-antd/tag';
     FormsModule,
     ReactiveFormsModule,
     MenuDesignerComponent,
+    MessageTemplateEditorComponent,
     NzAlertModule,
     NzButtonModule,
     NzCardModule,
@@ -261,38 +262,65 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
   }
 
   /**
-   * MenuDesignerComponent 保存菜单时触发。
+   * 通用的 UiConfig 局部保存 helper。
    *
-   * - messageConfig / welcomeText 原样回传：PR4 任务 23 才会加模板编辑 UI，
-   *   此刻不回传会被 DTO 视为"未提供"——而后端 UiConfigDto 三字段可选，
-   *   未提供就保留原值，但为了契约清晰仍显式回传。
-   * - 乐观锁：ifUnmodifiedSince 传当前 uiConfig.updatedAt；
-   *   成功后 update uiConfig.updatedAt，否则下次保存会 409。
+   * MenuDesigner / MessageTemplateEditor 各自只关心自己那一块字段，但后端 PUT /ui-config
+   * 端点用的是同一个 UiConfigDto（三字段全可选、未提供保留原值）。这里用 patch 合并策略：
+   * - patch 里给出的字段取新值；未给出的回退到当前 uiConfig 快照。
+   * - 乐观锁：传当前 uiConfig.updatedAt；成功后更新 updatedAt 到最新快照，
+   *   否则下一次保存会 412（If-Unmodified-Since 不匹配）。
+   * - 如果本次 patch 包含 menuConfig，同步更新 `initialMenu` signal——
+   *   MenuDesigner 子组件依赖这个 signal 做稳定引用，重置 dirty 状态。
+   *
+   * uiConfig 为 null 时直接 return：ui-config 加载失败的降级路径下，
+   * 既没有乐观锁基线也没有其他字段快照，贸然 PUT 会覆盖线上数据。
    */
-  onMenuChange(menu: MenuRow[]): void {
+  private saveUiConfigPatch(patch: {
+    menuConfig?: MenuRow[];
+    messageConfig?: MessageTemplates;
+    welcomeText?: string;
+  }): void {
     const ui = this.uiConfig();
     if (!ui) {
       return;
     }
+    const payload = {
+      welcomeText: patch.welcomeText ?? ui.welcomeText,
+      menuConfig: patch.menuConfig ?? ui.menuConfig,
+      messageConfig: patch.messageConfig ?? ui.messageConfig
+    };
     this.saving.set(true);
     this.uiConfigService
-      .saveUiConfig(
-        {
-          welcomeText: ui.welcomeText,
-          menuConfig: menu,
-          messageConfig: ui.messageConfig
-        },
-        ui.updatedAt
-      )
+      .saveUiConfig(payload, ui.updatedAt)
       .pipe(
         finalize(() => this.saving.set(false)),
         takeUntilDestroyed(this.destroyRef)
       )
       .subscribe(result => {
-        this.uiConfig.update(prev =>
-          prev ? { ...prev, menuConfig: menu, updatedAt: result.updatedAt } : prev
-        );
-        this.initialMenu.set(menu);
+        this.uiConfig.update(prev => (prev ? { ...prev, ...patch, updatedAt: result.updatedAt } : prev));
+        if (patch.menuConfig) {
+          this.initialMenu.set(patch.menuConfig);
+        }
       });
+  }
+
+  /**
+   * MenuDesignerComponent 保存菜单时触发。
+   *
+   * 走通用 saveUiConfigPatch，messageConfig / welcomeText 由 helper 自动从当前快照回填，
+   * 保证同一 PUT 请求契约完整（后端字段可选，但显式回传更清晰）。
+   */
+  onMenuChange(menu: MenuRow[]): void {
+    this.saveUiConfigPatch({ menuConfig: menu });
+  }
+
+  /**
+   * MessageTemplateEditorComponent 保存模板时触发（任务 26）。
+   *
+   * 和 onMenuChange 共享同一个 UiConfigService.saveUiConfig 端点与乐观锁机制：
+   * menuConfig / welcomeText 原样回传，避免覆盖当前菜单。
+   */
+  onTemplatesChange(templates: MessageTemplates): void {
+    this.saveUiConfigPatch({ messageConfig: templates });
   }
 }

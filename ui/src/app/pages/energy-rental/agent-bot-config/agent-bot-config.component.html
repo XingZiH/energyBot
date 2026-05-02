@@ -135,14 +135,21 @@
         </div>
       </nz-tab>
 
-      <nz-tab nzTitle="消息模板" nzDisabled>
+      <nz-tab nzTitle="消息模板">
         <div class="tab-panel">
-          <nz-alert
-            nzType="info"
-            nzMessage="消息模板编辑器即将推出"
-            nzDescription="welcomeText / orderCreated / payPending 等 9 个模板的编辑 UI 将在后续任务中提供。当前保存菜单时会保留服务端原值。"
-            nzShowIcon
-          ></nz-alert>
+          @if (uiConfigLoadError()) {
+            <nz-alert
+              nzType="error"
+              nzMessage="消息模板数据加载失败"
+              nzDescription="请检查网络或后端 /energy-rental/ui-config 接口状态，然后点击刷新。"
+              nzShowIcon
+            ></nz-alert>
+          } @else if (uiConfig(); as ui) {
+            <app-message-template-editor
+              [initialTemplates]="ui.messageConfig"
+              (templatesChange)="onTemplatesChange($event)"
+            ></app-message-template-editor>
+          }
         </div>
       </nz-tab>
     </nz-tabs>
