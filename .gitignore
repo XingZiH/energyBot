@@ -56,3 +56,6 @@ scripts
 
 # 视觉伴侣原型（brainstorming skill）
 .superpowers/
+
+# Go bot 本地编译产物
+go-bot/energy-bot
