@@ -124,6 +124,7 @@ export interface BotDesignerConfig {
   welcomeText: string;
   menuConfig: MenuRow[];
   messageConfig: MessageTemplates;
+  updatedAt?: string; // 由后端 GET 返回的 ISO8601 时间戳（并发保护用），前端写入时不传
 }
 ```
 
