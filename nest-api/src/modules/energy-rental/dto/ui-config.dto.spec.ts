@@ -4,7 +4,7 @@ import {
   UiConfigDto,
   MenuRowDto,
   MenuButtonDto,
-  ButtonAction,
+  MessageTemplatesDto,
 } from './ui-config.dto';
 
 describe('UiConfigDto', () => {
@@ -65,7 +65,11 @@ describe('UiConfigDto', () => {
     }));
     const dto = plainToInstance(MenuRowDto, { id: 'r', buttons });
     const errors = await validate(dto);
-    expect(errors.length).toBeGreaterThan(0);
+    expect(
+      errors.some(
+        (e) => e.property === 'buttons' && e.constraints?.arrayMaxSize,
+      ),
+    ).toBe(true);
   });
 
   it('拒绝按钮文本超过 64 字符', async () => {
@@ -111,6 +115,104 @@ describe('UiConfigDto', () => {
       },
     });
     const errors = await validate(dto, { whitelist: true });
-    expect(errors.length).toBeGreaterThan(0);
+    expect(
+      errors.some(
+        (e) =>
+          e.property === 'packageGroup' &&
+          e.children?.some((c) => c.property === 'sortBy'),
+      ),
+    ).toBe(true);
+  });
+
+  // ========== 追加的边界测试 ==========
+
+  it('接受 text 正好 64 字符的按钮', async () => {
+    const dto = plainToInstance(MenuButtonDto, {
+      id: 'b1',
+      text: 'x'.repeat(64),
+      action: 'orders',
+    });
+    const errors = await validate(dto);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('接受每行正好 4 个按钮', async () => {
+    const buttons = Array.from({ length: 4 }, (_, i) => ({
+      id: `b${i}`,
+      text: `按钮${i}`,
+      action: 'orders',
+    }));
+    const dto = plainToInstance(MenuRowDto, { id: 'r', buttons });
+    const errors = await validate(dto);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('action=submenu 时必须提供 submenu 数组', async () => {
+    const dto = plainToInstance(MenuButtonDto, {
+      id: 'b1',
+      text: '下钻',
+      action: 'submenu',
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'submenu')).toBe(true);
+  });
+
+  it('action=energy_package_group 但完全不提供 packageGroup 被拒绝', async () => {
+    const dto = plainToInstance(MenuButtonDto, {
+      id: 'b1',
+      text: '套餐',
+      action: 'energy_package_group',
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'packageGroup')).toBe(true);
+  });
+
+  it('action=url 时拒绝空字符串 url', async () => {
+    const dto = plainToInstance(MenuButtonDto, {
+      id: 'b1',
+      text: '外链',
+      action: 'url',
+      url: '',
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'url')).toBe(true);
+  });
+
+  it('action=url 时拒绝格式非法 url', async () => {
+    const dto = plainToInstance(MenuButtonDto, {
+      id: 'b1',
+      text: '外链',
+      action: 'url',
+      url: 'not a url',
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'url')).toBe(true);
+  });
+
+  it('action=command 时拒绝不符合 /xxx 格式的命令', async () => {
+    const dto = plainToInstance(MenuButtonDto, {
+      id: 'b1',
+      text: '命令',
+      action: 'command',
+      command: 'start', // 缺 /
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'command')).toBe(true);
+  });
+
+  it('messageConfig 缺少 welcome 字段被拒绝', async () => {
+    const dto = plainToInstance(MessageTemplatesDto, {
+      orderCreated: 'a',
+      payPending: 'a',
+      paySuccess: 'a',
+      payFailed: 'a',
+      addressInvalid: 'a',
+      unknownCommand: 'a',
+      packageUnavailable: 'a',
+      walletQueryResult: 'a',
+      // 故意缺 welcome
+    });
+    const errors = await validate(dto);
+    expect(errors.some((e) => e.property === 'welcome')).toBe(true);
   });
 });
