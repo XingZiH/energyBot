@@ -1,0 +1,92 @@
+<div class="template-editor-root">
+  <nz-tabs
+    class="template-editor-tabs"
+    nzTabPosition="left"
+    [nzAnimated]="false"
+    [nzSelectedIndex]="$activeTabIndex()"
+    (nzSelectedIndexChange)="onTabChange($event)"
+  >
+    @for (scene of scenes; track trackByKey($index, scene)) {
+      <nz-tab [nzTitle]="sceneTitleTpl">
+        <ng-template #sceneTitleTpl>
+          <span class="scene-tab-title">
+            <span class="scene-tab-label">{{ scene.label }}</span>
+            @if (hasUnknownVariables(scene.key)) {
+              <span
+                class="warning-dot"
+                nz-tooltip
+                nzTooltipTitle="该场景文案中含有未知变量"
+                aria-label="未知变量"
+              ></span>
+            }
+          </span>
+        </ng-template>
+
+        <div class="scene-editor">
+          <!-- 场景描述 -->
+          <header class="scene-header">
+            <h4 class="scene-title">{{ scene.label }}</h4>
+            <p class="scene-description">{{ scene.description }}</p>
+          </header>
+
+          <!-- 可插入变量 -->
+          <section class="variables-panel" aria-label="可插入变量">
+            <div class="variables-panel-label">
+              可用变量（点击插入到光标位置）：
+            </div>
+            <div class="variables-list">
+              @for (variable of availableVariables; track trackByName($index, variable)) {
+                <span
+                  class="variable-tag"
+                  [class.recommended]="scene.relevantVariables.includes(variable.name)"
+                  nz-tooltip
+                  [nzTooltipTitle]="
+                    variable.description + '，示例：' + variable.example
+                  "
+                  (click)="insertVariable(scene.key, variable.name, textareaRef)"
+                  role="button"
+                  tabindex="0"
+                  (keydown.enter)="insertVariable(scene.key, variable.name, textareaRef)"
+                >
+                  <span class="variable-tag-label">{{ variable.label }}</span>
+                  <code class="variable-tag-code">{{ '{' + variable.name + '}' }}</code>
+                </span>
+              }
+            </div>
+          </section>
+
+          <!-- 编辑区 -->
+          <section class="editor-area">
+            <textarea
+              #textareaRef
+              nz-input
+              class="scene-textarea"
+              [ngModel]="$draft()[scene.key]"
+              (ngModelChange)="updateScene(scene.key, $event)"
+              [nzAutosize]="{ minRows: 6, maxRows: 14 }"
+              [placeholder]="scene.defaultText"
+              [attr.aria-label]="scene.label + ' 文案编辑'"
+            ></textarea>
+
+            @if (hasUnknownVariables(scene.key)) {
+              <nz-alert
+                class="unknown-variable-alert"
+                nzType="warning"
+                nzShowIcon
+                [nzMessage]="unknownMsgTpl"
+              ></nz-alert>
+              <ng-template #unknownMsgTpl>
+                未知变量：{{ validateScene(scene.key).join('、') }}
+              </ng-template>
+            }
+
+            <div class="default-hint">
+              留空时将使用默认文案：
+              <code class="default-hint-code">{{ scene.defaultText }}</code>
+            </div>
+          </section>
+        </div>
+      </nz-tab>
+    }
+  </nz-tabs>
+</div>
