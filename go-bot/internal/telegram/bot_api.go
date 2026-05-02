@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"ng-antd-admin/go-bot/internal/telegram/actions"
+	"ng-antd-admin/go-bot/internal/telegram/template"
 )
 
 // 编译期断言：Bot 必须实现 actions.BotAPI。
@@ -122,8 +123,8 @@ func parsePriceSunToTRX(priceSun string) (float64, error) {
 // ShowStart 实现 actions.BotAPI。
 //
 // 语义等价于用户发送 /start：渲染并推送主菜单（套餐卡片 + 底部 Reply Keyboard）。
-// 任务 10B 先直接转发到 v1 的 sendPackageMenu；任务 12 接入 MessageConfig 后
-// 可由此入口切换成模板驱动的欢迎语。
+// sendPackageMenu 已使用 BotDesignerConfig.WelcomeText 兜底；
+// MessageTemplates.Welcome 作为独立的欢迎词场景，属 Level 2，待后续任务接入。
 func (b *Bot) ShowStart(ctx context.Context, chatID int64) error {
 	return b.sendPackageMenu(ctx, chatID)
 }
@@ -142,8 +143,8 @@ func (b *Bot) ShowWalletQuery(ctx context.Context, chatID int64) error {
 
 // ShowOrders 实现 actions.BotAPI。
 //
-// 任务 10B 仅发送固定占位消息。
-// TODO(任务 12)：接入 MessageConfig 模板，按用户 chatID 加载订单列表并渲染。
+// 当前仅发送固定占位消息。订单列表的真实渲染（DB 查询 + 分页 + 状态文案）
+// 不在任务 12（9 场景模板）范围内，待独立任务补齐。
 func (b *Bot) ShowOrders(ctx context.Context, chatID int64) error {
 	return b.sendMessage(ctx, chatID, "订单查询功能即将上线。", nil)
 }
@@ -198,10 +199,52 @@ func buildButtonSpec(btn DesignerMenuButton, path string) actions.ButtonSpec {
 // 未识别的命令不报错，给用户一条友好提示（避免菜单编辑错误导致用户侧静默）。
 // 调用方（Dispatcher.handleCommand）已负责：去空白、拒绝空字符串。
 func (b *Bot) RunCommand(ctx context.Context, chatID int64, cmd string) error {
-	switch strings.TrimSpace(cmd) {
+	cmd = strings.TrimSpace(cmd)
+	switch cmd {
 	case "/start", "/menu":
 		return b.sendPackageMenu(ctx, chatID)
 	default:
-		return b.sendMessage(ctx, chatID, fmt.Sprintf("命令 %s 暂未支持。", cmd), nil)
+		cfg, _ := b.loadDesignerConfig(ctx)
+		text := b.renderMessage(
+			cfg.MessageConfig.UnknownCommand,
+			map[string]string{"command": cmd},
+			fmt.Sprintf("命令 %s 暂未支持。", cmd),
+		)
+		return b.sendMessage(ctx, chatID, text, nil)
 	}
 }
+
+// renderMessage 用设计器 v2 的消息模板字段渲染用户面消息（任务 12）。
+//
+// 行为：
+//   - tpl 去空白后为空串，返回 fallback（兜底文案）
+//   - tpl 非空则交给 template.Render：{name} 占位符按 vars 替换，未知变量保留原样
+//
+// vars 为 nil 时等价于空 map，允许调用方省略。
+//
+// 典型用法：
+//
+//	text := b.renderMessage(cfg.MessageConfig.PackageUnavailable, nil,
+//	    "当前没有启用的能量套餐，请联系管理员。")
+//	b.sendMessage(ctx, chatID, text, markup)
+//
+// 设计要点：
+//   - 纯函数（不依赖 Bot 状态），方法形式只是让调用方少拼一层包路径
+//   - 不返回 error：template.Render 本身容错，空模板走 fallback 即可
+func (b *Bot) renderMessage(tpl string, vars map[string]string, fallback string) string {
+	if strings.TrimSpace(tpl) == "" {
+		return fallback
+	}
+	return template.Render(tpl, vars)
+}
+
+// TODO(任务 12 Level 3): 以下 4 个消息模板场景待接入，建议在 PR3 UI 阶段或独立任务补齐：
+//   - PayPending        → 支付等待中（需要支付状态查询入口，相关代码在 bot.go 的支付轮询/回调链路）
+//   - PaySuccess        → 支付成功（订单状态变更为 paid 时的用户通知）
+//   - PayFailed         → 支付失败/超时（订单过期或链上回执失败）
+//   - WalletQueryResult → 钱包查询结果（sendWalletSnapshot，当前链上数据由 walletSnapshotText 硬编码）
+//
+// 已完成（Level 1）：
+//   - PackageUnavailable → sendPackageMenu 空套餐分支
+//   - UnknownCommand     → RunCommand 未知命令兜底，支持 {command} 变量
+//   - AddressInvalid     → handleMessage 收到非法 TRON 地址时

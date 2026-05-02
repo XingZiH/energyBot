@@ -132,3 +132,59 @@ func TestNewBotInitializesDispatcher(t *testing.T) {
 	// 此处无法直接断言 dispatcher 内部的 bot 字段（未导出），
 	// 但只要构造不 panic、字段非 nil，即满足本任务范围。
 }
+
+// TestRenderMessage 覆盖 renderMessage helper 的三类关键行为：
+//   - 空模板 → 返回 fallback
+//   - 非空模板 → 交给 template.Render 替换占位符
+//   - 未知变量 → template.Render 保留原样（容错）
+//
+// renderMessage 是 bot_api.go 的纯方法（不依赖 Bot 状态），用 &Bot{} 零值即可。
+func TestRenderMessage(t *testing.T) {
+	b := &Bot{}
+
+	t.Run("空模板返回 fallback", func(t *testing.T) {
+		got := b.renderMessage("", nil, "fallback 文案")
+		if got != "fallback 文案" {
+			t.Errorf("got %q, want %q", got, "fallback 文案")
+		}
+	})
+
+	t.Run("仅含空白的模板返回 fallback", func(t *testing.T) {
+		got := b.renderMessage("   \n  \t", nil, "fallback")
+		if got != "fallback" {
+			t.Errorf("got %q, want %q", got, "fallback")
+		}
+	})
+
+	t.Run("非空模板替换已知变量", func(t *testing.T) {
+		got := b.renderMessage("命令 {command} 不支持。", map[string]string{"command": "/foo"}, "不该走到这里")
+		want := "命令 /foo 不支持。"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("未知变量保留原样", func(t *testing.T) {
+		got := b.renderMessage("hello {nobody}!", map[string]string{"command": "/foo"}, "fallback")
+		want := "hello {nobody}!"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("vars 为 nil 时所有变量保留原样但不 panic", func(t *testing.T) {
+		got := b.renderMessage("hi {command}", nil, "fallback")
+		want := "hi {command}"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("非空模板优先于 fallback", func(t *testing.T) {
+		// 即使模板渲染后文本为空（极端场景），仍返回渲染结果，不回退 fallback。
+		got := b.renderMessage(" hi ", nil, "fallback")
+		if got != " hi " {
+			t.Errorf("got %q, want %q", got, " hi ")
+		}
+	})
+}

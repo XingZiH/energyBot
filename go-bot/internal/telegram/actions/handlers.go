@@ -356,7 +356,9 @@ func (d *Dispatcher) handleWalletQuery(ctx context.Context, chatID int64, _ Butt
 
 // handleOrders 展示订单列表。
 //
-// 当前实现由 BotAPI.ShowOrders 发送占位消息（任务 12 接入 MessageConfig 模板渲染真实列表）。
+// 当前实现由 BotAPI.ShowOrders 发送占位消息。订单列表的真实渲染涉及
+// 用户订单表查询 + 分页 + 状态文案，不在任务 12（9 场景模板）范围内，
+// 待独立任务补齐。
 func (d *Dispatcher) handleOrders(ctx context.Context, chatID int64, _ ButtonSpec) error {
 	return d.bot.ShowOrders(ctx, chatID)
 }

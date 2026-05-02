@@ -265,6 +265,7 @@ func TestIsKnownVariable(t *testing.T) {
 		for _, name := range []string{
 			"orderNo", "packageName", "amount", "energy", "address",
 			"payAddress", "txHash", "botName", "bandwidth", "balance", "reason",
+			"command",
 		} {
 			if !IsKnownVariable(name) {
 				t.Errorf("IsKnownVariable(%q) = false, want true", name)
@@ -282,9 +283,9 @@ func TestIsKnownVariable(t *testing.T) {
 }
 
 func TestKnownVariables(t *testing.T) {
-	t.Run("白名单长度为 11", func(t *testing.T) {
-		if len(KnownVariables) != 11 {
-			t.Errorf("len(KnownVariables) = %d, want 11", len(KnownVariables))
+	t.Run("白名单长度为 12", func(t *testing.T) {
+		if len(KnownVariables) != 12 {
+			t.Errorf("len(KnownVariables) = %d, want 12", len(KnownVariables))
 		}
 	})
 
@@ -292,6 +293,7 @@ func TestKnownVariables(t *testing.T) {
 		want := []string{
 			"orderNo", "packageName", "amount", "energy", "address",
 			"payAddress", "txHash", "botName", "bandwidth", "balance", "reason",
+			"command",
 		}
 		if len(KnownVariables) != len(want) {
 			t.Fatalf("长度不匹配：got %d, want %d", len(KnownVariables), len(want))

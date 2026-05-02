@@ -27,13 +27,14 @@ var KnownVariables = []string{
 	"packageName", // Package.Name
 	"amount",      // Order.Amount
 	"energy",      // Package.Energy
-	"address",     // Order.ReceiverAddress
+	"address",     // Order.ReceiverAddress / 用户输入的 TRON 地址（AddressInvalid 场景）
 	"payAddress",  // Order.PayAddress
 	"txHash",      // Order.TxHash
 	"botName",     // bot.Username
 	"bandwidth",   // TRON API
 	"balance",     // TRON API
 	"reason",      // err.Error()
+	"command",     // UnknownCommand 场景：用户输入的命令原文（任务 12）
 }
 
 // knownVariablesSet 是 KnownVariables 的查表结构，供 IsKnownVariable 使用。

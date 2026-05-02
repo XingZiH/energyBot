@@ -77,8 +77,10 @@ type WalletSnapshot struct {
 }
 
 type BotDesignerConfig struct {
-	WelcomeText   string
-	MessageConfig map[string]string
+	WelcomeText string
+	// MessageConfig 是设计器 v2 的 9 场景消息模板集合（任务 12）。
+	// v1 的 map[string]string 已迁移为强类型 MessageTemplates，渲染通过 Bot.renderMessage 完成。
+	MessageConfig MessageTemplates
 	MenuRows      []DesignerMenuRow
 }
 
@@ -352,7 +354,13 @@ func (b *Bot) handleMessage(ctx context.Context, message Message) error {
 	switch {
 	case b.hasPendingAddressOperation(message.Chat.ID):
 		if !looksLikeTronAddress(text) {
-			return b.sendMessage(ctx, message.Chat.ID, "请输入有效的 TRON 地址，地址必须以 T 开头。", nil)
+			cfg, _ := b.loadDesignerConfig(ctx)
+			msg := b.renderMessage(
+				cfg.MessageConfig.AddressInvalid,
+				map[string]string{"address": text},
+				"请输入有效的 TRON 地址，地址必须以 T 开头。",
+			)
+			return b.sendMessage(ctx, message.Chat.ID, msg, nil)
 		}
 		return b.handleAddressInput(ctx, message.Chat.ID, text)
 	case isMenuCommand(text):
@@ -523,10 +531,11 @@ func (b *Bot) sendPackageMenu(ctx context.Context, chatID int64) error {
 	}
 	designerConfig, _ := b.loadDesignerConfig(ctx)
 	if len(packages) == 0 {
-		text := designerConfig.MessageConfig["noPackage"]
-		if strings.TrimSpace(text) == "" {
-			text = "当前没有启用的能量套餐，请联系管理员。"
-		}
+		text := b.renderMessage(
+			designerConfig.MessageConfig.PackageUnavailable,
+			nil,
+			"当前没有启用的能量套餐，请联系管理员。",
+		)
 		return b.sendMessage(ctx, chatID, text, designerConfig.replyKeyboard(packages))
 	}
 	if designerConfig.hasCustomMenu() {
@@ -661,9 +670,14 @@ limit 1`).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
 		b.logger.Printf("parse menu rows v2 failed (falling back to empty): %v", parseErr)
 		rows = nil
 	}
+	tpl, tplErr := parseMessageTemplates(messageConfigRaw)
+	if tplErr != nil {
+		b.logger.Printf("parse message templates failed (falling back to empty): %v", tplErr)
+		tpl = MessageTemplates{}
+	}
 	config := BotDesignerConfig{
 		WelcomeText:   strings.TrimSpace(welcomeText),
-		MessageConfig: parseMessageConfig(messageConfigRaw),
+		MessageConfig: tpl,
 		MenuRows:      rows,
 	}
 	return config, nil
@@ -1426,15 +1440,6 @@ func designerButtonText(button DesignerMenuButton, packageTextByID map[int]strin
 	default:
 		return ""
 	}
-}
-
-func parseMessageConfig(raw string) map[string]string {
-	config := map[string]string{}
-	if strings.TrimSpace(raw) == "" {
-		return config
-	}
-	_ = json.Unmarshal([]byte(raw), &config)
-	return config
 }
 
 func packageButtonText(pkg EnergyPackage) string {
