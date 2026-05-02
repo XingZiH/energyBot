@@ -10,7 +10,7 @@ import (
 //
 // 保持尽可能窄：只列出骨架实现用到的方法。任务 8/9/10 接入真实业务时可按需扩展：
 //   - 任务 8（submenu）：SendMessageWithInline(chatID, text, rows) ✓
-//   - 任务 9（energy_package_group）：LoadPackagesByIDs(ctx, ids)
+//   - 任务 9（energy_package_group）：LoadPackagesByIDs(ctx, ids) ✓
 //   - 任务 10（command/start/address/wallet/orders）：可能追加若干
 //     SendAddressManagement / SendWalletQueryMenu / SendPackageMenu 等
 //
@@ -20,6 +20,29 @@ type BotAPI interface {
 	// SendMessageWithInline 发送带 Inline Keyboard 的消息。
 	// rows 的每一行是一排按钮，最终由适配层转换为 Telegram 的 inline_keyboard 结构。
 	SendMessageWithInline(ctx context.Context, chatID int64, text string, rows [][]InlineButton) error
+	// LoadPackagesByIDs 按 ID 批量加载套餐信息用于套餐组展开。
+	//
+	// 实现方（bot.go）负责：
+	//   - 从数据库加载 telegram.EnergyPackage 并映射为 PackageInfo
+	//   - 把 PriceSun（Sun 单位字符串）换算为 Price（TRX 单位 float64），1 TRX = 1e6 Sun
+	//   - 部分 ID 不存在时返回能加载到的子集（不报错），由本包 handler 决定展示策略
+	//   - 返回的顺序不约定，handler 内部自行排序
+	LoadPackagesByIDs(ctx context.Context, ids []int) ([]PackageInfo, error)
+}
+
+// PackageInfo 是 actions 包内部使用的套餐信息结构，专供套餐组展开消费。
+//
+// 独立于 telegram.EnergyPackage 定义，避免 actions → telegram 的循环 import。
+// 字段集合刻意最小化，只包含模板渲染（{name}/{price}/{energy}）和排序所需的字段；
+// 新增字段前先核对是否在套餐组局部模板白名单内，避免超前设计。
+//
+// 注意单位约定：Price 是 TRX 单位的 float64（已从 PriceSun 换算），
+// 展示时用 %.2f 格式化；单位换算由 bot.go 的 LoadPackagesByIDs 实现负责。
+type PackageInfo struct {
+	ID     int     // 套餐 ID，用于 callback_data 拼接（pkg:{id}）
+	Name   string  // 套餐名称，对应模板变量 {name}
+	Price  float64 // 单价（TRX），对应模板变量 {price}，同时用于 price_asc/price_desc 排序
+	Energy int     // 能量数，对应模板变量 {energy}
 }
 
 // InlineButton 是 actions 包内部使用的 inline keyboard 按钮结构。

@@ -3,17 +3,20 @@ package actions
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+
+	"ng-antd-admin/go-bot/internal/telegram/template"
 )
 
 // 下列 handler 为骨架。已接入的：
 //   - url / text：v1 语义 SendMessage
 //   - submenu（任务 8）：渲染 Inline Keyboard
+//   - energy_package_group（任务 9）：加载→排序→模板渲染→Inline Keyboard
 //
-// 其余 6 个返回统一前缀 "[action 待接入" 的占位消息，便于后续任务接入时搜索。
+// 其余 5 个返回统一前缀 "[action 待接入" 的占位消息，便于后续任务接入时搜索。
 //
 // 接入计划：
-//   - 任务 9：handleEnergyPackageGroup 改为展开套餐列表
 //   - 任务 10：handleCommand / handleStart / handleAddressManage /
 //     handleWalletQuery / handleOrders 接入对应业务
 
@@ -39,6 +42,22 @@ const (
 
 	// submenuEmptyButtonText 是子按钮 Text 空白时的兜底文案。
 	submenuEmptyButtonText = "(未命名)"
+
+	// callbackPackagePrefix 是套餐组按钮 callback_data 的前缀。
+	// 格式：pkg:<packageId>，任务 11 的 callback_query 处理器通过此前缀识别套餐选择事件。
+	// 典型长度：4（前缀）+ 最多 11（int32）= 15 字节，远小于 64 字节上限，因此不做长度校验。
+	callbackPackagePrefix = "pkg:"
+
+	// packageGroupPrompt 是套餐组展开时的消息提示语。
+	// 统一文案不拼接 spec.Text（按钮名已在父菜单体现，避免冗余）。
+	packageGroupPrompt = "请选择套餐："
+
+	// packageGroupUnavailableText 是所有套餐都加载失败时发送的纯文本兜底文案。
+	packageGroupUnavailableText = "套餐暂时不可用"
+
+	// packageGroupDefaultTemplate 是 PackageGroupSpec.TextTemplate 为空时的默认按钮文案模板。
+	// 用套餐组局部变量（name/price），不是全局白名单的 packageName。
+	packageGroupDefaultTemplate = "{name} - {price} TRX"
 )
 
 // buildCallbackData 拼接 submenu 子按钮的 callback_data。
@@ -132,13 +151,141 @@ func (d *Dispatcher) handleSubmenu(ctx context.Context, chatID int64, spec Butto
 	return d.bot.SendMessageWithInline(ctx, chatID, prompt, rows)
 }
 
-// handleEnergyPackageGroup 展开套餐组 Inline Keyboard。任务 9 实现。
+// handleEnergyPackageGroup 展开套餐组 Inline Keyboard。
+//
+// 行为：
+//  1. 从 BotAPI.LoadPackagesByIDs 批量加载套餐信息
+//  2. 按 SortBy 排序（price_asc 默认 / price_desc / manual，其它值回落 price_asc）
+//  3. 对每个套餐用 spec.PackageGroup.TextTemplate 渲染按钮文本
+//     （空模板回落 "{name} - {price} TRX"）
+//  4. 组装 Inline Keyboard 每行 1 按钮，callback_data = "pkg:<packageId>"
+//  5. 末尾追加 "🔙 返回"（callback_data = "menu:back"），与 submenu 共用返回语义
+//
+// 错误处理：
+//   - LoadPackagesByIDs 返回 error：原样冒泡
+//   - 部分 ID 未加载到（DB 中已被删）：跳过缺失项，只展示能加载的
+//   - 全部加载失败（返回 nil 或空切片）：发送 packageGroupUnavailableText 纯文本消息，
+//     不发 Inline Keyboard，返回 nil
+//
+// 模板变量上下文（局部，独立于全局白名单）：
+//
+//	{name}   = PackageInfo.Name
+//	{price}  = fmt.Sprintf("%.2f", PackageInfo.Price)
+//	{energy} = fmt.Sprintf("%d", PackageInfo.Energy)
+//
+// 注意：这与任务 6 的全局白名单（{packageName}/{orderNo}/… 由 template.KnownVariables
+// 约束）是两套独立上下文。套餐组按钮只在本函数内部生效，未识别的变量（如 {packageName}）
+// 会按 template 包规则原样保留。任务 12 接入消息模板时才消费全局白名单。
 func (d *Dispatcher) handleEnergyPackageGroup(ctx context.Context, chatID int64, spec ButtonSpec) error {
 	if spec.PackageGroup == nil || len(spec.PackageGroup.PackageIDs) == 0 {
 		return ErrInvalidPackageGroup
 	}
-	return d.bot.SendMessage(ctx, chatID,
-		fmt.Sprintf("[package_group 待接入，%d 个套餐]", len(spec.PackageGroup.PackageIDs)), nil)
+	cfg := spec.PackageGroup
+
+	packages, err := d.bot.LoadPackagesByIDs(ctx, cfg.PackageIDs)
+	if err != nil {
+		return err
+	}
+
+	// 全部缺失：发送纯文本提示，不展开键盘。
+	if len(packages) == 0 {
+		return d.bot.SendMessage(ctx, chatID, packageGroupUnavailableText, nil)
+	}
+
+	// manual：按请求顺序过滤；其他模式：按 Price 稳定排序（未识别值回落 price_asc）。
+	if cfg.SortBy == "manual" {
+		packages = filterOrderByIDs(packages, cfg.PackageIDs)
+	} else {
+		sortPackages(packages, cfg.SortBy)
+	}
+
+	// 极端情形：manual 过滤后全部缺失（理论上不会进入，因为上面已经对 len(packages) == 0 做了判断；
+	// 但 filterOrderByIDs 在 DB 返回了不在 ids 里的脏数据时可能产生空结果，防御性处理）。
+	if len(packages) == 0 {
+		return d.bot.SendMessage(ctx, chatID, packageGroupUnavailableText, nil)
+	}
+
+	rows := make([][]InlineButton, 0, len(packages)+1)
+	for _, pkg := range packages {
+		rows = append(rows, []InlineButton{{
+			Text:         renderPackageButtonText(cfg.TextTemplate, pkg),
+			CallbackData: fmt.Sprintf("%s%d", callbackPackagePrefix, pkg.ID),
+		}})
+	}
+	rows = append(rows, []InlineButton{{Text: submenuBackText, CallbackData: callbackBack}})
+
+	return d.bot.SendMessageWithInline(ctx, chatID, packageGroupPrompt, rows)
+}
+
+// sortPackages 按 sortBy 就地稳定排序 packages。
+//
+// 支持值：
+//   - "price_asc"：按 Price 升序（默认）
+//   - "price_desc"：按 Price 降序
+//   - "manual"：不动（由调用方用 filterOrderByIDs 按请求 ids 顺序排列）
+//   - 其他（空串、未知字符串）：回落 price_asc
+//
+// 注意：对于 manual，本函数什么都不做；调用方必须自己调用 filterOrderByIDs。
+// 这样拆分是因为 manual 需要 PackageIDs 上下文，而排序契约只拿到 packages 自身。
+func sortPackages(packages []PackageInfo, sortBy string) {
+	switch sortBy {
+	case "manual":
+		return
+	case "price_desc":
+		sort.SliceStable(packages, func(i, j int) bool {
+			return packages[i].Price > packages[j].Price
+		})
+	default:
+		// price_asc / 空 / 未知 → 默认升序
+		sort.SliceStable(packages, func(i, j int) bool {
+			return packages[i].Price < packages[j].Price
+		})
+	}
+}
+
+// renderPackageButtonText 用套餐组局部变量渲染按钮文本。
+//
+// 变量集合（局部，独立于全局模板白名单）：
+//
+//	{name}   → pkg.Name
+//	{price}  → pkg.Price 格式化为 "%.2f"（TRX 两位小数）
+//	{energy} → pkg.Energy（十进制整数）
+//
+// 空模板回落 packageGroupDefaultTemplate。
+// 未识别的变量（例如 {packageName}）由 template.Render 原样保留。
+func renderPackageButtonText(tpl string, pkg PackageInfo) string {
+	if strings.TrimSpace(tpl) == "" {
+		tpl = packageGroupDefaultTemplate
+	}
+	return template.Render(tpl, map[string]string{
+		"name":   pkg.Name,
+		"price":  fmt.Sprintf("%.2f", pkg.Price),
+		"energy": fmt.Sprintf("%d", pkg.Energy),
+	})
+}
+
+// filterOrderByIDs 按 ids 给定的顺序从 packages 中挑出对应套餐（用于 manual 排序）。
+//
+// 行为：
+//   - 返回切片顺序严格跟随 ids
+//   - ids 中未在 packages 出现的 id 被跳过（部分加载失败的情况）
+//   - packages 中不在 ids 的项被丢弃（DB 返回脏数据的防御）
+//   - ids 为 nil 或空时返回空切片
+func filterOrderByIDs(packages []PackageInfo, ids []int) []PackageInfo {
+	if len(ids) == 0 {
+		return nil
+	}
+	byID := make(map[int]PackageInfo, len(packages))
+	for _, p := range packages {
+		byID[p.ID] = p
+	}
+	out := make([]PackageInfo, 0, len(ids))
+	for _, id := range ids {
+		if p, ok := byID[id]; ok {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // handleAddressManage 进入地址管理。任务 10 接入。

@@ -27,6 +27,13 @@ type mockBot struct {
 	sendErr   error
 	inline    []sentInlineMessage
 	inlineErr error
+
+	// 套餐组相关：
+	// loadPackages 是 LoadPackagesByIDs 的返回值。若 loadErr 非 nil 则优先返回 error。
+	// loadCalledWith 记录最近一次调用传入的 ids，便于断言。
+	loadPackages   []PackageInfo
+	loadErr        error
+	loadCalledWith []int
 }
 
 func (m *mockBot) SendMessage(_ context.Context, chatID int64, text string, markup any) error {
@@ -43,6 +50,15 @@ func (m *mockBot) SendMessageWithInline(_ context.Context, chatID int64, text st
 	}
 	m.inline = append(m.inline, sentInlineMessage{chatID: chatID, text: text, rows: rows})
 	return nil
+}
+
+func (m *mockBot) LoadPackagesByIDs(_ context.Context, ids []int) ([]PackageInfo, error) {
+	// 复制一份 ids，避免被调用方后续修改影响断言。
+	m.loadCalledWith = append([]int(nil), ids...)
+	if m.loadErr != nil {
+		return nil, m.loadErr
+	}
+	return m.loadPackages, nil
 }
 
 // lastText 返回最后一条被发送的消息文本；没有则返回空串。
@@ -151,23 +167,81 @@ func TestDispatch_Routing(t *testing.T) {
 		}
 	})
 
-	t.Run("energy_package_group action 返回待接入占位", func(t *testing.T) {
-		bot := &mockBot{}
+	t.Run("energy_package_group action 渲染套餐列表 Inline Keyboard", func(t *testing.T) {
+		bot := &mockBot{
+			loadPackages: []PackageInfo{
+				{ID: 1, Name: "A", Price: 12.5, Energy: 65000},
+				{ID: 2, Name: "B", Price: 8.5, Energy: 32000},
+				{ID: 3, Name: "C", Price: 24.0, Energy: 130000},
+			},
+		}
 		d := NewDispatcher(bot)
 		err := d.Dispatch(context.Background(), chatID, ButtonSpec{
 			Action: ActionEnergyPackageGroup,
+			Text:   "买套餐",
 			PackageGroup: &PackageGroupSpec{
-				PackageIDs: []int{1, 2, 3},
+				PackageIDs:   []int{1, 2, 3},
+				SortBy:       "price_asc",
+				TextTemplate: "{name} ({price} TRX, {energy})",
 			},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(bot.lastText(), "待接入") {
-			t.Errorf("expected 待接入 marker, got %q", bot.lastText())
+		// 套餐组不应走 SendMessage 路径（只发 Inline Keyboard）。
+		if len(bot.sent) != 0 {
+			t.Errorf("package_group 成功场景不应调用 SendMessage，got %d", len(bot.sent))
 		}
-		if !strings.Contains(bot.lastText(), "3") {
-			t.Errorf("expected package count in message, got %q", bot.lastText())
+		msg, ok := bot.lastInline()
+		if !ok {
+			t.Fatal("expected SendMessageWithInline to be called")
+		}
+		if msg.chatID != chatID {
+			t.Errorf("chatID: want %d, got %d", chatID, msg.chatID)
+		}
+		if msg.text != "请选择套餐：" {
+			t.Errorf("prompt: want %q, got %q", "请选择套餐：", msg.text)
+		}
+		// LoadPackagesByIDs 应收到原始 ids。
+		if want := []int{1, 2, 3}; !equalInts(bot.loadCalledWith, want) {
+			t.Errorf("LoadPackagesByIDs ids: want %v, got %v", want, bot.loadCalledWith)
+		}
+		// 3 个套餐 + 1 行返回 = 4 行
+		if len(msg.rows) != 4 {
+			t.Fatalf("rows: want 4, got %d", len(msg.rows))
+		}
+		// 每行应该恰好 1 个按钮（套餐按钮单行展示）。
+		for i, row := range msg.rows {
+			if len(row) != 1 {
+				t.Errorf("row %d should have 1 button, got %d", i, len(row))
+			}
+		}
+		// 按 price 升序：B(8.5) → A(12.5) → C(24.0)
+		wantButtons := []struct {
+			text string
+			cb   string
+		}{
+			{"B (8.50 TRX, 32000)", "pkg:2"},
+			{"A (12.50 TRX, 65000)", "pkg:1"},
+			{"C (24.00 TRX, 130000)", "pkg:3"},
+		}
+		for i, w := range wantButtons {
+			if got := msg.rows[i][0].Text; got != w.text {
+				t.Errorf("row %d text: want %q, got %q", i, w.text, got)
+			}
+			if got := msg.rows[i][0].CallbackData; got != w.cb {
+				t.Errorf("row %d callback_data: want %q, got %q", i, w.cb, got)
+			}
+		}
+		// 最后一行：返回按钮
+		if len(msg.rows[3]) != 1 {
+			t.Fatalf("back row should have 1 button, got %d", len(msg.rows[3]))
+		}
+		if got := msg.rows[3][0].Text; got != "🔙 返回" {
+			t.Errorf("back text: got %q", got)
+		}
+		if got := msg.rows[3][0].CallbackData; got != "menu:back" {
+			t.Errorf("back callback_data: got %q", got)
 		}
 	})
 
@@ -539,4 +613,395 @@ func TestDispatch_SubmenuCallbackTooLong(t *testing.T) {
 	if len(bot.inline) != 0 {
 		t.Errorf("no inline send on callback overflow, got %d", len(bot.inline))
 	}
+}
+
+// --- handleEnergyPackageGroup 专项测试 ---
+
+// equalInts 比较两个 int 切片（顺序敏感）。
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// pkgRowTextsAndCBs 从 inline 消息里抽出每行第一个按钮的 (text, callback_data)。
+// 套餐组每行只有 1 个按钮。
+func pkgRowTextsAndCBs(msg sentInlineMessage) [][2]string {
+	out := make([][2]string, 0, len(msg.rows))
+	for _, row := range msg.rows {
+		if len(row) == 0 {
+			out = append(out, [2]string{"", ""})
+			continue
+		}
+		out = append(out, [2]string{row[0].Text, row[0].CallbackData})
+	}
+	return out
+}
+
+func TestDispatch_PackageGroup_Sorting(t *testing.T) {
+	const chatID int64 = 7
+	// 3 个套餐（价格乱序、名字按输入顺序），用于各排序模式对比。
+	packages := []PackageInfo{
+		{ID: 10, Name: "A", Price: 20.0, Energy: 100000},
+		{ID: 11, Name: "B", Price: 5.5, Energy: 30000},
+		{ID: 12, Name: "C", Price: 12.3, Energy: 60000},
+	}
+	ids := []int{10, 11, 12}
+
+	cases := []struct {
+		name     string
+		sortBy   string
+		wantCBs  []string // 按顺序的 callback_data（不含末尾返回按钮）
+		wantDesc string
+	}{
+		{"price_asc 升序", "price_asc", []string{"pkg:11", "pkg:12", "pkg:10"}, "B(5.5) C(12.3) A(20.0)"},
+		{"price_desc 降序", "price_desc", []string{"pkg:10", "pkg:12", "pkg:11"}, "A(20.0) C(12.3) B(5.5)"},
+		{"manual 保持 PackageIDs 顺序", "manual", []string{"pkg:10", "pkg:11", "pkg:12"}, "按输入 [10,11,12]"},
+		{"空 SortBy 默认 price_asc", "", []string{"pkg:11", "pkg:12", "pkg:10"}, "默认升序"},
+		{"未知 SortBy 回落 price_asc", "weird_unknown", []string{"pkg:11", "pkg:12", "pkg:10"}, "未知值降级升序"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// 每次都复制一份，避免 sort 就地修改影响下一 case。
+			pkgsCopy := append([]PackageInfo(nil), packages...)
+			bot := &mockBot{loadPackages: pkgsCopy}
+			d := NewDispatcher(bot)
+			err := d.Dispatch(context.Background(), chatID, ButtonSpec{
+				Action: ActionEnergyPackageGroup,
+				PackageGroup: &PackageGroupSpec{
+					PackageIDs:   ids,
+					SortBy:       c.sortBy,
+					TextTemplate: "{name} {price}",
+				},
+			})
+			if err != nil {
+				t.Fatalf("[%s] unexpected error: %v", c.wantDesc, err)
+			}
+			msg, ok := bot.lastInline()
+			if !ok {
+				t.Fatalf("[%s] expected inline message", c.wantDesc)
+			}
+			// 套餐按钮 + 返回按钮
+			if len(msg.rows) != len(c.wantCBs)+1 {
+				t.Fatalf("[%s] rows: want %d, got %d", c.wantDesc, len(c.wantCBs)+1, len(msg.rows))
+			}
+			got := pkgRowTextsAndCBs(msg)
+			for i, want := range c.wantCBs {
+				if got[i][1] != want {
+					t.Errorf("[%s] row %d callback: want %q, got %q（整体顺序 %v）",
+						c.wantDesc, i, want, got[i][1], got)
+				}
+			}
+			// 最后一行：返回按钮
+			if got[len(c.wantCBs)][1] != "menu:back" {
+				t.Errorf("[%s] last row should be back, got %q", c.wantDesc, got[len(c.wantCBs)][1])
+			}
+		})
+	}
+}
+
+func TestDispatch_PackageGroup_EmptyTemplate(t *testing.T) {
+	bot := &mockBot{
+		loadPackages: []PackageInfo{
+			{ID: 1, Name: "标准套餐", Price: 10.0, Energy: 65000},
+		},
+	}
+	d := NewDispatcher(bot)
+	err := d.Dispatch(context.Background(), 1, ButtonSpec{
+		Action: ActionEnergyPackageGroup,
+		PackageGroup: &PackageGroupSpec{
+			PackageIDs:   []int{1},
+			TextTemplate: "", // 空模板 → 默认 "{name} - {price} TRX"
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msg, ok := bot.lastInline()
+	if !ok {
+		t.Fatal("expected inline message")
+	}
+	// 第 0 行是套餐按钮，第 1 行是返回按钮
+	if len(msg.rows) != 2 {
+		t.Fatalf("rows: want 2, got %d", len(msg.rows))
+	}
+	want := "标准套餐 - 10.00 TRX"
+	if got := msg.rows[0][0].Text; got != want {
+		t.Errorf("default template text: want %q, got %q", want, got)
+	}
+}
+
+func TestDispatch_PackageGroup_PartialLoad(t *testing.T) {
+	// 请求 [1,2,3]，DB 只返回 [1,3]（ID=2 被删除）。
+	bot := &mockBot{
+		loadPackages: []PackageInfo{
+			{ID: 1, Name: "A", Price: 1.0, Energy: 1000},
+			{ID: 3, Name: "C", Price: 3.0, Energy: 3000},
+		},
+	}
+	d := NewDispatcher(bot)
+	err := d.Dispatch(context.Background(), 1, ButtonSpec{
+		Action: ActionEnergyPackageGroup,
+		PackageGroup: &PackageGroupSpec{
+			PackageIDs:   []int{1, 2, 3},
+			SortBy:       "price_asc",
+			TextTemplate: "{name}",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 不报错，发送 2 套餐 + 返回 = 3 行
+	msg, ok := bot.lastInline()
+	if !ok {
+		t.Fatal("expected inline message")
+	}
+	if len(msg.rows) != 3 {
+		t.Fatalf("rows: want 3 (2 packages + back), got %d", len(msg.rows))
+	}
+	if got := msg.rows[0][0].CallbackData; got != "pkg:1" {
+		t.Errorf("row 0: want pkg:1, got %q", got)
+	}
+	if got := msg.rows[1][0].CallbackData; got != "pkg:3" {
+		t.Errorf("row 1: want pkg:3, got %q", got)
+	}
+	// 不应发纯文本消息
+	if len(bot.sent) != 0 {
+		t.Errorf("部分加载成功不应发文本消息，got %d", len(bot.sent))
+	}
+}
+
+func TestDispatch_PackageGroup_PartialLoad_ManualPreservesRequestOrder(t *testing.T) {
+	// manual 排序下，LoadPackagesByIDs 返回顺序被打乱 + 部分缺失；
+	// 应按 PackageIDs 原始顺序展示可用项。
+	bot := &mockBot{
+		loadPackages: []PackageInfo{
+			// DB 返回顺序乱序：3、1，缺 2
+			{ID: 3, Name: "C", Price: 3.0, Energy: 3000},
+			{ID: 1, Name: "A", Price: 1.0, Energy: 1000},
+		},
+	}
+	d := NewDispatcher(bot)
+	err := d.Dispatch(context.Background(), 1, ButtonSpec{
+		Action: ActionEnergyPackageGroup,
+		PackageGroup: &PackageGroupSpec{
+			PackageIDs:   []int{1, 2, 3},
+			SortBy:       "manual",
+			TextTemplate: "{name}",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msg, ok := bot.lastInline()
+	if !ok {
+		t.Fatal("expected inline message")
+	}
+	// 按原 ids 顺序 [1,2,3]，跳过缺失的 2：应为 pkg:1, pkg:3
+	if len(msg.rows) != 3 {
+		t.Fatalf("rows: want 3, got %d", len(msg.rows))
+	}
+	if got := msg.rows[0][0].CallbackData; got != "pkg:1" {
+		t.Errorf("row 0: want pkg:1, got %q", got)
+	}
+	if got := msg.rows[1][0].CallbackData; got != "pkg:3" {
+		t.Errorf("row 1: want pkg:3, got %q", got)
+	}
+}
+
+func TestDispatch_PackageGroup_AllFailed(t *testing.T) {
+	// 全部加载失败（空切片，无 error）：发送"套餐暂时不可用"文本消息，不发 inline。
+	bot := &mockBot{loadPackages: []PackageInfo{}}
+	d := NewDispatcher(bot)
+	err := d.Dispatch(context.Background(), 1, ButtonSpec{
+		Action: ActionEnergyPackageGroup,
+		PackageGroup: &PackageGroupSpec{
+			PackageIDs: []int{1, 2},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(bot.inline) != 0 {
+		t.Errorf("全部加载失败不应发 Inline Keyboard，got %d", len(bot.inline))
+	}
+	if len(bot.sent) != 1 {
+		t.Fatalf("expect 1 text message for unavailable, got %d", len(bot.sent))
+	}
+	if !strings.Contains(bot.lastText(), "套餐暂时不可用") {
+		t.Errorf("unavailable text: got %q", bot.lastText())
+	}
+}
+
+func TestDispatch_PackageGroup_LoadError(t *testing.T) {
+	boom := errors.New("db down")
+	bot := &mockBot{loadErr: boom}
+	d := NewDispatcher(bot)
+	err := d.Dispatch(context.Background(), 1, ButtonSpec{
+		Action: ActionEnergyPackageGroup,
+		PackageGroup: &PackageGroupSpec{
+			PackageIDs: []int{1},
+		},
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("expected LoadPackagesByIDs error to bubble, got %v", err)
+	}
+	// 不应发任何消息
+	if len(bot.inline) != 0 || len(bot.sent) != 0 {
+		t.Errorf("加载出错时不应发消息")
+	}
+}
+
+// --- helper 单测 ---
+
+func TestSortPackages(t *testing.T) {
+	base := []PackageInfo{
+		{ID: 10, Name: "A", Price: 20.0},
+		{ID: 11, Name: "B", Price: 5.5},
+		{ID: 12, Name: "C", Price: 12.3},
+	}
+
+	t.Run("price_asc", func(t *testing.T) {
+		got := append([]PackageInfo(nil), base...)
+		sortPackages(got, "price_asc")
+		wantIDs := []int{11, 12, 10}
+		for i, id := range wantIDs {
+			if got[i].ID != id {
+				t.Errorf("pos %d: want id %d, got %d", i, id, got[i].ID)
+			}
+		}
+	})
+
+	t.Run("price_desc", func(t *testing.T) {
+		got := append([]PackageInfo(nil), base...)
+		sortPackages(got, "price_desc")
+		wantIDs := []int{10, 12, 11}
+		for i, id := range wantIDs {
+			if got[i].ID != id {
+				t.Errorf("pos %d: want id %d, got %d", i, id, got[i].ID)
+			}
+		}
+	})
+
+	t.Run("manual 不改变顺序", func(t *testing.T) {
+		got := append([]PackageInfo(nil), base...)
+		sortPackages(got, "manual")
+		wantIDs := []int{10, 11, 12}
+		for i, id := range wantIDs {
+			if got[i].ID != id {
+				t.Errorf("pos %d: want id %d, got %d", i, id, got[i].ID)
+			}
+		}
+	})
+
+	t.Run("未知 SortBy 回落 price_asc", func(t *testing.T) {
+		got := append([]PackageInfo(nil), base...)
+		sortPackages(got, "something_unknown")
+		wantIDs := []int{11, 12, 10}
+		for i, id := range wantIDs {
+			if got[i].ID != id {
+				t.Errorf("pos %d: want id %d, got %d", i, id, got[i].ID)
+			}
+		}
+	})
+
+	t.Run("空 SortBy 回落 price_asc", func(t *testing.T) {
+		got := append([]PackageInfo(nil), base...)
+		sortPackages(got, "")
+		wantIDs := []int{11, 12, 10}
+		for i, id := range wantIDs {
+			if got[i].ID != id {
+				t.Errorf("pos %d: want id %d, got %d", i, id, got[i].ID)
+			}
+		}
+	})
+
+	t.Run("稳定排序：相等 price 保持原顺序", func(t *testing.T) {
+		got := []PackageInfo{
+			{ID: 1, Name: "A", Price: 5.0},
+			{ID: 2, Name: "B", Price: 5.0},
+			{ID: 3, Name: "C", Price: 5.0},
+		}
+		sortPackages(got, "price_asc")
+		for i, wantID := range []int{1, 2, 3} {
+			if got[i].ID != wantID {
+				t.Errorf("stable asc pos %d: want id %d, got %d", i, wantID, got[i].ID)
+			}
+		}
+	})
+}
+
+func TestRenderPackageButtonText(t *testing.T) {
+	pkg := PackageInfo{ID: 1, Name: "标准", Price: 12.5, Energy: 65000}
+
+	t.Run("全部变量替换", func(t *testing.T) {
+		got := renderPackageButtonText("{name} ({price} TRX, {energy})", pkg)
+		want := "标准 (12.50 TRX, 65000)"
+		if got != want {
+			t.Errorf("want %q, got %q", want, got)
+		}
+	})
+
+	t.Run("空模板回落默认", func(t *testing.T) {
+		got := renderPackageButtonText("", pkg)
+		want := "标准 - 12.50 TRX"
+		if got != want {
+			t.Errorf("want %q, got %q", want, got)
+		}
+	})
+
+	t.Run("未知变量保留原样（局部白名单外）", func(t *testing.T) {
+		// 用全局白名单里的 packageName 测试：套餐组内部模板只认 name/price/energy，
+		// 所以 {packageName} 应原样保留。
+		got := renderPackageButtonText("{packageName}-{name}", pkg)
+		want := "{packageName}-标准"
+		if got != want {
+			t.Errorf("want %q, got %q", want, got)
+		}
+	})
+
+	t.Run("price 格式化两位小数", func(t *testing.T) {
+		got := renderPackageButtonText("{price}", PackageInfo{Price: 1})
+		if got != "1.00" {
+			t.Errorf("want %q, got %q", "1.00", got)
+		}
+	})
+}
+
+func TestFilterOrderByIDs(t *testing.T) {
+	packages := []PackageInfo{
+		{ID: 3, Name: "C"},
+		{ID: 1, Name: "A"},
+		// 缺 2
+	}
+	t.Run("按 ids 顺序过滤，跳过缺失", func(t *testing.T) {
+		got := filterOrderByIDs(packages, []int{1, 2, 3})
+		wantIDs := []int{1, 3}
+		if len(got) != len(wantIDs) {
+			t.Fatalf("len: want %d, got %d", len(wantIDs), len(got))
+		}
+		for i, id := range wantIDs {
+			if got[i].ID != id {
+				t.Errorf("pos %d: want %d, got %d", i, id, got[i].ID)
+			}
+		}
+	})
+	t.Run("ids 为空返回空切片", func(t *testing.T) {
+		got := filterOrderByIDs(packages, nil)
+		if len(got) != 0 {
+			t.Errorf("want empty, got %v", got)
+		}
+	})
+	t.Run("全部缺失返回空切片", func(t *testing.T) {
+		got := filterOrderByIDs(packages, []int{99, 100})
+		if len(got) != 0 {
+			t.Errorf("want empty, got %v", got)
+		}
+	})
 }
