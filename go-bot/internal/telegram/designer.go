@@ -1,11 +1,10 @@
 // Package telegram 的 designer.go 提供设计器 v2 的数据结构和解析逻辑。
 //
-// v1 与 v2 的关系：
-//   - v1 解析逻辑（parseMenuRows / parseMessageConfig）位于 bot.go，
-//     对应按钮 action 字符串 "package"/"address"/"wallet" 等；
-//   - v2 解析逻辑（本文件）对应新 9 种 ButtonAction 枚举；
-//   - 两者目前并存以维持向后兼容，v1 数据走旧路径，v2 数据走新路径；
-//   - 完整迁移与 v1 旧代码移除计划见任务 10。
+// v2 路径概述：
+//   - 菜单解析：parseMenuRowsV2（严格 JSON + 深度校验），唯一调用方为 bot.go:loadDesignerConfig；
+//   - 按钮分发：统一走 actions.Dispatcher（见 internal/telegram/actions/），按钮 action 字符串
+//     对应 ButtonAction 枚举（9 种）；
+//   - v1 遗留的 parseMenuRows / executeDesignerButton 已在任务 10D 清理。
 //
 // 修改本文件的字段或 JSON tag 时，务必同步更新：
 //   - 前端：ui/src/app/pages/energy-rental/agent-bot-config/designer/types.ts

@@ -95,9 +95,8 @@ type DesignerMenuButton struct {
 	URL     string       `json:"url,omitempty"`
 	Message string       `json:"message,omitempty"`
 	Command string       `json:"command,omitempty"`
-	// PackageID 是 v1 遗留字段，v2 已由 PackageGroup 替代。
-	// 目前 bot.go 中 v1 解析路径（parseMenuRows 与 executeDesignerButton 的
-	// "package" 分支）仍在读此字段。任务 10 完成 v1 路径清理后即可移除。
+	// PackageID 是 v1 遗留字段，保留以反序列化旧数据，v2 已由 PackageGroup 替代。
+	// 新版解析路径（parseMenuRowsV2 + actions.Dispatcher）不再读此字段。
 	PackageID    int                 `json:"packageId,omitempty"`
 	Submenu      []DesignerMenuRow   `json:"submenu,omitempty"`
 	PackageGroup *PackageGroupConfig `json:"packageGroup,omitempty"`
@@ -534,57 +533,17 @@ func (b *Bot) handleCustomMenuButton(ctx context.Context, chatID int64, text str
 		return false
 	}
 	// v2 路径：按钮分发统一走 actions.Dispatcher。
-	// executeDesignerButton 留作 10D 清理，此处不再调用。
-	// dispatcher 非 nil 约束由 newBot 初始化 + TestNewBotInitializesDispatcher 保证。
+	// dispatcher 非 nil 约束由 newBot 初始化 + TestNewBotInitializesDispatcher 保证；
+	// 此处仅作防御性检查，出现 nil 视为初始化缺陷，记日志后不处理。
 	if b.dispatcher == nil {
-		b.logger.Printf("dispatcher not initialized; fallback to legacy path")
-		if err := b.executeDesignerButton(ctx, chatID, button); err != nil {
-			b.logger.Printf("execute designer button failed: %v", err)
-		}
-		return true
+		b.logger.Printf("dispatcher is nil, cannot dispatch button: %s", button.Text)
+		return false
 	}
 	spec := buildButtonSpec(button, path)
 	if err := b.dispatcher.Dispatch(ctx, chatID, spec); err != nil {
 		b.logger.Printf("dispatch designer button failed: %v", err)
 	}
 	return true
-}
-
-func (b *Bot) executeDesignerButton(ctx context.Context, chatID int64, button DesignerMenuButton) error {
-	switch strings.TrimSpace(string(button.Action)) {
-	case "package":
-		if button.PackageID <= 0 {
-			return b.sendPackageMenu(ctx, chatID)
-		}
-		pkg, err := b.findPackage(ctx, button.PackageID)
-		if err != nil {
-			return b.sendMessage(ctx, chatID, "套餐不存在或已下架，请重新选择。", nil)
-		}
-		return b.sendAddressSelection(ctx, chatID, pkg)
-	case "address":
-		return b.sendAddressManagement(ctx, chatID)
-	case "wallet":
-		return b.sendWalletQueryMenu(ctx, chatID)
-	case "text":
-		message := strings.TrimSpace(button.Message)
-		if message == "" {
-			message = "已收到。"
-		}
-		return b.sendMessage(ctx, chatID, message, nil)
-	case "url":
-		url := strings.TrimSpace(button.URL)
-		if url == "" {
-			url = "链接暂未配置。"
-		}
-		return b.sendMessage(ctx, chatID, url, nil)
-	case "start", "refresh":
-		return b.sendPackageMenu(ctx, chatID)
-	default:
-		if strings.TrimSpace(button.Command) == "/start" {
-			return b.sendPackageMenu(ctx, chatID)
-		}
-		return b.sendMessage(ctx, chatID, "暂不支持该按钮动作。", nil)
-	}
 }
 
 func (b *Bot) handlePackageButton(ctx context.Context, chatID int64, text string) bool {
@@ -638,10 +597,15 @@ limit 1`).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
 	if err != nil {
 		return BotDesignerConfig{}, err
 	}
+	rows, parseErr := parseMenuRowsV2(menuConfigRaw)
+	if parseErr != nil {
+		b.logger.Printf("parse menu rows v2 failed (falling back to empty): %v", parseErr)
+		rows = nil
+	}
 	config := BotDesignerConfig{
 		WelcomeText:   strings.TrimSpace(welcomeText),
 		MessageConfig: parseMessageConfig(messageConfigRaw),
-		MenuRows:      parseMenuRows(menuConfigRaw),
+		MenuRows:      rows,
 	}
 	return config, nil
 }
@@ -1412,25 +1376,6 @@ func parseMessageConfig(raw string) map[string]string {
 	}
 	_ = json.Unmarshal([]byte(raw), &config)
 	return config
-}
-
-func parseMenuRows(raw string) []DesignerMenuRow {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	var rows []DesignerMenuRow
-	if err := json.Unmarshal([]byte(raw), &rows); err == nil {
-		return rows
-	}
-	var buttons []DesignerMenuButton
-	if err := json.Unmarshal([]byte(raw), &buttons); err != nil {
-		return nil
-	}
-	legacyRows := make([]DesignerMenuRow, 0, len(buttons))
-	for _, button := range buttons {
-		legacyRows = append(legacyRows, DesignerMenuRow{Buttons: []DesignerMenuButton{button}})
-	}
-	return legacyRows
 }
 
 func packageButtonText(pkg EnergyPackage) string {
