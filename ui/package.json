@@ -13,7 +13,8 @@
     "test": "ng test",
     "lint": "ng lint",
     "lint:fix": "eslint --fix --cache . --ext .ts,.html",
-    "lint:style": "npx stylelint \"src/**/*.less\" --fix"
+    "lint:style": "npx stylelint \"src/**/*.less\" --fix",
+    "audit:designer-theme": "node scripts/audit-designer-theme.mjs"
   },
   "private": true,
   "dependencies": {

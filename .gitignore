@@ -53,6 +53,7 @@ testem.log
 Thumbs.db
 
 scripts
+!/ui/scripts/
 
 # 视觉伴侣原型（brainstorming skill）
 .superpowers/
