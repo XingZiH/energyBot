@@ -1,0 +1,72 @@
+<div class="tg-preview" [class.dark-mode]="$darkMode()">
+  <!-- Header：标题 + 主题切换 -->
+  <div class="tg-header">
+    <span class="tg-header-title">预览</span>
+    <button
+      type="button"
+      class="tg-theme-toggle"
+      (click)="toggleDarkMode()"
+      [attr.aria-label]="$darkMode() ? '切换到浅色' : '切换到深色'"
+      [title]="$darkMode() ? '切换到浅色' : '切换到深色'"
+    >
+      <span nz-icon [nzType]="$darkMode() ? 'bulb' : 'moon'" nzTheme="outline"></span>
+    </button>
+  </div>
+
+  <!-- 聊天区域 -->
+  <div class="tg-chat">
+    <!-- Bot 气泡：始终展示一条消息，触发预览的按钮菜单（或空态提示） -->
+    <div class="tg-bot-bubble">
+      <ng-container *ngIf="$currentMenu().length === 0; else hasMenu">
+        请从左侧设计菜单...
+      </ng-container>
+      <ng-template #hasMenu>请选择：</ng-template>
+    </div>
+
+    <!-- Inline Keyboard：子菜单渲染路径 -->
+    <div class="tg-inline-keyboard" *ngIf="$isInline() && $currentMenu().length > 0">
+      <div
+        class="tg-inline-row"
+        *ngFor="let row of $currentMenu(); trackBy: trackByRowId"
+      >
+        <button
+          *ngFor="let btn of row.buttons; trackBy: trackByButtonId"
+          type="button"
+          class="tg-inline-button"
+          [title]="getButtonTooltip(btn)"
+        >
+          <span class="tg-inline-button-text">{{ btn.text || '(未命名)' }}</span>
+          <span
+            *ngIf="btn.action === ButtonAction.SUBMENU"
+            class="tg-inline-submenu-indicator"
+            nz-icon
+            nzType="right"
+            nzTheme="outline"
+          ></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reply Keyboard：根菜单渲染路径，固定底部 -->
+  <div class="tg-reply-keyboard" *ngIf="!$isInline() && $currentMenu().length > 0">
+    <div
+      class="tg-reply-row"
+      *ngFor="let row of $currentMenu(); trackBy: trackByRowId"
+    >
+      <button
+        *ngFor="let btn of row.buttons; trackBy: trackByButtonId"
+        type="button"
+        class="tg-reply-button"
+        [title]="getButtonTooltip(btn)"
+      >
+        {{ btn.text || '(未命名)' }}
+      </button>
+    </div>
+  </div>
+
+  <!-- 底部面包屑提示 -->
+  <div class="tg-breadcrumb-hint">
+    当前预览层级：<span class="tg-breadcrumb-text">{{ $breadcrumbText() }}</span>
+  </div>
+</div>

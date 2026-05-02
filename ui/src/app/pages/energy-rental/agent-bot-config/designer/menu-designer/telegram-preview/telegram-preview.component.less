@@ -1,0 +1,252 @@
+/**
+ * TelegramPreview 样式。
+ *
+ * 严格例外：本组件允许硬编码 Telegram 官方配色（浅/深主题各一套），
+ * 不走 --ant-color-* CSS 变量。原因：这是"模拟 Telegram 聊天界面"的设计目标，
+ * 必须与 Telegram 实际 UI 观感一致，脱离 ng-zorro 主题系统。
+ *
+ * 其他所有 designer 组件严禁硬编码颜色（见设计文档 §8.2）。
+ */
+
+// ---------------- 浅色主题（Telegram Light） ----------------
+@tg-light-chat-bg: #e5f3ff;
+@tg-light-bubble-bg: #ffffff;
+@tg-light-bubble-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+@tg-light-bubble-text: #000000;
+@tg-light-inline-bg: #ffffff;
+@tg-light-inline-text: #1967d2;
+@tg-light-inline-border: #e0e0e0;
+@tg-light-reply-bg: #f5f5f5;
+@tg-light-reply-button-bg: #ffffff;
+@tg-light-reply-button-text: #000000;
+@tg-light-reply-button-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+@tg-light-header-bg: #ffffff;
+@tg-light-header-text: #000000;
+@tg-light-header-border: #e0e0e0;
+
+// ---------------- 深色主题（Telegram Dark） ----------------
+@tg-dark-chat-bg: #0e1621;
+@tg-dark-bubble-bg: #182533;
+@tg-dark-bubble-text: #ffffff;
+@tg-dark-inline-bg: #182533;
+@tg-dark-inline-text: #64a6ef;
+@tg-dark-inline-border: #2a3f55;
+@tg-dark-reply-bg: #1e2835;
+@tg-dark-reply-button-bg: #2a3f55;
+@tg-dark-reply-button-text: #ffffff;
+@tg-dark-header-bg: #17212b;
+@tg-dark-header-text: #ffffff;
+@tg-dark-header-border: #2a3f55;
+
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.tg-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  background: @tg-light-chat-bg;
+  color: @tg-light-bubble-text;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: background-color 0.2s ease;
+}
+
+// ---------------- Header ----------------
+.tg-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: @tg-light-header-bg;
+  color: @tg-light-header-text;
+  border-bottom: 1px solid @tg-light-header-border;
+}
+
+.tg-header-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tg-theme-toggle {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.06);
+  }
+}
+
+// ---------------- 聊天区域 ----------------
+.tg-chat {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 12px;
+  box-sizing: border-box;
+}
+
+.tg-bot-bubble {
+  max-width: 80%;
+  display: inline-block;
+  background: @tg-light-bubble-bg;
+  color: @tg-light-bubble-text;
+  padding: 8px 12px;
+  border-radius: 12px 12px 12px 4px;
+  box-shadow: @tg-light-bubble-shadow;
+  font-size: 14px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+// ---------------- Inline Keyboard ----------------
+.tg-inline-keyboard {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 80%;
+}
+
+.tg-inline-row {
+  display: flex;
+  gap: 4px;
+}
+
+.tg-inline-button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 10px;
+  background: @tg-light-inline-bg;
+  color: @tg-light-inline-text;
+  border: 1px solid @tg-light-inline-border;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-shadow: @tg-light-bubble-shadow;
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background: rgba(25, 103, 210, 0.06);
+  }
+}
+
+.tg-inline-button-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tg-inline-submenu-indicator {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+// ---------------- Reply Keyboard ----------------
+.tg-reply-keyboard {
+  flex-shrink: 0;
+  background: @tg-light-reply-bg;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tg-reply-row {
+  display: flex;
+  gap: 4px;
+}
+
+.tg-reply-button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 10px 8px;
+  background: @tg-light-reply-button-bg;
+  color: @tg-light-reply-button-text;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: @tg-light-reply-button-shadow;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ---------------- 面包屑底部提示 ----------------
+.tg-breadcrumb-hint {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 6px 12px;
+  background: @tg-light-header-bg;
+  color: @tg-light-header-text;
+  border-top: 1px solid @tg-light-header-border;
+  opacity: 0.75;
+}
+
+.tg-breadcrumb-text {
+  font-weight: 500;
+}
+
+// ================ 深色主题 ================
+.tg-preview.dark-mode {
+  background: @tg-dark-chat-bg;
+  color: @tg-dark-bubble-text;
+
+  .tg-header {
+    background: @tg-dark-header-bg;
+    color: @tg-dark-header-text;
+    border-bottom-color: @tg-dark-header-border;
+  }
+
+  .tg-theme-toggle:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .tg-bot-bubble {
+    background: @tg-dark-bubble-bg;
+    color: @tg-dark-bubble-text;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+
+  .tg-inline-button {
+    background: @tg-dark-inline-bg;
+    color: @tg-dark-inline-text;
+    border-color: @tg-dark-inline-border;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+
+    &:hover {
+      background: rgba(100, 166, 239, 0.1);
+    }
+  }
+
+  .tg-reply-keyboard {
+    background: @tg-dark-reply-bg;
+  }
+
+  .tg-reply-button {
+    background: @tg-dark-reply-button-bg;
+    color: @tg-dark-reply-button-text;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+
+  .tg-breadcrumb-hint {
+    background: @tg-dark-header-bg;
+    color: @tg-dark-header-text;
+    border-top-color: @tg-dark-header-border;
+  }
+}
