@@ -121,19 +121,13 @@
       <!-- ENERGY_PACKAGE_GROUP 动作 -->
       <ng-container *ngIf="btn.action === ButtonAction.ENERGY_PACKAGE_GROUP">
         <nz-form-item>
-          <nz-form-label>套餐 ID 列表</nz-form-label>
+          <nz-form-label>套餐列表</nz-form-label>
           <nz-form-control>
-            <input
-              nz-input
-              type="text"
-              [ngModel]="$packageIdsCsv()"
-              (ngModelChange)="updatePackageGroupIdsCsv($event)"
-              [ngModelOptions]="{ standalone: true }"
-              placeholder="逗号分隔，如：1,2,3"
-            />
-            <div class="property-hint">
-              非数字字符会被忽略。任务 18 将提供专门的套餐选择器。
-            </div>
+            <app-package-group-selector
+              [packageIds]="$packageIds()"
+              [agentId]="agentId()"
+              (packageIdsChange)="updatePackageGroupIds($event)"
+            ></app-package-group-selector>
           </nz-form-control>
         </nz-form-item>
 

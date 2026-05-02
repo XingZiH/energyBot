@@ -4,6 +4,7 @@ import {
   Component,
   computed,
   inject,
+  input,
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -28,6 +29,7 @@ import {
 } from '../../types';
 import { ACTION_ICON_MAP, ACTION_TITLE_MAP } from '../action-icons';
 import { MenuTreeService } from '../menu-tree.service';
+import { PackageGroupSelectorComponent } from '../package-group-selector/package-group-selector.component';
 
 /**
  * PropertyPanel 右侧属性面板（任务 17）。
@@ -66,6 +68,7 @@ import { MenuTreeService } from '../menu-tree.service';
     NzInputModule,
     NzInputNumberModule,
     NzSelectModule,
+    PackageGroupSelectorComponent,
   ],
   templateUrl: './property-panel.component.html',
   styleUrls: ['./property-panel.component.less'],
@@ -73,6 +76,13 @@ import { MenuTreeService } from '../menu-tree.service';
 })
 export class PropertyPanelComponent {
   readonly tree = inject(MenuTreeService);
+
+  /**
+   * 当前 agent ID，传递给 PackageGroupSelector 用于筛选套餐。
+   * 由父容器（任务 20 的 MenuDesigner 主容器）通过 `[agentId]` 注入；
+   * 默认 null 表示尚未就绪，selector 不会触发加载。
+   */
+  readonly agentId = input<number | null>(null);
 
   readonly maxTextLength = MAX_BUTTON_TEXT_LEN;
   readonly ButtonAction = ButtonAction;
@@ -136,11 +146,14 @@ export class PropertyPanelComponent {
     return null;
   });
 
-  /** packageIds CSV 展示值：从 number[] 反序列化为 "1,2,3"。 */
-  readonly $packageIdsCsv = computed<string>(() => {
+  /**
+   * ENERGY_PACKAGE_GROUP 下当前已选 packageIds 的计算属性，传给 selector 做 input。
+   * 非该 action 时返回空数组；selector 侧 agentId=null 时也不会加载。
+   */
+  readonly $packageIds = computed<number[]>(() => {
     const btn = this.$selectedButton();
-    if (!btn || btn.action !== ButtonAction.ENERGY_PACKAGE_GROUP) return '';
-    return (btn.packageGroup?.packageIds ?? []).join(',');
+    if (!btn || btn.action !== ButtonAction.ENERGY_PACKAGE_GROUP) return [];
+    return btn.packageGroup?.packageIds ?? [];
   });
 
   /** 是否为"无配置" action（START / ADDRESS_MANAGE / WALLET_QUERY / ORDERS）。 */
@@ -229,14 +242,10 @@ export class PropertyPanelComponent {
   // -------- ENERGY_PACKAGE_GROUP 专用 --------
 
   /**
-   * 从 CSV 字符串更新 packageIds。过滤非数字/空段，保留其他 packageGroup 字段。
+   * 来自 PackageGroupSelector 的 packageIdsChange。
+   * 保留 sortBy / textTemplate，覆盖 packageIds。
    */
-  updatePackageGroupIdsCsv(csv: string): void {
-    const ids = csv
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0 && /^\d+$/.test(s))
-      .map((s) => Number(s));
+  updatePackageGroupIds(ids: number[]): void {
     this.patchPackageGroup({ packageIds: ids });
   }
 

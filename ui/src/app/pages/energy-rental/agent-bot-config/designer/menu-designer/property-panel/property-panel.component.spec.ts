@@ -1,11 +1,15 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { of } from 'rxjs';
 
 import { NZ_ICONS, NzIconModule } from 'ng-zorro-antd/icon';
 import {
   BgColorsOutline,
+  CloseOutline,
+  CloseCircleOutline,
   CodeOutline,
   DownOutline,
+  DragOutline,
   EnvironmentOutline,
   FolderOutline,
   FontColorsOutline,
@@ -18,6 +22,7 @@ import {
   WalletOutline,
 } from '@ant-design/icons-angular/icons';
 
+import { EnergyPackageService } from '../../services/energy-package.service';
 import { ButtonAction, MAX_BUTTON_TEXT_LEN, MenuButton } from '../../types';
 import { MenuTreeService } from '../menu-tree.service';
 import { PropertyPanelComponent } from './property-panel.component';
@@ -41,11 +46,18 @@ describe('PropertyPanelComponent', () => {
       providers: [
         MenuTreeService,
         {
+          provide: EnergyPackageService,
+          useValue: { listPackages: jasmine.createSpy('listPackages').and.returnValue(of([])) },
+        },
+        {
           provide: NZ_ICONS,
           useValue: [
             BgColorsOutline,
+            CloseOutline,
+            CloseCircleOutline,
             CodeOutline,
             DownOutline,
+            DragOutline,
             EnvironmentOutline,
             FolderOutline,
             FontColorsOutline,
@@ -291,41 +303,63 @@ describe('PropertyPanelComponent', () => {
 
   // ---------- ENERGY_PACKAGE_GROUP ----------
 
-  it('13. ENERGY_PACKAGE_GROUP 的 packageIds CSV 输入解析为 number[]', () => {
+  it('13. ENERGY_PACKAGE_GROUP 下 updatePackageGroupIds 写入 packageIds 保留其他字段', () => {
     const id = seedButton(tree, {
       id: 'b1',
       text: 'x',
       action: ButtonAction.ENERGY_PACKAGE_GROUP,
-      packageGroup: { packageIds: [], sortBy: 'price_asc', textTemplate: '' },
+      packageGroup: { packageIds: [], sortBy: 'price_desc', textTemplate: '模板' },
     });
     fixture.detectChanges();
 
     const spy = spyOn(tree, 'updateButton').and.callThrough();
-    component.updatePackageGroupIdsCsv('1,2,3');
+    component.updatePackageGroupIds([5, 6, 7]);
 
     expect(spy).toHaveBeenCalled();
     const patch = spy.calls.mostRecent().args[1] as Partial<MenuButton>;
-    expect(patch.packageGroup?.packageIds).toEqual([1, 2, 3]);
-    expect(patch.packageGroup?.sortBy).toBe('price_asc');
-    expect(patch.packageGroup?.textTemplate).toBe('');
+    expect(patch.packageGroup?.packageIds).toEqual([5, 6, 7]);
+    expect(patch.packageGroup?.sortBy).toBe('price_desc');
+    expect(patch.packageGroup?.textTemplate).toBe('模板');
     // 实际写入也验证
     const after = tree.$currentMenu()[0].buttons[0];
-    expect(after.packageGroup?.packageIds).toEqual([1, 2, 3]);
+    expect(after.packageGroup?.packageIds).toEqual([5, 6, 7]);
     expect(after.id).toBe(id);
   });
 
-  it('13b. packageIds CSV 含非数字时过滤掉（"1, a, 2, ,3" → [1,2,3])', () => {
+  it('13b. ENERGY_PACKAGE_GROUP 下模板渲染 app-package-group-selector', () => {
     seedButton(tree, {
       id: 'b1',
       text: 'x',
       action: ButtonAction.ENERGY_PACKAGE_GROUP,
-      packageGroup: { packageIds: [], sortBy: 'price_asc', textTemplate: '' },
+      packageGroup: { packageIds: [1, 2], sortBy: 'price_asc', textTemplate: '' },
     });
     fixture.detectChanges();
 
-    component.updatePackageGroupIdsCsv('1, a, 2, ,3');
-    const after = tree.$currentMenu()[0].buttons[0];
-    expect(after.packageGroup?.packageIds).toEqual([1, 2, 3]);
+    const selectorEl = fixture.debugElement.query(By.css('app-package-group-selector'));
+    expect(selectorEl)
+      .withContext('ENERGY_PACKAGE_GROUP 下应渲染 PackageGroupSelector')
+      .toBeTruthy();
+    // 确保 CSV 旧 input 已经被移除
+    const csvInput = fixture.debugElement.query(By.css('input[placeholder*="逗号"]'));
+    expect(csvInput)
+      .withContext('CSV 输入应该被完全移除')
+      .toBeNull();
+  });
+
+  it('13c. $packageIds 计算属性仅对 ENERGY_PACKAGE_GROUP 返回值；其他 action 返回空', () => {
+    seedButton(tree, {
+      id: 'b1',
+      text: 'x',
+      action: ButtonAction.ENERGY_PACKAGE_GROUP,
+      packageGroup: { packageIds: [10, 20], sortBy: 'price_asc', textTemplate: '' },
+    });
+    fixture.detectChanges();
+    expect(component.$packageIds()).toEqual([10, 20]);
+
+    // 切到 TEXT
+    component.updateAction(ButtonAction.TEXT);
+    fixture.detectChanges();
+    expect(component.$packageIds()).toEqual([]);
   });
 
   it('14. ENERGY_PACKAGE_GROUP 的 sortBy select 更新调 updateButton', () => {
@@ -397,7 +431,7 @@ describe('PropertyPanelComponent', () => {
     expect(after.style?.textColor).toBe('#00ff00');
   });
 
-  // ---------- 附加：$selectedButton 深度搜索 ----------
+  // ---------- 附加：$selectedButton 深度搜索 / agentId ----------
 
   it('16. $selectedButton 能从深层 submenu 中找到按钮', () => {
     tree.setRootMenu([
@@ -430,5 +464,24 @@ describe('PropertyPanelComponent', () => {
 
     expect(component.$selectedButton()?.id).toBe('deep');
     expect(component.$selectedButton()?.text).toBe('深层按钮');
+  });
+
+  it('17. agentId input 默认 null，可通过 setInput 设置并传递给 selector', () => {
+    expect(component.agentId()).toBeNull();
+
+    seedButton(tree, {
+      id: 'b1',
+      text: 'x',
+      action: ButtonAction.ENERGY_PACKAGE_GROUP,
+      packageGroup: { packageIds: [], sortBy: 'price_asc', textTemplate: '' },
+    });
+    fixture.componentRef.setInput('agentId', 42);
+    fixture.detectChanges();
+
+    expect(component.agentId()).toBe(42);
+    const selectorEl = fixture.debugElement.query(By.css('app-package-group-selector'));
+    expect(selectorEl).toBeTruthy();
+    // 通过 componentInstance 验证 agentId input 被传递
+    expect(selectorEl.componentInstance.agentId()).toBe(42);
   });
 });

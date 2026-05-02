@@ -1,0 +1,93 @@
+<div class="selector-root">
+  <!-- 加载态 -->
+  <nz-spin *ngIf="$loading()" class="selector-spin" nzSimple></nz-spin>
+
+  <!-- 错误态 -->
+  <div *ngIf="$error() as err" class="selector-error">
+    <span nz-icon nzType="close-circle" nzTheme="outline"></span>
+    {{ err }}
+  </div>
+
+  <!-- 已选套餐列表 -->
+  <ng-container *ngIf="!$loading()">
+    <ng-container *ngIf="selectedPackages().length > 0; else emptyTpl">
+      <div class="selector-header">
+        <span class="selector-title">已选 {{ selectedPackages().length }} 个套餐</span>
+        <span class="selector-hint">可拖动排序</span>
+      </div>
+
+      <div
+        cdkDropList
+        (cdkDropListDropped)="onDrop($event)"
+        class="selected-list"
+      >
+        <div
+          *ngFor="let pkg of selectedPackages(); let i = index; trackBy: trackById"
+          cdkDrag
+          class="selected-item"
+        >
+          <span
+            cdkDragHandle
+            nz-icon
+            nzType="drag"
+            nzTheme="outline"
+            class="drag-handle"
+            title="拖动调整顺序"
+          ></span>
+          <span class="package-order">#{{ i + 1 }}</span>
+          <span class="package-name" [title]="pkg.name">{{ pkg.name }}</span>
+          <span class="package-meta">
+            <nz-tag nzColor="blue">{{ pkg.priceTRX }} TRX</nz-tag>
+            <nz-tag nzColor="green">{{ pkg.energy }} 能量</nz-tag>
+            <nz-tag *ngIf="pkg.durationHours" nzColor="default">{{ pkg.durationHours }}h</nz-tag>
+          </span>
+          <button
+            nz-button
+            nzType="text"
+            nzDanger
+            nzSize="small"
+            type="button"
+            class="remove-btn"
+            (click)="removePackage(pkg.id)"
+            [attr.aria-label]="'移除 ' + pkg.name"
+          >
+            <span nz-icon nzType="close" nzTheme="outline"></span>
+          </button>
+        </div>
+      </div>
+    </ng-container>
+
+    <ng-template #emptyTpl>
+      <nz-empty
+        class="selector-empty"
+        nzNotFoundImage="simple"
+        [nzNotFoundContent]="'未选中任何套餐，请从下方添加'"
+      ></nz-empty>
+    </ng-template>
+
+    <!-- 添加套餐下拉 -->
+    <div class="add-package-row">
+      <nz-select
+        class="add-select"
+        [ngModel]="null"
+        (ngModelChange)="addPackage($event)"
+        nzPlaceHolder="+ 添加套餐"
+        nzAllowClear
+        nzShowSearch
+        [nzDisabled]="availablePackages().length === 0"
+      >
+        <nz-option
+          *ngFor="let pkg of availablePackages()"
+          [nzValue]="pkg.id"
+          [nzLabel]="pkg.name + ' (' + pkg.priceTRX + ' TRX / ' + pkg.energy + ' 能量)'"
+        ></nz-option>
+      </nz-select>
+      <span
+        *ngIf="availablePackages().length === 0 && !$loading()"
+        class="add-empty-hint"
+      >
+        无可用套餐
+      </span>
+    </div>
+  </ng-container>
+</div>
