@@ -292,8 +292,8 @@ func TestDispatch_BotErrorBubbles(t *testing.T) {
 // --- 构造函数 ---
 
 func TestNewDispatcher(t *testing.T) {
-	t.Run("nil bot 返回的 Dispatcher 调用 Dispatch 会 panic 或返回错误", func(t *testing.T) {
-		// 我们不强制 nil 守卫行为；仅确认 NewDispatcher 对非 nil 输入返回可用实例。
+	t.Run("非 nil bot 返回可用 Dispatcher", func(t *testing.T) {
+		// 仅确认 NewDispatcher 对非 nil 输入返回可用实例；nil bot 的守卫行为不在此约束。
 		d := NewDispatcher(&mockBot{})
 		if d == nil {
 			t.Fatal("NewDispatcher returned nil")
