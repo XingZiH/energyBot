@@ -148,6 +148,48 @@ func (b *Bot) ShowOrders(ctx context.Context, chatID int64) error {
 	return b.sendMessage(ctx, chatID, "订单查询功能即将上线。", nil)
 }
 
+// buildButtonSpec 把 telegram.DesignerMenuButton 映射为 actions.ButtonSpec。
+//
+// path 是按钮在菜单树中的坐标（如 "row0.btn1"），用于 Dispatcher 的 submenu
+// 分支在下钻时拼接 callback_data。其它 action 可以不设。
+//
+// 映射规则：
+//   - 基本字段（Action/Text/URL/Message/Command）透传，ButtonAction 枚举值
+//     通过 string 强转——actions 包的常量与 telegram.ButtonAction 的字符串值
+//     逐一对齐（由 designer_sync_test.go 守护）。
+//   - Submenu 递归映射；子按钮的 Path 字段留空：callback_data 由
+//     actions.handleSubmenu 基于父 Path + 遍历坐标动态生成，子 ButtonSpec
+//     的 Path 只在任务 11 解析 callback_query 时才会被回填。
+//   - PackageGroup 逐字段拷贝；nil 透传。
+func buildButtonSpec(btn DesignerMenuButton, path string) actions.ButtonSpec {
+	spec := actions.ButtonSpec{
+		Action:  string(btn.Action),
+		Text:    btn.Text,
+		URL:     btn.URL,
+		Message: btn.Message,
+		Command: btn.Command,
+		Path:    path,
+	}
+	if len(btn.Submenu) > 0 {
+		spec.Submenu = make([]actions.RowSpec, 0, len(btn.Submenu))
+		for _, row := range btn.Submenu {
+			line := actions.RowSpec{Buttons: make([]actions.ButtonSpec, 0, len(row.Buttons))}
+			for _, child := range row.Buttons {
+				line.Buttons = append(line.Buttons, buildButtonSpec(child, ""))
+			}
+			spec.Submenu = append(spec.Submenu, line)
+		}
+	}
+	if btn.PackageGroup != nil {
+		spec.PackageGroup = &actions.PackageGroupSpec{
+			PackageIDs:   btn.PackageGroup.PackageIDs,
+			TextTemplate: btn.PackageGroup.TextTemplate,
+			SortBy:       btn.PackageGroup.SortBy,
+		}
+	}
+	return spec
+}
+
 // RunCommand 实现 actions.BotAPI。
 //
 // 把按钮配置中的命令字符串分发到对应业务入口。当前支持：

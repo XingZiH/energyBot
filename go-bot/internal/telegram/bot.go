@@ -529,12 +529,23 @@ func (b *Bot) handleCustomMenuButton(ctx context.Context, chatID int64, text str
 	if err != nil || !designerConfig.hasCustomMenu() {
 		return false
 	}
-	button, ok := designerConfig.findButton(text, b.packageButtonTextByID(ctx))
+	button, path, ok := designerConfig.findButton(text, b.packageButtonTextByID(ctx))
 	if !ok {
 		return false
 	}
-	if err := b.executeDesignerButton(ctx, chatID, button); err != nil {
-		b.logger.Printf("execute designer button failed: %v", err)
+	// v2 路径：按钮分发统一走 actions.Dispatcher。
+	// executeDesignerButton 留作 10D 清理，此处不再调用。
+	// dispatcher 非 nil 约束由 newBot 初始化 + TestNewBotInitializesDispatcher 保证。
+	if b.dispatcher == nil {
+		b.logger.Printf("dispatcher not initialized; fallback to legacy path")
+		if err := b.executeDesignerButton(ctx, chatID, button); err != nil {
+			b.logger.Printf("execute designer button failed: %v", err)
+		}
+		return true
+	}
+	spec := buildButtonSpec(button, path)
+	if err := b.dispatcher.Dispatch(ctx, chatID, spec); err != nil {
+		b.logger.Printf("dispatch designer button failed: %v", err)
 	}
 	return true
 }
@@ -1342,16 +1353,25 @@ func (c BotDesignerConfig) replyKeyboard(packages []EnergyPackage) *replyKeyboar
 	}
 }
 
-func (c BotDesignerConfig) findButton(text string, packageTextByID map[int]string) (DesignerMenuButton, bool) {
+// findButton 在根层菜单中按文本查找按钮。
+//
+// 返回值：
+//   - button：匹配的按钮（未找到时为零值）
+//   - path：按钮在菜单树中的坐标，格式 "row{i}.btn{j}"（未找到时为空串）
+//   - ok：是否找到
+//
+// Path 用于后续 actions.Dispatcher 分发 submenu 按钮时拼接 callback_data。
+// 目前只遍历根层；子菜单按钮由 callback_query（任务 11）处理。
+func (c BotDesignerConfig) findButton(text string, packageTextByID map[int]string) (DesignerMenuButton, string, bool) {
 	text = strings.TrimSpace(text)
-	for _, row := range c.MenuRows {
-		for _, button := range row.Buttons {
+	for i, row := range c.MenuRows {
+		for j, button := range row.Buttons {
 			if strings.EqualFold(text, designerButtonText(button, packageTextByID)) {
-				return button, true
+				return button, fmt.Sprintf("row%d.btn%d", i, j), true
 			}
 		}
 	}
-	return DesignerMenuButton{}, false
+	return DesignerMenuButton{}, "", false
 }
 
 func designerButtonText(button DesignerMenuButton, packageTextByID map[int]string) string {
