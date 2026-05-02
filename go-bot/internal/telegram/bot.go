@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ng-antd-admin/go-bot/internal/config"
+	"ng-antd-admin/go-bot/internal/telegram/actions"
 )
 
 const telegramAPIBase = "https://api.telegram.org"
@@ -37,6 +38,7 @@ type Bot struct {
 	energyProvider     string
 	selectedPackageIDs map[int64]int
 	pendingAddressOps  map[int64]pendingAddressOperation
+	dispatcher         *actions.Dispatcher
 	mu                 sync.Mutex
 }
 
@@ -230,7 +232,7 @@ func newBot(cfg config.Config, db *pgxpool.Pool, logger *log.Logger, agentID int
 		logger = log.Default()
 	}
 
-	return &Bot{
+	b := &Bot{
 		agentID:            agentID,
 		token:              strings.TrimSpace(token),
 		db:                 db,
@@ -244,7 +246,10 @@ func newBot(cfg config.Config, db *pgxpool.Pool, logger *log.Logger, agentID int
 		energyProvider:     strings.TrimSpace(cfg.EnergyProvider),
 		selectedPackageIDs: map[int64]int{},
 		pendingAddressOps:  map[int64]pendingAddressOperation{},
-	}, nil
+	}
+	// Bot 完成全部字段初始化后再注入 dispatcher，避免 actions 子包持有半初始化状态。
+	b.dispatcher = actions.NewDispatcher(b)
+	return b, nil
 }
 
 func LoadEnabledAgentBots(ctx context.Context, cfg config.Config, db *pgxpool.Pool, logger *log.Logger) ([]*Bot, error) {
