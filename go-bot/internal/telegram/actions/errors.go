@@ -44,4 +44,12 @@ var (
 	// ErrInvalidPackageGroup 表示 energy_package_group action 的 PackageGroup
 	// 为 nil 或 PackageIDs 为空。
 	ErrInvalidPackageGroup = errors.New("package_group 配置无效")
+
+	// ErrMissingPath 表示 submenu action 缺失 ButtonSpec.Path 字段。
+	// Path 是拼接子按钮 callback_data 的基底，由 bot.go 在分发前按按钮坐标赋值。
+	ErrMissingPath = errors.New("submenu 缺失 ButtonSpec.Path")
+
+	// ErrCallbackTooLong 表示拼接出的 callback_data 超过 Telegram Bot API
+	// 协议上限（64 字节）。通常意味着 submenu 嵌套过深或下标过大，需调整菜单设计。
+	ErrCallbackTooLong = errors.New("callback_data 超过 Telegram 64 字节上限")
 )

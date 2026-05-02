@@ -9,7 +9,7 @@ import (
 // BotAPI 是 actions 子包需要的 bot 能力抽象。
 //
 // 保持尽可能窄：只列出骨架实现用到的方法。任务 8/9/10 接入真实业务时可按需扩展：
-//   - 任务 8（submenu）：SendMessageWithInline(chatID, text, markup)
+//   - 任务 8（submenu）：SendMessageWithInline(chatID, text, rows) ✓
 //   - 任务 9（energy_package_group）：LoadPackagesByIDs(ctx, ids)
 //   - 任务 10（command/start/address/wallet/orders）：可能追加若干
 //     SendAddressManagement / SendWalletQueryMenu / SendPackageMenu 等
@@ -17,6 +17,18 @@ import (
 // 单测通过 mockBot 提供实现；生产由 telegram.Bot 适配。
 type BotAPI interface {
 	SendMessage(ctx context.Context, chatID int64, text string, markup any) error
+	// SendMessageWithInline 发送带 Inline Keyboard 的消息。
+	// rows 的每一行是一排按钮，最终由适配层转换为 Telegram 的 inline_keyboard 结构。
+	SendMessageWithInline(ctx context.Context, chatID int64, text string, rows [][]InlineButton) error
+}
+
+// InlineButton 是 actions 包内部使用的 inline keyboard 按钮结构。
+//
+// 独立于 telegram.inlineKeyboardButton 定义，避免 actions → telegram 的 import 依赖
+// （bot.go 适配层在调用 SendMessageWithInline 的实现时把本结构映射为 telegram 包内的 struct）。
+type InlineButton struct {
+	Text         string
+	CallbackData string
 }
 
 // ButtonSpec 是 Dispatch 方法需要的按钮参数。
@@ -32,6 +44,13 @@ type ButtonSpec struct {
 	PackageID    int // v1 遗留字段；v2 骨架不使用，保留以支持后续 v1→v2 迁移路径。
 	Submenu      []RowSpec
 	PackageGroup *PackageGroupSpec
+
+	// Path 是按钮在菜单树中的坐标，用于 submenu 子按钮拼接 callback_data。
+	// 格式：row{i}.btn{j}[.row{i}.btn{j}]*
+	//   - 根层 row0 的第 1 个按钮：Path = "row0.btn1"
+	//   - 上述按钮的 submenu 里 row0 第 2 个按钮：Path = "row0.btn1.row0.btn2"
+	// 由调用方（bot.go）在分发前按按钮遍历位置赋值；其它 action 可以不设。
+	Path string
 }
 
 // RowSpec 是 Submenu 中的一行按钮。
