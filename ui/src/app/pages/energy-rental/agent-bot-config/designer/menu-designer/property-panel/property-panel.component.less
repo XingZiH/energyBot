@@ -1,0 +1,131 @@
+// PropertyPanel 样式
+//
+// 色彩策略：严格 --ant-color-* CSS 变量，与 MenuCanvas / ComponentPalette 保持一致。
+
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--ant-color-bg-container);
+}
+
+.property-panel-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.property-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--ant-color-text-tertiary);
+}
+
+.property-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ant-color-text);
+  font-size: 15px;
+  font-weight: 500;
+
+  [nz-icon] {
+    color: var(--ant-color-primary);
+    font-size: 16px;
+  }
+}
+
+.property-header-title {
+  flex: 1;
+}
+
+.property-header-meta {
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.property-divider {
+  margin: 12px 0;
+}
+
+.property-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.property-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  line-height: 1.4;
+}
+
+// 校验失败时标红
+input.has-error,
+textarea.has-error {
+  border-color: var(--ant-color-error) !important;
+
+  &:focus {
+    box-shadow: 0 0 0 2px var(--ant-color-error-bg, rgba(255, 77, 79, 0.12)) !important;
+  }
+}
+
+.property-note {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 6px;
+  background: var(--ant-color-bg-layout);
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+
+  &-muted {
+    text-align: center;
+    color: var(--ant-color-text-tertiary);
+    font-style: normal;
+  }
+}
+
+.property-enter-submenu {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.property-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+  color: var(--ant-color-text);
+  font-size: 14px;
+  font-weight: 500;
+
+  &:hover {
+    color: var(--ant-color-primary);
+  }
+}
+
+.property-section-toggle {
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  transition: transform 0.2s ease;
+}
+
+.property-section-title {
+  flex: 1;
+}
+
+.property-section-body {
+  padding-top: 8px;
+}

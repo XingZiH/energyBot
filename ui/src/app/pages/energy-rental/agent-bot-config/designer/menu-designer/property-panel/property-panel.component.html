@@ -1,0 +1,231 @@
+<div class="property-panel-root">
+  <ng-container *ngIf="$selectedButton() as btn; else emptyTpl">
+    <div class="property-header">
+      <span nz-icon [nzType]="actionIconMap[btn.action]" nzTheme="outline"></span>
+      <span class="property-header-title">属性</span>
+      <span class="property-header-meta">{{ actionTitleMap[btn.action] }}</span>
+    </div>
+    <nz-divider class="property-divider"></nz-divider>
+
+    <form class="property-form" nz-form nzLayout="vertical">
+      <!-- 按钮文本 -->
+      <nz-form-item>
+        <nz-form-label>按钮文本</nz-form-label>
+        <nz-form-control [nzErrorTip]="$textError() || ''">
+          <input
+            nz-input
+            type="text"
+            [attr.maxlength]="maxTextLength + 10"
+            [ngModel]="btn.text"
+            (ngModelChange)="updateText($event)"
+            [ngModelOptions]="{ standalone: true }"
+            placeholder="按钮显示文字（≤ 64 字符）"
+            [class.has-error]="$textError() !== null"
+          />
+          <div class="property-hint" *ngIf="$textError() as err">{{ err }}</div>
+        </nz-form-control>
+      </nz-form-item>
+
+      <!-- 动作类型 -->
+      <nz-form-item>
+        <nz-form-label>动作类型</nz-form-label>
+        <nz-form-control>
+          <nz-select
+            [ngModel]="btn.action"
+            (ngModelChange)="updateAction($event)"
+            [ngModelOptions]="{ standalone: true }"
+            nzShowSearch
+          >
+            <nz-option
+              *ngFor="let opt of actionOptions"
+              [nzValue]="opt.value"
+              [nzLabel]="opt.label"
+            ></nz-option>
+          </nz-select>
+        </nz-form-control>
+      </nz-form-item>
+
+      <!-- URL 动作特定字段 -->
+      <ng-container *ngIf="btn.action === ButtonAction.URL">
+        <nz-form-item>
+          <nz-form-label>URL 地址</nz-form-label>
+          <nz-form-control [nzErrorTip]="$urlError() || ''">
+            <input
+              nz-input
+              type="url"
+              [ngModel]="btn.url || ''"
+              (ngModelChange)="updateURL($event)"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="https://example.com"
+              [class.has-error]="$urlError() !== null"
+            />
+            <div class="property-hint" *ngIf="$urlError() as err">{{ err }}</div>
+          </nz-form-control>
+        </nz-form-item>
+      </ng-container>
+
+      <!-- TEXT 动作 -->
+      <ng-container *ngIf="btn.action === ButtonAction.TEXT">
+        <nz-form-item>
+          <nz-form-label>消息内容</nz-form-label>
+          <nz-form-control>
+            <textarea
+              nz-input
+              rows="4"
+              [ngModel]="btn.message || ''"
+              (ngModelChange)="updateMessage($event)"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="用户点击按钮后回复的消息文本"
+            ></textarea>
+          </nz-form-control>
+        </nz-form-item>
+      </ng-container>
+
+      <!-- COMMAND 动作 -->
+      <ng-container *ngIf="btn.action === ButtonAction.COMMAND">
+        <nz-form-item>
+          <nz-form-label>命令</nz-form-label>
+          <nz-form-control [nzErrorTip]="$commandError() || ''">
+            <input
+              nz-input
+              type="text"
+              [ngModel]="btn.command || ''"
+              (ngModelChange)="updateCommand($event)"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="/start"
+              [class.has-error]="$commandError() !== null"
+            />
+            <div class="property-hint" *ngIf="$commandError() as err">{{ err }}</div>
+          </nz-form-control>
+        </nz-form-item>
+      </ng-container>
+
+      <!-- SUBMENU 动作 -->
+      <ng-container *ngIf="btn.action === ButtonAction.SUBMENU">
+        <div class="property-note">
+          此按钮承载一个子菜单，请点击下方按钮进入子菜单编辑。
+        </div>
+        <button
+          nz-button
+          nzType="primary"
+          nzGhost
+          type="button"
+          class="property-enter-submenu"
+          (click)="enterSubmenu()"
+        >
+          <span nz-icon nzType="folder" nzTheme="outline"></span>
+          进入子菜单
+        </button>
+      </ng-container>
+
+      <!-- ENERGY_PACKAGE_GROUP 动作 -->
+      <ng-container *ngIf="btn.action === ButtonAction.ENERGY_PACKAGE_GROUP">
+        <nz-form-item>
+          <nz-form-label>套餐 ID 列表</nz-form-label>
+          <nz-form-control>
+            <input
+              nz-input
+              type="text"
+              [ngModel]="$packageIdsCsv()"
+              (ngModelChange)="updatePackageGroupIdsCsv($event)"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="逗号分隔，如：1,2,3"
+            />
+            <div class="property-hint">
+              非数字字符会被忽略。任务 18 将提供专门的套餐选择器。
+            </div>
+          </nz-form-control>
+        </nz-form-item>
+
+        <nz-form-item>
+          <nz-form-label>排序方式</nz-form-label>
+          <nz-form-control>
+            <nz-select
+              [ngModel]="btn.packageGroup?.sortBy || 'price_asc'"
+              (ngModelChange)="updatePackageGroupSortBy($event)"
+              [ngModelOptions]="{ standalone: true }"
+            >
+              <nz-option
+                *ngFor="let opt of sortByOptions"
+                [nzValue]="opt.value"
+                [nzLabel]="opt.label"
+              ></nz-option>
+            </nz-select>
+          </nz-form-control>
+        </nz-form-item>
+
+        <nz-form-item>
+          <nz-form-label>文本模板</nz-form-label>
+          <nz-form-control>
+            <input
+              nz-input
+              type="text"
+              [ngModel]="btn.packageGroup?.textTemplate || ''"
+              (ngModelChange)="updatePackageGroupTemplate($event)"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="例：{name} - {price} TRX"
+            />
+          </nz-form-control>
+        </nz-form-item>
+      </ng-container>
+
+      <!-- 无配置 action 提示 -->
+      <ng-container *ngIf="$isNoConfigAction()">
+        <div class="property-note property-note-muted">
+          此动作无需额外配置。
+        </div>
+      </ng-container>
+
+      <!-- 按钮样式（可折叠） -->
+      <nz-divider class="property-divider"></nz-divider>
+      <div class="property-section-header" (click)="toggleStyleCollapse()">
+        <span
+          nz-icon
+          [nzType]="$styleCollapsed() ? 'right' : 'down'"
+          nzTheme="outline"
+          class="property-section-toggle"
+        ></span>
+        <span class="property-section-title">按钮样式</span>
+      </div>
+      <div class="property-section-body" *ngIf="!$styleCollapsed()">
+        <nz-form-item>
+          <nz-form-label>
+            <span nz-icon nzType="bg-colors" nzTheme="outline"></span>
+            背景色
+          </nz-form-label>
+          <nz-form-control>
+            <nz-color-picker
+              [nzValue]="btn.style?.bgColor || '#ffffff'"
+              nzFormat="hex"
+              nzAllowClear
+              (nzOnChange)="onBgColorChange($event)"
+            ></nz-color-picker>
+          </nz-form-control>
+        </nz-form-item>
+
+        <nz-form-item>
+          <nz-form-label>
+            <span nz-icon nzType="font-colors" nzTheme="outline"></span>
+            文字色
+          </nz-form-label>
+          <nz-form-control>
+            <nz-color-picker
+              [nzValue]="btn.style?.textColor || '#000000'"
+              nzFormat="hex"
+              nzAllowClear
+              (nzOnChange)="onTextColorChange($event)"
+            ></nz-color-picker>
+          </nz-form-control>
+        </nz-form-item>
+      </div>
+    </form>
+  </ng-container>
+
+  <ng-template #emptyTpl>
+    <nz-empty
+      class="property-empty"
+      nzNotFoundImage="simple"
+      [nzNotFoundContent]="'选中一个按钮开始编辑属性'"
+    ></nz-empty>
+  </ng-template>
+</div>
