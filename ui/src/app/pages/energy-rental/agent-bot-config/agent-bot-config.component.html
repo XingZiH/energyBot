@@ -3,7 +3,7 @@
 <nz-spin [nzSpinning]="loading()">
   <nz-alert
     class="m-b-16"
-    nzMessage="Telegram Bot Token 留空时不会覆盖旧配置；文案和按钮编排会保存到当前机器人配置。"
+    nzMessage="Telegram Bot Token 留空时不会覆盖旧配置；菜单和消息模板会保存到当前机器人的 UI 配置端点。"
     nzShowIcon
     nzType="info"
   ></nz-alert>
@@ -62,10 +62,10 @@
     </nz-descriptions>
   </nz-card>
 
-  <form nz-form [formGroup]="form">
-    <nz-card>
-      <nz-tabs [nzAnimated]="false">
-        <nz-tab nzTitle="基础参数">
+  <nz-card>
+    <nz-tabs [nzAnimated]="false">
+      <nz-tab nzTitle="基础设置">
+        <form nz-form [formGroup]="form">
           <div class="tab-panel">
             <nz-form-item>
               <nz-form-label nzRequired>机器人状态</nz-form-label>
@@ -107,368 +107,44 @@
                 </nz-form-control>
               </nz-form-item>
             }
-          </div>
-        </nz-tab>
 
-        <nz-tab nzTitle="文案模板">
-          <div class="tab-panel">
-            <nz-alert
-              class="m-b-16"
-              nzMessage="模板变量：{orderNo} {packageName} {amount} {coin} {receiverAddress} {expireMinutes}"
-              nzShowIcon
-              nzType="info"
-            ></nz-alert>
-
-            <nz-form-item>
-              <nz-form-label>欢迎消息 (/start)</nz-form-label>
-              <nz-form-control>
-                <textarea formControlName="welcomeText" nz-input rows="3" placeholder="用户进入机器人时看到的欢迎文案"></textarea>
-              </nz-form-control>
-            </nz-form-item>
-            <nz-form-item>
-              <nz-form-label>下单成功模板</nz-form-label>
-              <nz-form-control>
-                <textarea formControlName="orderCreated" nz-input rows="3" placeholder="订单创建后的消息模板"></textarea>
-              </nz-form-control>
-            </nz-form-item>
-            <nz-form-item>
-              <nz-form-label>待支付模板</nz-form-label>
-              <nz-form-control>
-                <textarea formControlName="payPending" nz-input rows="3" placeholder="订单待支付时展示"></textarea>
-              </nz-form-control>
-            </nz-form-item>
-            <nz-form-item>
-              <nz-form-label>支付成功模板</nz-form-label>
-              <nz-form-control>
-                <textarea formControlName="paySuccess" nz-input rows="3" placeholder="支付成功或发放完成时展示"></textarea>
-              </nz-form-control>
-            </nz-form-item>
-            <nz-form-item>
-              <nz-form-label>支付失败模板</nz-form-label>
-              <nz-form-control>
-                <textarea formControlName="payFailed" nz-input rows="3" placeholder="支付失败或订单异常时展示"></textarea>
-              </nz-form-control>
-            </nz-form-item>
-            <nz-form-item>
-              <nz-form-label>无套餐模板</nz-form-label>
-              <nz-form-control>
-                <textarea formControlName="noPackage" nz-input rows="2" placeholder="没有可售套餐时展示"></textarea>
-              </nz-form-control>
-            </nz-form-item>
-            <nz-form-item>
-              <nz-form-label>未知命令模板</nz-form-label>
-              <nz-form-control>
-                <textarea formControlName="unknownCommand" nz-input rows="2" placeholder="用户输入未知内容时展示"></textarea>
-              </nz-form-control>
-            </nz-form-item>
-          </div>
-        </nz-tab>
-
-        <nz-tab nzTitle="按钮编排">
-          <div class="designer-toolbar">
-            <nz-alert
-              nzMessage="左侧点击组件添加，中间预览可拖拽排序，右侧编辑按钮属性。"
-              nzShowIcon
-              nzType="info"
-            ></nz-alert>
-            <div class="designer-mode">
-              <nz-switch [ngModel]="interactiveMode()" [ngModelOptions]="{ standalone: true }" (ngModelChange)="interactiveMode.set($event)"></nz-switch>
-              <span class="switch-label">模拟预览</span>
+            <div class="submit-row">
+              <button nz-button nzType="primary" [nzLoading]="saving()" (click)="onSaveBot()">保存基础设置</button>
+              <button nz-button type="button" (click)="loadAll()"><i nz-icon nzType="reload"></i>刷新</button>
             </div>
           </div>
+        </form>
+      </nz-tab>
 
-          <div class="designer-layout">
-            <nz-card class="palette-card" nzTitle="组件" nzSize="small">
-              <div class="palette-section">
-                <div class="section-label">布局</div>
-                <button nz-button nzBlock (click)="addRow()" type="button">
-                  <i nz-icon nzType="border-horizontal"></i>
-                  添加按钮行
-                </button>
-              </div>
+      <nz-tab nzTitle="菜单设计">
+        <div class="menu-designer-wrapper">
+          @if (uiConfigLoadError()) {
+            <nz-alert
+              nzType="error"
+              nzMessage="菜单数据加载失败"
+              nzDescription="请检查网络或后端 /energy-rental/ui-config 接口状态，然后点击刷新。"
+              nzShowIcon
+            ></nz-alert>
+          } @else if (uiConfig(); as ui) {
+            <app-menu-designer
+              [initialMenu]="initialMenu()"
+              [agentId]="config()?.agentId ?? null"
+              (menuChange)="onMenuChange($event)"
+            ></app-menu-designer>
+          }
+        </div>
+      </nz-tab>
 
-              <nz-divider></nz-divider>
-
-              <div class="palette-section">
-                <div class="section-label">基础按钮</div>
-                @for (item of buttonPresets; track item.action) {
-                  <button class="palette-item" nz-button nzBlock type="button" (click)="addButton(item.action)">
-                    <i nz-icon [nzType]="item.icon"></i>
-                    <span>{{ item.label }}</span>
-                    <small>{{ item.description }}</small>
-                  </button>
-                }
-              </div>
-
-              <nz-divider></nz-divider>
-
-              <div class="palette-section">
-                <div class="section-label">样式预设</div>
-                @for (preset of colorPresets; track preset.name) {
-                  <button class="preset-button" nz-button nzBlock type="button" (click)="addStyledButton('package', preset, '⚡')">
-                    <span class="preset-chip" [style.background]="preset.bgColor" [style.color]="preset.textColor">{{ preset.name }}</span>
-                  </button>
-                }
-              </div>
-            </nz-card>
-
-            <nz-card class="preview-card" nzTitle="Telegram 预览" nzSize="small">
-              <div class="phone-frame" (click)="clearSelection()">
-                <div class="tg-header">
-                  <div class="tg-avatar">B</div>
-                  <div>
-                    <div class="tg-name">{{ config()?.telegramBotUsername || 'Energy Bot' }}</div>
-                    <div class="tg-status">机器人</div>
-                  </div>
-                </div>
-
-                <div class="tg-body">
-                  <div class="tg-bubble">{{ form.controls.welcomeText.value || '欢迎使用能量租赁机器人。' }}</div>
-
-                  @if (menuRows().length === 0) {
-                    <div class="empty-keyboard">从左侧添加按钮组件</div>
-                  } @else {
-                    <div
-                      class="tg-keyboard"
-                      cdkDropList
-                      [cdkDropListData]="menuRows()"
-                      (cdkDropListDropped)="dropRow($event)"
-                      (click)="$event.stopPropagation()"
-                    >
-                      @for (row of menuRows(); track row.id; let rowIndex = $index) {
-                        <div
-                          class="tg-row"
-                          cdkDrag
-                          cdkDropList
-                          [id]="buttonDropId(row)"
-                          [cdkDropListConnectedTo]="buttonDropListIds()"
-                          [cdkDropListData]="row.buttons"
-                          (cdkDropListDropped)="dropButton($event, row)"
-                          [class.selected]="selection().type === 'row' && selection().rowId === row.id"
-                          [style.gap.px]="row.style.gap ?? 6"
-                          (click)="selectRow(row.id)"
-                        >
-                          @if (row.buttons.length === 0) {
-                            <div class="empty-row">第 {{ rowIndex + 1 }} 行</div>
-                          }
-                          @for (button of row.buttons; track button.id) {
-                            <button
-                              class="tg-button"
-                              cdkDrag
-                              type="button"
-                              [class.selected]="selection().buttonId === button.id"
-                              [style.background]="button.style.bgColor"
-                              [style.color]="button.style.textColor"
-                              [class.bold]="button.style.bold"
-                              (click)="selectButton(row.id, button.id); $event.stopPropagation()"
-                            >
-                              @if (button.style.emoji) {
-                                <span>{{ button.style.emoji }}</span>
-                              }
-                              <span>{{ buttonText(button, rowIndex) }}</span>
-                              @if (button.style.emojiSuffix) {
-                                <span>{{ button.style.emojiSuffix }}</span>
-                              }
-                            </button>
-                          }
-                        </div>
-                      }
-                    </div>
-                  }
-                </div>
-
-                <div class="tg-input">输入消息...</div>
-              </div>
-            </nz-card>
-
-            <nz-card class="property-card" nzTitle="属性" nzSize="small">
-              @if (!selection().type) {
-                <div class="property-empty">
-                  <i nz-icon nzType="select" nzTheme="outline"></i>
-                  <p>点击预览中的行或按钮编辑属性</p>
-                </div>
-              } @else if (selection().type === 'row' && selectedRow(); as row) {
-                <div class="property-title">
-                  <strong>行属性</strong>
-                  <nz-tag>第 {{ rowIndex(row) + 1 }} 行</nz-tag>
-                </div>
-                <nz-form-item>
-                  <nz-form-label>按钮间距</nz-form-label>
-                  <nz-form-control>
-                    <nz-input-number
-                      [(ngModel)]="row.style.gap"
-                      [ngModelOptions]="{ standalone: true }"
-                      [nzMin]="0"
-                      [nzMax]="20"
-                      (ngModelChange)="touchDesigner()"
-                    ></nz-input-number>
-                  </nz-form-control>
-                </nz-form-item>
-                <div class="property-actions">
-                  <button nz-button type="button" (click)="moveSelected(-1)"><i nz-icon nzType="up"></i>上移</button>
-                  <button nz-button type="button" (click)="moveSelected(1)"><i nz-icon nzType="down"></i>下移</button>
-                  <button nz-button nzDanger type="button" (click)="removeSelected()"><i nz-icon nzType="delete"></i>删除行</button>
-                </div>
-              } @else if (selection().type === 'button' && selectedButton(); as button) {
-                <div class="property-title">
-                  <strong>按钮属性</strong>
-                  <nz-tag>{{ actionLabels[button.action] }}</nz-tag>
-                </div>
-
-                <nz-form-item>
-                  <nz-form-label>按钮文案</nz-form-label>
-                  <nz-form-control>
-                    <input nz-input [(ngModel)]="button.text" [ngModelOptions]="{ standalone: true }" (ngModelChange)="touchDesigner()" />
-                  </nz-form-control>
-                </nz-form-item>
-
-                <nz-form-item>
-                  <nz-form-label>动作类型</nz-form-label>
-                  <nz-form-control>
-                    <nz-select
-                      [ngModel]="button.action"
-                      [ngModelOptions]="{ standalone: true }"
-                      (ngModelChange)="setButtonAction($event)"
-                    >
-                      @for (item of buttonPresets; track item.action) {
-                        <nz-option [nzValue]="item.action" [nzLabel]="item.label"></nz-option>
-                      }
-                    </nz-select>
-                  </nz-form-control>
-                </nz-form-item>
-
-                @if (button.action === 'package') {
-                  <nz-form-item>
-                    <nz-form-label>绑定套餐</nz-form-label>
-                    <nz-form-control>
-                      <nz-select
-                        nzAllowClear
-                        nzShowSearch
-                        [(ngModel)]="button.packageId"
-                        [ngModelOptions]="{ standalone: true }"
-                        (ngModelChange)="touchDesigner()"
-                        nzPlaceHolder="请选择套餐"
-                      >
-                        @for (item of packages(); track item.id) {
-                          <nz-option [nzValue]="item.id" [nzLabel]="item.packageName"></nz-option>
-                        }
-                      </nz-select>
-                    </nz-form-control>
-                  </nz-form-item>
-                } @else if (button.action === 'text') {
-                  <nz-form-item>
-                    <nz-form-label>提示文本</nz-form-label>
-                    <nz-form-control>
-                      <textarea
-                        nz-input
-                        rows="3"
-                        [(ngModel)]="button.message"
-                        [ngModelOptions]="{ standalone: true }"
-                        (ngModelChange)="touchDesigner()"
-                      ></textarea>
-                    </nz-form-control>
-                  </nz-form-item>
-                } @else if (button.action === 'url') {
-                  <nz-form-item>
-                    <nz-form-label>链接地址</nz-form-label>
-                    <nz-form-control>
-                      <input
-                        nz-input
-                        [(ngModel)]="button.url"
-                        [ngModelOptions]="{ standalone: true }"
-                        (ngModelChange)="touchDesigner()"
-                        placeholder="https://..."
-                      />
-                    </nz-form-control>
-                  </nz-form-item>
-                }
-
-                <nz-divider></nz-divider>
-
-                <div class="section-label">颜色预设</div>
-                <div class="color-grid">
-                  @for (preset of colorPresets; track preset.name) {
-                    <button
-                      class="color-chip"
-                      type="button"
-                      [style.background]="preset.bgColor"
-                      [style.color]="preset.textColor"
-                      (click)="applyPreset(preset)"
-                    >
-                      {{ preset.name }}
-                    </button>
-                  }
-                </div>
-
-                <nz-form-item>
-                  <nz-form-label>背景颜色</nz-form-label>
-                  <nz-form-control>
-                    <input
-                      nz-input
-                      [(ngModel)]="button.style.bgColor"
-                      [ngModelOptions]="{ standalone: true }"
-                      (ngModelChange)="touchDesigner()"
-                      placeholder="#eef6ff"
-                    />
-                  </nz-form-control>
-                </nz-form-item>
-                <nz-form-item>
-                  <nz-form-label>文字颜色</nz-form-label>
-                  <nz-form-control>
-                    <input
-                      nz-input
-                      [(ngModel)]="button.style.textColor"
-                      [ngModelOptions]="{ standalone: true }"
-                      (ngModelChange)="touchDesigner()"
-                      placeholder="#1677ff"
-                    />
-                  </nz-form-control>
-                </nz-form-item>
-                <nz-form-item>
-                  <nz-form-label>加粗</nz-form-label>
-                  <nz-form-control>
-                    <nz-switch
-                      [(ngModel)]="button.style.bold"
-                      [ngModelOptions]="{ standalone: true }"
-                      (ngModelChange)="touchDesigner()"
-                    ></nz-switch>
-                  </nz-form-control>
-                </nz-form-item>
-
-                <div class="section-label">前置图标</div>
-                <div class="emoji-grid">
-                  @for (emoji of emojiOptions; track emoji) {
-                    <button type="button" [class.active]="button.style.emoji === emoji" (click)="setButtonEmoji(emoji)">
-                      {{ emoji || '无' }}
-                    </button>
-                  }
-                </div>
-                <div class="section-label">后置图标</div>
-                <div class="emoji-grid">
-                  @for (emoji of emojiOptions; track emoji) {
-                    <button type="button" [class.active]="button.style.emojiSuffix === emoji" (click)="setButtonEmoji(emoji, true)">
-                      {{ emoji || '无' }}
-                    </button>
-                  }
-                </div>
-
-                <div class="property-actions">
-                  <button nz-button type="button" (click)="moveSelected(-1)"><i nz-icon nzType="left"></i>左移</button>
-                  <button nz-button type="button" (click)="moveSelected(1)"><i nz-icon nzType="right"></i>右移</button>
-                  <button nz-button type="button" (click)="duplicateButton()"><i nz-icon nzType="copy"></i>复制</button>
-                  <button nz-button type="button" (click)="resetButtonStyle()">重置样式</button>
-                  <button nz-button nzDanger type="button" (click)="removeSelected()"><i nz-icon nzType="delete"></i>删除</button>
-                </div>
-              }
-            </nz-card>
-          </div>
-        </nz-tab>
-      </nz-tabs>
-
-      <div class="submit-row">
-        <button nz-button nzType="primary" [nzLoading]="saving()" (click)="submit()">保存配置</button>
-        <button nz-button type="button" (click)="loadConfig()"><i nz-icon nzType="reload"></i>刷新</button>
-      </div>
-    </nz-card>
-  </form>
+      <nz-tab nzTitle="消息模板" nzDisabled>
+        <div class="tab-panel">
+          <nz-alert
+            nzType="info"
+            nzMessage="消息模板编辑器即将推出"
+            nzDescription="welcomeText / orderCreated / payPending 等 9 个模板的编辑 UI 将在后续任务中提供。当前保存菜单时会保留服务端原值。"
+            nzShowIcon
+          ></nz-alert>
+        </div>
+      </nz-tab>
+    </nz-tabs>
+  </nz-card>
 </nz-spin>
