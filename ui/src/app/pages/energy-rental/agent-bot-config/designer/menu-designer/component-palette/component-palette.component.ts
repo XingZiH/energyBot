@@ -7,6 +7,7 @@ import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzTooltipModule } from 'ng-zorro-antd/tooltip';
 
 import { ButtonAction } from '../../types';
+import { ACTION_ICON_MAP, ACTION_TITLE_MAP } from '../action-icons';
 
 /**
  * 组件面板一项的数据结构。
@@ -24,6 +25,42 @@ export interface PaletteItem {
   /** 卡片描述 + tooltip 内容 */
   description: string;
 }
+
+/**
+ * description 描述文案（仅 palette 使用，按 action 分散到此 map）。
+ *
+ * 未放入 action-icons.ts 的原因：canvas 卡片展示 text 由用户编辑，
+ * 不需要 palette 的引导文案；提取到共享文件反而扩大无必要的依赖。
+ */
+const PALETTE_DESCRIPTION_MAP: Record<ButtonAction, string> = {
+  [ButtonAction.URL]: '点击打开外部网址',
+  [ButtonAction.TEXT]: '点击回复一段文字',
+  [ButtonAction.COMMAND]: '执行 /xxx 命令',
+  [ButtonAction.START]: '返回欢迎界面',
+  [ButtonAction.SUBMENU]: '下钻到下一级',
+  [ButtonAction.ENERGY_PACKAGE_GROUP]: '展示套餐列表供选购',
+  [ButtonAction.ADDRESS_MANAGE]: '打开地址管理面板',
+  [ButtonAction.WALLET_QUERY]: '查询钱包链上数据',
+  [ButtonAction.ORDERS]: '展示用户订单列表',
+};
+
+/**
+ * paletteItems 展示顺序：
+ * 基础交互（URL/TEXT/COMMAND/START）→ 结构（SUBMENU）→ 业务（能量/地址/钱包/订单）。
+ *
+ * 按频率/逻辑分组排列，而不是 enum 声明序，改动 enum 声明序不影响 UI。
+ */
+const PALETTE_DISPLAY_ORDER: ReadonlyArray<ButtonAction> = [
+  ButtonAction.URL,
+  ButtonAction.TEXT,
+  ButtonAction.COMMAND,
+  ButtonAction.START,
+  ButtonAction.SUBMENU,
+  ButtonAction.ENERGY_PACKAGE_GROUP,
+  ButtonAction.ADDRESS_MANAGE,
+  ButtonAction.WALLET_QUERY,
+  ButtonAction.ORDERS,
+];
 
 /**
  * 左侧组件面板：列出 9 种可拖拽到画布的按钮类型。
@@ -45,67 +82,17 @@ export class ComponentPaletteComponent {
   /**
    * 9 种 action 对应的 palette 项。
    *
-   * 顺序即 UI 从上到下的展示顺序：按使用频率 / 逻辑分组排序——
-   * 基础交互（URL/TEXT/COMMAND/START） → 结构（SUBMENU）→ 业务（能量/地址/钱包/订单）。
+   * 顺序由 PALETTE_DISPLAY_ORDER 控制；图标 + 标题从 action-icons.ts 的共享 map 读取，
+   * 避免 palette 与 canvas 两端维护两份（新增 enum 值时 TS 会强制补齐 map）。
    *
    * ReadonlyArray + 每项 readonly 字段：运行期不可变，避免意外修改。
    */
-  readonly paletteItems: ReadonlyArray<PaletteItem> = [
-    {
-      action: ButtonAction.URL,
-      icon: 'link',
-      title: '网址链接',
-      description: '点击打开外部网址',
-    },
-    {
-      action: ButtonAction.TEXT,
-      icon: 'message',
-      title: '文本消息',
-      description: '点击回复一段文字',
-    },
-    {
-      action: ButtonAction.COMMAND,
-      icon: 'code',
-      title: '命令',
-      description: '执行 /xxx 命令',
-    },
-    {
-      action: ButtonAction.START,
-      icon: 'home',
-      title: '开始',
-      description: '返回欢迎界面',
-    },
-    {
-      action: ButtonAction.SUBMENU,
-      icon: 'folder',
-      title: '子菜单',
-      description: '下钻到下一级',
-    },
-    {
-      action: ButtonAction.ENERGY_PACKAGE_GROUP,
-      icon: 'thunderbolt',
-      title: '能量套餐组',
-      description: '展示套餐列表供选购',
-    },
-    {
-      action: ButtonAction.ADDRESS_MANAGE,
-      icon: 'environment',
-      title: '地址管理',
-      description: '打开地址管理面板',
-    },
-    {
-      action: ButtonAction.WALLET_QUERY,
-      icon: 'wallet',
-      title: '钱包查询',
-      description: '查询钱包链上数据',
-    },
-    {
-      action: ButtonAction.ORDERS,
-      icon: 'ordered-list',
-      title: '我的订单',
-      description: '展示用户订单列表',
-    },
-  ];
+  readonly paletteItems: ReadonlyArray<PaletteItem> = PALETTE_DISPLAY_ORDER.map((action) => ({
+    action,
+    icon: ACTION_ICON_MAP[action],
+    title: ACTION_TITLE_MAP[action],
+    description: PALETTE_DESCRIPTION_MAP[action],
+  }));
 
   /** *ngFor trackBy：避免每次变更检测时重建 DOM 节点 */
   trackByAction = (_: number, item: PaletteItem): string => item.action;
