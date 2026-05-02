@@ -8,11 +8,10 @@ import (
 
 // BotAPI 是 actions 子包需要的 bot 能力抽象。
 //
-// 保持尽可能窄：只列出骨架实现用到的方法。任务 8/9/10 接入真实业务时可按需扩展：
+// 保持尽可能窄：只列出骨架实现用到的方法。任务 8/9/10 接入真实业务时按需扩展：
 //   - 任务 8（submenu）：SendMessageWithInline(chatID, text, rows) ✓
 //   - 任务 9（energy_package_group）：LoadPackagesByIDs(ctx, ids) ✓
-//   - 任务 10（command/start/address/wallet/orders）：可能追加若干
-//     SendAddressManagement / SendWalletQueryMenu / SendPackageMenu 等
+//   - 任务 10B（command/start/address/wallet/orders）：新增下列 5 个业务入口 ✓
 //
 // 单测通过 mockBot 提供实现；生产由 telegram.Bot 适配。
 type BotAPI interface {
@@ -28,6 +27,25 @@ type BotAPI interface {
 	//   - 部分 ID 不存在时返回能加载到的子集（不报错），由本包 handler 决定展示策略
 	//   - 返回的顺序不约定，handler 内部自行排序
 	LoadPackagesByIDs(ctx context.Context, ids []int) ([]PackageInfo, error)
+
+	// 以下 5 个业务入口由任务 10B 加入，用于把 5 个 action handler 从占位文本
+	// 切换到真实业务调用。
+	//
+	// 命名约定：Show* 是交互式展示（发送菜单/消息），RunCommand 是命令分发。
+	// 实现方（bot.go）只做转发到已有业务方法，不在此包实现业务逻辑。
+
+	// ShowStart 展示欢迎界面与主菜单（语义对齐 /start 命令）。
+	ShowStart(ctx context.Context, chatID int64) error
+	// ShowAddressManagement 展示地址管理面板。
+	ShowAddressManagement(ctx context.Context, chatID int64) error
+	// ShowWalletQuery 展示钱包查询入口。
+	ShowWalletQuery(ctx context.Context, chatID int64) error
+	// ShowOrders 展示订单列表。任务 10B 先占位；任务 12 接入 MessageConfig 模板渲染。
+	ShowOrders(ctx context.Context, chatID int64) error
+	// RunCommand 分发命令字符串（如 "/start" "/menu"）。
+	// 已知命令由实现方路由到具体业务；未知命令由实现方决定友好提示策略。
+	// 调用方传入前应保证 cmd 非空且已 trim（Dispatcher.handleCommand 已负责此契约）。
+	RunCommand(ctx context.Context, chatID int64, cmd string) error
 }
 
 // PackageInfo 是 actions 包内部使用的套餐信息结构，专供套餐组展开消费。

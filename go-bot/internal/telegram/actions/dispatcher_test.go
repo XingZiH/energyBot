@@ -34,6 +34,27 @@ type mockBot struct {
 	loadPackages   []PackageInfo
 	loadErr        error
 	loadCalledWith []int
+
+	// 任务 10B 新增 5 个业务方法的调用记录。
+	// *Calls 记录调用次数；last*ChatID 记录最近一次 chatID；
+	// lastCommand 记录 RunCommand 最近一次传入的 cmd。
+	// 任何一个方法的 err 字段非 nil 时返回错误而不记录 chatID（对齐 SendMessage 语义）。
+	showStartCalls        int
+	showStartLastChatID   int64
+	showStartErr          error
+	showAddressCalls      int
+	showAddressLastChatID int64
+	showAddressErr        error
+	showWalletCalls       int
+	showWalletLastChatID  int64
+	showWalletErr         error
+	showOrdersCalls       int
+	showOrdersLastChatID  int64
+	showOrdersErr         error
+	runCommandCalls       int
+	runCommandLastChatID  int64
+	runCommandLastCmd     string
+	runCommandErr         error
 }
 
 func (m *mockBot) SendMessage(_ context.Context, chatID int64, text string, markup any) error {
@@ -59,6 +80,52 @@ func (m *mockBot) LoadPackagesByIDs(_ context.Context, ids []int) ([]PackageInfo
 		return nil, m.loadErr
 	}
 	return m.loadPackages, nil
+}
+
+func (m *mockBot) ShowStart(_ context.Context, chatID int64) error {
+	if m.showStartErr != nil {
+		return m.showStartErr
+	}
+	m.showStartCalls++
+	m.showStartLastChatID = chatID
+	return nil
+}
+
+func (m *mockBot) ShowAddressManagement(_ context.Context, chatID int64) error {
+	if m.showAddressErr != nil {
+		return m.showAddressErr
+	}
+	m.showAddressCalls++
+	m.showAddressLastChatID = chatID
+	return nil
+}
+
+func (m *mockBot) ShowWalletQuery(_ context.Context, chatID int64) error {
+	if m.showWalletErr != nil {
+		return m.showWalletErr
+	}
+	m.showWalletCalls++
+	m.showWalletLastChatID = chatID
+	return nil
+}
+
+func (m *mockBot) ShowOrders(_ context.Context, chatID int64) error {
+	if m.showOrdersErr != nil {
+		return m.showOrdersErr
+	}
+	m.showOrdersCalls++
+	m.showOrdersLastChatID = chatID
+	return nil
+}
+
+func (m *mockBot) RunCommand(_ context.Context, chatID int64, cmd string) error {
+	if m.runCommandErr != nil {
+		return m.runCommandErr
+	}
+	m.runCommandCalls++
+	m.runCommandLastChatID = chatID
+	m.runCommandLastCmd = cmd
+	return nil
 }
 
 // lastText 返回最后一条被发送的消息文本；没有则返回空串。
@@ -137,7 +204,7 @@ func TestDispatch_Routing(t *testing.T) {
 		}
 	})
 
-	t.Run("command action 返回待接入占位", func(t *testing.T) {
+	t.Run("command action 调用 RunCommand 并传递命令字符串", func(t *testing.T) {
 		bot := &mockBot{}
 		d := NewDispatcher(bot)
 		err := d.Dispatch(context.Background(), chatID, ButtonSpec{
@@ -147,23 +214,49 @@ func TestDispatch_Routing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(bot.lastText(), "待接入") {
-			t.Errorf("expected 待接入 marker, got %q", bot.lastText())
+		if bot.runCommandCalls != 1 {
+			t.Fatalf("RunCommand calls: want 1, got %d", bot.runCommandCalls)
 		}
-		if !strings.Contains(bot.lastText(), "/start") {
-			t.Errorf("expected command name in message, got %q", bot.lastText())
+		if bot.runCommandLastChatID != chatID {
+			t.Errorf("RunCommand chatID: want %d, got %d", chatID, bot.runCommandLastChatID)
+		}
+		if bot.runCommandLastCmd != "/start" {
+			t.Errorf("RunCommand cmd: want %q, got %q", "/start", bot.runCommandLastCmd)
+		}
+		// 走 RunCommand 路径时不应直接调用 SendMessage。
+		if len(bot.sent) != 0 {
+			t.Errorf("command action 不应直接调用 SendMessage，got %d", len(bot.sent))
 		}
 	})
 
-	t.Run("start action 返回待接入占位", func(t *testing.T) {
+	t.Run("command action 空 Command 返回 ErrEmptyCommand", func(t *testing.T) {
+		bot := &mockBot{}
+		d := NewDispatcher(bot)
+		err := d.Dispatch(context.Background(), chatID, ButtonSpec{
+			Action:  ActionCommand,
+			Command: "   ",
+		})
+		if !errors.Is(err, ErrEmptyCommand) {
+			t.Fatalf("expected ErrEmptyCommand, got %v", err)
+		}
+		if bot.runCommandCalls != 0 {
+			t.Errorf("RunCommand 不应被调用，got %d", bot.runCommandCalls)
+		}
+	})
+
+	t.Run("start action 调用 ShowStart", func(t *testing.T) {
 		bot := &mockBot{}
 		d := NewDispatcher(bot)
 		err := d.Dispatch(context.Background(), chatID, ButtonSpec{Action: ActionStart})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(bot.lastText(), "待接入") {
-			t.Errorf("expected 待接入 marker, got %q", bot.lastText())
+		if bot.showStartCalls != 1 || bot.showStartLastChatID != chatID {
+			t.Errorf("ShowStart: calls=%d chatID=%d (want 1, %d)",
+				bot.showStartCalls, bot.showStartLastChatID, chatID)
+		}
+		if len(bot.sent) != 0 {
+			t.Errorf("start action 不应直接调用 SendMessage，got %d", len(bot.sent))
 		}
 	})
 
@@ -245,39 +338,42 @@ func TestDispatch_Routing(t *testing.T) {
 		}
 	})
 
-	t.Run("address_manage action 返回待接入占位", func(t *testing.T) {
+	t.Run("address_manage action 调用 ShowAddressManagement", func(t *testing.T) {
 		bot := &mockBot{}
 		d := NewDispatcher(bot)
 		err := d.Dispatch(context.Background(), chatID, ButtonSpec{Action: ActionAddressManage})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(bot.lastText(), "待接入") {
-			t.Errorf("expected 待接入 marker, got %q", bot.lastText())
+		if bot.showAddressCalls != 1 || bot.showAddressLastChatID != chatID {
+			t.Errorf("ShowAddressManagement: calls=%d chatID=%d (want 1, %d)",
+				bot.showAddressCalls, bot.showAddressLastChatID, chatID)
 		}
 	})
 
-	t.Run("wallet_query action 返回待接入占位", func(t *testing.T) {
+	t.Run("wallet_query action 调用 ShowWalletQuery", func(t *testing.T) {
 		bot := &mockBot{}
 		d := NewDispatcher(bot)
 		err := d.Dispatch(context.Background(), chatID, ButtonSpec{Action: ActionWalletQuery})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(bot.lastText(), "待接入") {
-			t.Errorf("expected 待接入 marker, got %q", bot.lastText())
+		if bot.showWalletCalls != 1 || bot.showWalletLastChatID != chatID {
+			t.Errorf("ShowWalletQuery: calls=%d chatID=%d (want 1, %d)",
+				bot.showWalletCalls, bot.showWalletLastChatID, chatID)
 		}
 	})
 
-	t.Run("orders action 返回待接入占位", func(t *testing.T) {
+	t.Run("orders action 调用 ShowOrders", func(t *testing.T) {
 		bot := &mockBot{}
 		d := NewDispatcher(bot)
 		err := d.Dispatch(context.Background(), chatID, ButtonSpec{Action: ActionOrders})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(bot.lastText(), "待接入") {
-			t.Errorf("expected 待接入 marker, got %q", bot.lastText())
+		if bot.showOrdersCalls != 1 || bot.showOrdersLastChatID != chatID {
+			t.Errorf("ShowOrders: calls=%d chatID=%d (want 1, %d)",
+				bot.showOrdersCalls, bot.showOrdersLastChatID, chatID)
 		}
 	})
 
@@ -518,6 +614,59 @@ func TestDispatch_BotErrorBubbles(t *testing.T) {
 		})
 		if !errors.Is(err, boom) {
 			t.Fatalf("expected inline boom to bubble up, got %v", err)
+		}
+	})
+
+	t.Run("ShowStart 返回错误时 Dispatch 冒泡", func(t *testing.T) {
+		boom := errors.New("start boom")
+		bot := &mockBot{showStartErr: boom}
+		d := NewDispatcher(bot)
+		err := d.Dispatch(context.Background(), 1, ButtonSpec{Action: ActionStart})
+		if !errors.Is(err, boom) {
+			t.Fatalf("expected start boom to bubble up, got %v", err)
+		}
+	})
+
+	t.Run("ShowAddressManagement 返回错误时 Dispatch 冒泡", func(t *testing.T) {
+		boom := errors.New("addr boom")
+		bot := &mockBot{showAddressErr: boom}
+		d := NewDispatcher(bot)
+		err := d.Dispatch(context.Background(), 1, ButtonSpec{Action: ActionAddressManage})
+		if !errors.Is(err, boom) {
+			t.Fatalf("expected addr boom to bubble up, got %v", err)
+		}
+	})
+
+	t.Run("ShowWalletQuery 返回错误时 Dispatch 冒泡", func(t *testing.T) {
+		boom := errors.New("wallet boom")
+		bot := &mockBot{showWalletErr: boom}
+		d := NewDispatcher(bot)
+		err := d.Dispatch(context.Background(), 1, ButtonSpec{Action: ActionWalletQuery})
+		if !errors.Is(err, boom) {
+			t.Fatalf("expected wallet boom to bubble up, got %v", err)
+		}
+	})
+
+	t.Run("ShowOrders 返回错误时 Dispatch 冒泡", func(t *testing.T) {
+		boom := errors.New("orders boom")
+		bot := &mockBot{showOrdersErr: boom}
+		d := NewDispatcher(bot)
+		err := d.Dispatch(context.Background(), 1, ButtonSpec{Action: ActionOrders})
+		if !errors.Is(err, boom) {
+			t.Fatalf("expected orders boom to bubble up, got %v", err)
+		}
+	})
+
+	t.Run("RunCommand 返回错误时 Dispatch 冒泡", func(t *testing.T) {
+		boom := errors.New("cmd boom")
+		bot := &mockBot{runCommandErr: boom}
+		d := NewDispatcher(bot)
+		err := d.Dispatch(context.Background(), 1, ButtonSpec{
+			Action:  ActionCommand,
+			Command: "/start",
+		})
+		if !errors.Is(err, boom) {
+			t.Fatalf("expected cmd boom to bubble up, got %v", err)
 		}
 	})
 }

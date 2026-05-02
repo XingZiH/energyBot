@@ -13,12 +13,9 @@ import (
 //   - url / text：v1 语义 SendMessage
 //   - submenu（任务 8）：渲染 Inline Keyboard
 //   - energy_package_group（任务 9）：加载→排序→模板渲染→Inline Keyboard
-//
-// 其余 5 个返回统一前缀 "[action 待接入" 的占位消息，便于后续任务接入时搜索。
-//
-// 接入计划：
-//   - 任务 10：handleCommand / handleStart / handleAddressManage /
-//     handleWalletQuery / handleOrders 接入对应业务
+//   - command / start / address_manage / wallet_query / orders（任务 10B）：
+//     通过 BotAPI 新增的 ShowStart / ShowAddressManagement / ShowWalletQuery /
+//     ShowOrders / RunCommand 转发到 Bot 的真实业务方法
 
 // Submenu 渲染相关常量。
 const (
@@ -93,16 +90,21 @@ func (d *Dispatcher) handleText(ctx context.Context, chatID int64, spec ButtonSp
 	return d.bot.SendMessage(ctx, chatID, msg, nil)
 }
 
-// handleCommand 触发内部命令（/start 等）。任务 10 接入真实命令分发。
+// handleCommand 把按钮配置的命令字符串（spec.Command）转发给 BotAPI.RunCommand。
+//
+// 契约：Command 空字符串（或全空白）被视为配置错误，直接返回 ErrEmptyCommand，
+// 不发任何消息。调用方应在菜单配置环节校验，避免运行时到达此分支。
 func (d *Dispatcher) handleCommand(ctx context.Context, chatID int64, spec ButtonSpec) error {
 	cmd := strings.TrimSpace(spec.Command)
-	return d.bot.SendMessage(ctx, chatID,
-		fmt.Sprintf("[command 待接入: %s]", cmd), nil)
+	if cmd == "" {
+		return ErrEmptyCommand
+	}
+	return d.bot.RunCommand(ctx, chatID, cmd)
 }
 
-// handleStart 显示欢迎界面 + 主菜单。任务 10 接入。
+// handleStart 展示欢迎界面与主菜单，等同于用户发送 /start。
 func (d *Dispatcher) handleStart(ctx context.Context, chatID int64, _ ButtonSpec) error {
-	return d.bot.SendMessage(ctx, chatID, "[start 待接入]", nil)
+	return d.bot.ShowStart(ctx, chatID)
 }
 
 // handleSubmenu 把 spec.Submenu 渲染成 Inline Keyboard 发出。
@@ -288,17 +290,19 @@ func filterOrderByIDs(packages []PackageInfo, ids []int) []PackageInfo {
 	return out
 }
 
-// handleAddressManage 进入地址管理。任务 10 接入。
+// handleAddressManage 展示地址管理面板。
 func (d *Dispatcher) handleAddressManage(ctx context.Context, chatID int64, _ ButtonSpec) error {
-	return d.bot.SendMessage(ctx, chatID, "[address_manage 待接入]", nil)
+	return d.bot.ShowAddressManagement(ctx, chatID)
 }
 
-// handleWalletQuery 进入钱包查询。任务 10 接入。
+// handleWalletQuery 展示钱包查询入口。
 func (d *Dispatcher) handleWalletQuery(ctx context.Context, chatID int64, _ ButtonSpec) error {
-	return d.bot.SendMessage(ctx, chatID, "[wallet_query 待接入]", nil)
+	return d.bot.ShowWalletQuery(ctx, chatID)
 }
 
-// handleOrders 进入订单查询。任务 10 接入。
+// handleOrders 展示订单列表。
+//
+// 当前实现由 BotAPI.ShowOrders 发送占位消息（任务 12 接入 MessageConfig 模板渲染真实列表）。
 func (d *Dispatcher) handleOrders(ctx context.Context, chatID int64, _ ButtonSpec) error {
-	return d.bot.SendMessage(ctx, chatID, "[orders 待接入]", nil)
+	return d.bot.ShowOrders(ctx, chatID)
 }

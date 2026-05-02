@@ -118,3 +118,48 @@ func parsePriceSunToTRX(priceSun string) (float64, error) {
 	}
 	return float64(sun) / 1e6, nil
 }
+
+// ShowStart 实现 actions.BotAPI。
+//
+// 语义等价于用户发送 /start：渲染并推送主菜单（套餐卡片 + 底部 Reply Keyboard）。
+// 任务 10B 先直接转发到 v1 的 sendPackageMenu；任务 12 接入 MessageConfig 后
+// 可由此入口切换成模板驱动的欢迎语。
+func (b *Bot) ShowStart(ctx context.Context, chatID int64) error {
+	return b.sendPackageMenu(ctx, chatID)
+}
+
+// ShowAddressManagement 实现 actions.BotAPI。
+// 展示地址管理面板（转发到 v1 的 sendAddressManagement）。
+func (b *Bot) ShowAddressManagement(ctx context.Context, chatID int64) error {
+	return b.sendAddressManagement(ctx, chatID)
+}
+
+// ShowWalletQuery 实现 actions.BotAPI。
+// 展示钱包查询入口（转发到 v1 的 sendWalletQueryMenu）。
+func (b *Bot) ShowWalletQuery(ctx context.Context, chatID int64) error {
+	return b.sendWalletQueryMenu(ctx, chatID)
+}
+
+// ShowOrders 实现 actions.BotAPI。
+//
+// 任务 10B 仅发送固定占位消息。
+// TODO(任务 12)：接入 MessageConfig 模板，按用户 chatID 加载订单列表并渲染。
+func (b *Bot) ShowOrders(ctx context.Context, chatID int64) error {
+	return b.sendMessage(ctx, chatID, "订单查询功能即将上线。", nil)
+}
+
+// RunCommand 实现 actions.BotAPI。
+//
+// 把按钮配置中的命令字符串分发到对应业务入口。当前支持：
+//   - "/start"、"/menu"：对齐 v1 isMenuCommand 的同义集合，走 sendPackageMenu
+//
+// 未识别的命令不报错，给用户一条友好提示（避免菜单编辑错误导致用户侧静默）。
+// 调用方（Dispatcher.handleCommand）已负责：去空白、拒绝空字符串。
+func (b *Bot) RunCommand(ctx context.Context, chatID int64, cmd string) error {
+	switch strings.TrimSpace(cmd) {
+	case "/start", "/menu":
+		return b.sendPackageMenu(ctx, chatID)
+	default:
+		return b.sendMessage(ctx, chatID, fmt.Sprintf("命令 %s 暂未支持。", cmd), nil)
+	}
+}

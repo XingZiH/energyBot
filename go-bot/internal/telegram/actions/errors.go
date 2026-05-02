@@ -52,4 +52,8 @@ var (
 	// ErrCallbackTooLong 表示拼接出的 callback_data 超过 Telegram Bot API
 	// 协议上限（64 字节）。通常意味着 submenu 嵌套过深或下标过大，需调整菜单设计。
 	ErrCallbackTooLong = errors.New("callback_data 超过 Telegram 64 字节上限")
+
+	// ErrEmptyCommand 表示 command action 的 ButtonSpec.Command 为空字符串
+	// （或全空白）。命令分发必须携带有效的命令字符串，调用方应在配置环节校验。
+	ErrEmptyCommand = errors.New("command action 缺失 ButtonSpec.Command")
 )
