@@ -1,7 +1,7 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { UiConfigService } from './ui-config.service';
 import { ButtonAction } from '../dto/ui-config.dto';
-import { energyPackagesTable } from '../../../drizzle/schema';
+import { agentBotConfigsTable, energyPackagesTable } from '../../../drizzle/schema';
 
 type MockCall = {
   table: unknown;
@@ -257,6 +257,204 @@ describe('UiConfigService', () => {
       await expect(service.validate(dto as any, 0)).rejects.toThrow(BadRequestException);
       await expect(service.validate(dto as any, -1)).rejects.toThrow(BadRequestException);
       await expect(service.validate(dto as any, NaN)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('loadUiConfig', () => {
+    it('空记录时返回空配置 + epoch updatedAt（ISO 格式）', async () => {
+      const conn = createMockConn(new Map([[agentBotConfigsTable, []]]));
+      const service = new UiConfigService(conn as any);
+      const res = await service.loadUiConfig(100);
+      expect(res.welcomeText).toBe('');
+      expect(res.menuConfig).toEqual([]);
+      expect(res.updatedAt).toBe('1970-01-01T00:00:00.000Z');
+      expect(res.updatedAt).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      );
+    });
+
+    it('有记录时返回已解析内容 + ISO updatedAt', async () => {
+      const conn = createMockConn(
+        new Map([
+          [
+            agentBotConfigsTable,
+            [
+              {
+                welcomeText: '欢迎光临',
+                menuConfig: '[{"id":"r","buttons":[]}]',
+                messageConfig: null,
+                updatedAt: new Date('2026-05-02T12:34:56.789Z'),
+              },
+            ],
+          ],
+        ]),
+      );
+      const service = new UiConfigService(conn as any);
+      const res = await service.loadUiConfig(100);
+      expect(res.welcomeText).toBe('欢迎光临');
+      expect(res.menuConfig).toEqual([{ id: 'r', buttons: [] }]);
+      expect(res.updatedAt).toBe('2026-05-02T12:34:56.789Z');
+      expect(res.updatedAt).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      );
+    });
+
+    it('查询 where 参数包含 agentId + deletedAt 过滤（防回归）', async () => {
+      const recorder: MockCall[] = [];
+      const conn = createMockConn(
+        new Map([[agentBotConfigsTable, []]]),
+        recorder,
+      );
+      const service = new UiConfigService(conn as any);
+      await service.loadUiConfig(100);
+      expect(recorder).toHaveLength(1);
+      expect(recorder[0].table).toBe(agentBotConfigsTable);
+      // and(eq(agentId), isNull(deletedAt)) 表达式对象，至少要非空
+      expect(recorder[0].whereArg).toBeTruthy();
+    });
+  });
+
+  describe('saveUiConfig', () => {
+    /**
+     * 构造带完整 mock 的 UiConfigService。
+     *
+     * drizzle 调用链：
+     *   update(table).set(values).where(expr).returning(fields) → Promise<rows>
+     *   insert(table).values(values).onConflictDoUpdate(config) → Promise<void>
+     *
+     * 两条链式分别控制乐观锁成功/失败和 upsert 路径。
+     */
+    function buildConn(opts: {
+      updateReturning?: unknown[];
+      captureInsert?: { called: boolean; values?: unknown; conflict?: unknown };
+    }) {
+      const captureUpdate: {
+        set?: unknown;
+        where?: unknown;
+        returning?: unknown;
+      } = {};
+      const conn = {
+        update: jest.fn(() => ({
+          set: jest.fn((setArg: unknown) => {
+            captureUpdate.set = setArg;
+            return {
+              where: jest.fn((whereArg: unknown) => {
+                captureUpdate.where = whereArg;
+                return {
+                  returning: jest.fn((fields: unknown) => {
+                    captureUpdate.returning = fields;
+                    return Promise.resolve(opts.updateReturning ?? []);
+                  }),
+                };
+              }),
+            };
+          }),
+        })),
+        insert: jest.fn(() => ({
+          values: jest.fn((vals: unknown) => {
+            if (opts.captureInsert) opts.captureInsert.values = vals;
+            return {
+              onConflictDoUpdate: jest.fn((cfg: unknown) => {
+                if (opts.captureInsert) {
+                  opts.captureInsert.called = true;
+                  opts.captureInsert.conflict = cfg;
+                }
+                return Promise.resolve();
+              }),
+            };
+          }),
+        })),
+      };
+      return { conn, captureUpdate };
+    }
+
+    it('带 expectedUpdatedAt 且匹配时 update 成功返回新 updatedAt（ISO）', async () => {
+      const { conn } = buildConn({ updateReturning: [{ id: 1 }] });
+      const service = new UiConfigService(conn as any);
+      const res = await service.saveUiConfig(
+        100,
+        { welcomeText: '', menuConfig: [], messageConfig: null } as any,
+        '2026-01-01T00:00:00.000Z',
+      );
+      expect(res.updatedAt).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      );
+      expect(conn.update).toHaveBeenCalled();
+      expect(conn.insert).not.toHaveBeenCalled();
+    });
+
+    it('带 expectedUpdatedAt 不匹配时抛 HttpException(CONFLICT)', async () => {
+      const { conn } = buildConn({ updateReturning: [] });
+      const service = new UiConfigService(conn as any);
+      let thrown: any = null;
+      try {
+        await service.saveUiConfig(
+          100,
+          { welcomeText: '', menuConfig: [], messageConfig: null } as any,
+          '2026-01-01T00:00:00.000Z',
+        );
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(HttpException);
+      expect(thrown.getStatus()).toBe(HttpStatus.CONFLICT);
+      expect(conn.insert).not.toHaveBeenCalled();
+    });
+
+    it('无 expectedUpdatedAt 时走 onConflictDoUpdate 原子 upsert', async () => {
+      const captureInsert: any = { called: false };
+      const { conn } = buildConn({ captureInsert });
+      const service = new UiConfigService(conn as any);
+      const res = await service.saveUiConfig(100, {
+        welcomeText: 'hi',
+        menuConfig: [],
+        messageConfig: null,
+      } as any);
+      expect(res.updatedAt).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      );
+      expect(captureInsert.called).toBe(true);
+      expect(conn.insert).toHaveBeenCalled();
+      expect(conn.update).not.toHaveBeenCalled();
+      // onConflictDoUpdate 必须带 target + targetWhere（部分索引语义）
+      expect(captureInsert.conflict).toMatchObject({
+        target: expect.anything(),
+        targetWhere: expect.anything(),
+        set: expect.anything(),
+      });
+      // insert values 应注入 agentId 和默认 botStatus
+      expect(captureInsert.values).toMatchObject({
+        agentId: 100,
+        botStatus: 'disabled',
+      });
+    });
+
+    it('menuConfig 为空数组时统一写 null 而非空 JSON 数组字符串', async () => {
+      const captureInsert: any = { called: false };
+      const { conn } = buildConn({ captureInsert });
+      const service = new UiConfigService(conn as any);
+      await service.saveUiConfig(100, {
+        welcomeText: '',
+        menuConfig: [],
+        messageConfig: null,
+      } as any);
+      expect((captureInsert.values as any).menuConfig).toBeNull();
+      expect((captureInsert.values as any).messageConfig).toBeNull();
+    });
+
+    it('menuConfig 非空时序列化为 JSON 字符串', async () => {
+      const captureInsert: any = { called: false };
+      const { conn } = buildConn({ captureInsert });
+      const service = new UiConfigService(conn as any);
+      const menu = [{ id: 'r', buttons: [] }];
+      await service.saveUiConfig(100, {
+        welcomeText: '',
+        menuConfig: menu,
+        messageConfig: null,
+      } as any);
+      expect((captureInsert.values as any).menuConfig).toBe(
+        JSON.stringify(menu),
+      );
     });
   });
 });

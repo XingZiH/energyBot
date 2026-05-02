@@ -10,10 +10,12 @@
  * - Go bot 深度常量：go-bot/internal/telegram/designer.go:MaxMenuDepth
  */
 import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
-  BadRequestException,
 } from '@nestjs/common';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -151,8 +153,11 @@ export class UiConfigService {
   /**
    * 读取 agent 的 UI 配置。若不存在，返回空配置 + epoch updatedAt。
    *
-   * 注意：menuConfig / messageConfig 在 DB 中以 JSON 字符串形式存储，
-   * 读取时解析；解析失败降级为空值，避免旧数据格式导致前端崩溃。
+   * 注意：
+   * - 过滤 deletedAt IS NULL，软删行不参与读取（与 uq_agent_bot_configs_agent_id
+   *   部分索引的语义一致）。
+   * - menuConfig / messageConfig 在 DB 中以 JSON 字符串形式存储，
+   *   读取时解析；解析失败降级为空值，避免旧数据格式导致前端崩溃。
    */
   async loadUiConfig(agentId: number): Promise<{
     welcomeText: string;
@@ -163,7 +168,12 @@ export class UiConfigService {
     const rows = await this.conn
       .select()
       .from(agentBotConfigsTable)
-      .where(eq(agentBotConfigsTable.agentId, agentId));
+      .where(
+        and(
+          eq(agentBotConfigsTable.agentId, agentId),
+          isNull(agentBotConfigsTable.deletedAt),
+        ),
+      );
     const row = rows[0];
     if (!row) {
       return {
@@ -183,66 +193,74 @@ export class UiConfigService {
   }
 
   /**
-   * 保存 agent 的 UI 配置（upsert）。调用前应已通过 validate() 校验。
+   * 保存 agent 的 UI 配置。调用前应已通过 validate() 校验。
    *
-   * 实现选择：先 select 再 update/insert，而非用 drizzle onConflict。
-   * 原因：agent_bot_configs 表上 agentId 没有 unique 约束（一个 agent 可以
-   * 理论上有多条记录，尽管当前业务只建一条），走 select+分支能避免对
-   * schema 做额外约束变更，与 AuthService.signup 保持一致风格。
+   * 并发策略：
+   * - 无 expectedUpdatedAt：走 insert().onConflictDoUpdate()，依赖部分 unique 索引
+   *   `uq_agent_bot_configs_agent_id`（WHERE deleted_at IS NULL）实现原子 upsert，
+   *   彻底消除 select-then-insert 的 TOCTOU 空档。
+   * - 带 expectedUpdatedAt：走 UPDATE ... WHERE agent_id=? AND updated_at=?
+   *   AND deleted_at IS NULL，把乐观锁下沉到 SQL 层；affected rows=0 即冲突。
+   *
+   * 注意：menuConfig/messageConfig 空值统一写 null（而非空数组/空对象序列化），
+   * 语义更清晰，读取时由 emptyTemplates() 兜底。
+   *
+   * @throws HttpException(CONFLICT) 当 expectedUpdatedAt 与当前 DB 不匹配
+   *   （可能原因：已被他人更新 / 记录不存在——两者都要求前端重新 GET 后再写）
    */
   async saveUiConfig(
     agentId: number,
     dto: UiConfigDto,
+    expectedUpdatedAt?: string,
   ): Promise<{ updatedAt: string }> {
     const now = new Date();
-    const values = {
+    const nextValues = {
       welcomeText: dto.welcomeText ?? '',
-      menuConfig: dto.menuConfig ? JSON.stringify(dto.menuConfig) : null,
+      menuConfig: dto.menuConfig?.length ? JSON.stringify(dto.menuConfig) : null,
       messageConfig: dto.messageConfig
         ? JSON.stringify(dto.messageConfig)
         : null,
       updatedAt: now,
     };
-    const existing = await this.conn
-      .select({ id: agentBotConfigsTable.id })
-      .from(agentBotConfigsTable)
-      .where(eq(agentBotConfigsTable.agentId, agentId));
 
-    if (existing[0]) {
-      await this.conn
+    if (expectedUpdatedAt) {
+      // 带乐观锁：UPDATE 附加 WHERE updated_at = expected，affected rows=0 即冲突。
+      const updated = await this.conn
         .update(agentBotConfigsTable)
-        .set(values)
-        .where(eq(agentBotConfigsTable.id, existing[0].id));
-    } else {
-      await this.conn.insert(agentBotConfigsTable).values({
-        agentId,
-        botStatus: 'disabled',
-        ...values,
-      });
-    }
-    return { updatedAt: now.toISOString() };
-  }
+        .set(nextValues)
+        .where(
+          and(
+            eq(agentBotConfigsTable.agentId, agentId),
+            eq(
+              agentBotConfigsTable.updatedAt,
+              new Date(expectedUpdatedAt),
+            ),
+            isNull(agentBotConfigsTable.deletedAt),
+          ),
+        )
+        .returning({ id: agentBotConfigsTable.id });
 
-  /**
-   * 乐观锁：基于客户端提供的 If-Unmodified-Since 判断是否冲突。
-   *
-   * @param ifUnmodifiedSince 客户端上次读取时的 updatedAt（ISO 字符串）。
-   *                          缺省视为不使用乐观锁，允许继续写入。
-   * @returns true 表示无冲突可写入；false 表示服务端已有更新，需返回 409。
-   */
-  async checkConcurrency(
-    agentId: number,
-    ifUnmodifiedSince: string | undefined,
-  ): Promise<boolean> {
-    if (!ifUnmodifiedSince) return true;
-    const rows = await this.conn
-      .select({ updatedAt: agentBotConfigsTable.updatedAt })
-      .from(agentBotConfigsTable)
-      .where(eq(agentBotConfigsTable.agentId, agentId));
-    const row = rows[0];
-    if (!row) return true; // 首次创建场景，无历史版本可冲突
-    const currentUpdatedAt = (row.updatedAt ?? new Date(0)).toISOString();
-    return currentUpdatedAt === ifUnmodifiedSince;
+      if (updated.length === 0) {
+        throw new HttpException(
+          '配置已被他人修改，请刷新后重试',
+          HttpStatus.CONFLICT,
+        );
+      }
+      return { updatedAt: now.toISOString() };
+    }
+
+    // 无 expectedUpdatedAt：首次创建或覆盖写，用 onConflictDoUpdate 保证原子。
+    // targetWhere 必须匹配 uq_agent_bot_configs_agent_id 的部分索引谓词，
+    // 否则 PG 无法识别目标索引。
+    await this.conn
+      .insert(agentBotConfigsTable)
+      .values({ agentId, botStatus: 'disabled', ...nextValues })
+      .onConflictDoUpdate({
+        target: agentBotConfigsTable.agentId,
+        targetWhere: isNull(agentBotConfigsTable.deletedAt),
+        set: nextValues,
+      });
+    return { updatedAt: now.toISOString() };
   }
 
   /**

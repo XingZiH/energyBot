@@ -2015,11 +2015,18 @@ export class EnergyRentalService {
    * 安全上下文：保证返回的 agentId 确属于当前登录用户，
    * 调用方不应再接受任何客户端提交的 agentId 参数，防止越权。
    *
-   * @throws BadRequestException 当 userId 不属于 agent scope
+   * 防御：resolveRequiredAgentScope 理论上已保证 agentId 存在，
+   * 这里叠加 runtime 断言，避免 schema 漂移或 mock 逃逸导致下游 SQL 失败。
+   *
+   * @throws BadRequestException 当 userId 不属于 agent scope 或 agentId 非法
    */
   async resolveAgentId(userId?: number): Promise<number> {
     const scope = await this.resolveRequiredAgentScope(userId);
-    return scope.agentId!;
+    const agentId = scope.agentId;
+    if (!agentId || agentId <= 0) {
+      throw new BadRequestException('当前账号无可用 agent scope');
+    }
+    return agentId;
   }
 
   private async findAgentWalletAccount(agentId?: number) {

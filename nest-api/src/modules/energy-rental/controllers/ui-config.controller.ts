@@ -10,23 +10,21 @@
  *     → 返回当前 agent 的 UI 配置
  *   PUT  /energy-rental/ui-config?dryRun=true|false
  *     → 保存 UI 配置
- *     - dryRun=true：只跑校验链，不写入 DB（前端"预检"场景）
- *     - Header `If-Unmodified-Since: <ISO>`：乐观锁，与服务端当前 updatedAt
- *       不一致时返回 409 Conflict
+ *     - dryRun=true：只跑校验链（DTO + 菜单深度 + 套餐 ID），
+ *       不做并发检查，不写 DB（前端"预检"场景）
+ *     - Header `If-Unmodified-Since: <ISO>`：乐观锁。与服务端当前 updatedAt
+ *       不一致时由 service 层抛 409 Conflict（SQL WHERE 下沉，消除 TOCTOU）
  *
  * 校验链（DTO → Service）：
  *   ValidationPipe (class-validator 基础格式)
  *   → uiConfigService.validate (菜单深度 + 套餐 ID 归属)
- *   → checkConcurrency (乐观锁)
- *   → saveUiConfig
+ *   → uiConfigService.saveUiConfig (乐观锁 + 原子 upsert)
  */
 import {
   Body,
   Controller,
   Get,
   Headers,
-  HttpException,
-  HttpStatus,
   Put,
   Query,
   Req,
@@ -41,6 +39,11 @@ import { UiConfigDto } from '../dto/ui-config.dto';
 import { EnergyRentalService } from '../energy-rental.service';
 import { UiConfigService } from '../services/ui-config.service';
 
+/**
+ * UI 配置读写所需权限码。与菜单权限配置保持同一常量，避免字符串散落。
+ */
+const PERM_BOT_CONFIG = 'default:energy-rental:bot-config';
+
 @ApiTags('能量租赁-UI配置')
 @Controller('energy-rental/ui-config')
 export class UiConfigController {
@@ -51,7 +54,7 @@ export class UiConfigController {
 
   @Get()
   @UseGuards(JwtGuard, AuthGuard)
-  @Permission('default:energy-rental:bot-config')
+  @Permission(PERM_BOT_CONFIG)
   async getUiConfig(@Req() req: { user?: { userId?: number } }) {
     const agentId = await this.energyRentalService.resolveAgentId(
       req.user?.userId,
@@ -62,7 +65,7 @@ export class UiConfigController {
 
   @Put()
   @UseGuards(JwtGuard, AuthGuard)
-  @Permission('default:energy-rental:bot-config')
+  @Permission(PERM_BOT_CONFIG)
   async updateUiConfig(
     @Req() req: { user?: { userId?: number } },
     @Body() dto: UiConfigDto,
@@ -81,18 +84,13 @@ export class UiConfigController {
       return ResultData.success({ valid: true });
     }
 
-    const canWrite = await this.uiConfigService.checkConcurrency(
+    // 乐观锁已下沉到 saveUiConfig（UPDATE WHERE updated_at=expected），
+    // 冲突时 service 层抛 HttpException(CONFLICT)，由全局异常处理冒泡。
+    const result = await this.uiConfigService.saveUiConfig(
       agentId,
+      dto,
       ifUnmodifiedSince,
     );
-    if (!canWrite) {
-      throw new HttpException(
-        '配置已被他人修改，请刷新后重试',
-        HttpStatus.CONFLICT,
-      );
-    }
-
-    const result = await this.uiConfigService.saveUiConfig(agentId, dto);
     return ResultData.success(result);
   }
 }

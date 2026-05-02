@@ -4,7 +4,11 @@
  * 策略：纯单元测试，mock 掉 UiConfigService 和 EnergyRentalService，
  * 不起 NestJS TestingModule，因为 Guard 装饰器在直接实例化时不会触发。
  * Guard 和 Permission 装饰器的功能由框架层保证，这里只验证 controller
- * 自己的编排逻辑（agentId 解析 → validate → dryRun/并发判断 → save）。
+ * 自己的编排逻辑（agentId 解析 → validate → dryRun → save 透传乐观锁参数）。
+ *
+ * 并发模型变更说明（code review）：乐观锁已下沉到 saveUiConfig 的 SQL
+ * WHERE 子句，controller 不再调用 checkConcurrency。409 由 service 抛出
+ * HttpException 冒泡。
  */
 import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { UiConfigController } from './ui-config.controller';
@@ -14,7 +18,6 @@ describe('UiConfigController', () => {
     loadUiConfig: jest.fn(),
     saveUiConfig: jest.fn(),
     validate: jest.fn(),
-    checkConcurrency: jest.fn(),
   };
   const mockEnergyRentalService = {
     resolveAgentId: jest.fn(),
@@ -62,6 +65,10 @@ describe('UiConfigController', () => {
       expect(res.code).toBe(200);
       expect(res.data.welcomeText).toBe('欢迎');
       expect(res.data.updatedAt).toBe('2026-01-01T00:00:00.000Z');
+      // ISO 格式断言：YYYY-MM-DDTHH:mm:ss.sssZ
+      expect(res.data.updatedAt).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      );
     });
 
     it('userId 无对应 agent 时 resolveAgentId 抛 BadRequestException', async () => {
@@ -88,7 +95,6 @@ describe('UiConfigController', () => {
       );
 
       expect(mockUiConfigService.validate).toHaveBeenCalledWith(validDto, 100);
-      expect(mockUiConfigService.checkConcurrency).not.toHaveBeenCalled();
       expect(mockUiConfigService.saveUiConfig).not.toHaveBeenCalled();
       expect(res.code).toBe(200);
       expect(res.data.valid).toBe(true);
@@ -109,14 +115,16 @@ describe('UiConfigController', () => {
         ),
       ).rejects.toThrow(BadRequestException);
 
-      expect(mockUiConfigService.checkConcurrency).not.toHaveBeenCalled();
       expect(mockUiConfigService.saveUiConfig).not.toHaveBeenCalled();
     });
 
-    it('If-Unmodified-Since 不匹配时返回 409 Conflict', async () => {
+    it('If-Unmodified-Since 传递到 saveUiConfig；service 抛 409 时冒泡', async () => {
+      // 乐观锁下沉后，409 由 service 层 throw，controller 仅透传冒泡
       mockEnergyRentalService.resolveAgentId.mockResolvedValue(100);
       mockUiConfigService.validate.mockResolvedValue(undefined);
-      mockUiConfigService.checkConcurrency.mockResolvedValue(false);
+      mockUiConfigService.saveUiConfig.mockRejectedValue(
+        new HttpException('配置已被他人修改', HttpStatus.CONFLICT),
+      );
 
       let thrown: any = null;
       try {
@@ -132,13 +140,16 @@ describe('UiConfigController', () => {
 
       expect(thrown).toBeInstanceOf(HttpException);
       expect(thrown.getStatus()).toBe(HttpStatus.CONFLICT);
-      expect(mockUiConfigService.saveUiConfig).not.toHaveBeenCalled();
+      expect(mockUiConfigService.saveUiConfig).toHaveBeenCalledWith(
+        100,
+        validDto,
+        '2026-01-01T00:00:00.000Z',
+      );
     });
 
-    it('If-Unmodified-Since 匹配时正常保存并返回新 updatedAt', async () => {
+    it('If-Unmodified-Since 匹配时 service 成功保存并返回新 updatedAt', async () => {
       mockEnergyRentalService.resolveAgentId.mockResolvedValue(100);
       mockUiConfigService.validate.mockResolvedValue(undefined);
-      mockUiConfigService.checkConcurrency.mockResolvedValue(true);
       mockUiConfigService.saveUiConfig.mockResolvedValue({
         updatedAt: '2026-05-02T00:00:00.000Z',
       });
@@ -150,22 +161,22 @@ describe('UiConfigController', () => {
         '2026-01-01T00:00:00.000Z',
       );
 
-      expect(mockUiConfigService.checkConcurrency).toHaveBeenCalledWith(
-        100,
-        '2026-01-01T00:00:00.000Z',
-      );
       expect(mockUiConfigService.saveUiConfig).toHaveBeenCalledWith(
         100,
         validDto,
+        '2026-01-01T00:00:00.000Z',
       );
       expect(res.code).toBe(200);
       expect(res.data.updatedAt).toBe('2026-05-02T00:00:00.000Z');
+      // ISO 格式断言：YYYY-MM-DDTHH:mm:ss.sssZ
+      expect(res.data.updatedAt).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      );
     });
 
-    it('无 If-Unmodified-Since header 也能保存（新建场景）', async () => {
+    it('无 If-Unmodified-Since header 也能保存（新建场景，走 onConflictDoUpdate 路径）', async () => {
       mockEnergyRentalService.resolveAgentId.mockResolvedValue(100);
       mockUiConfigService.validate.mockResolvedValue(undefined);
-      mockUiConfigService.checkConcurrency.mockResolvedValue(true);
       mockUiConfigService.saveUiConfig.mockResolvedValue({
         updatedAt: '2026-05-02T00:00:00.000Z',
       });
@@ -177,17 +188,17 @@ describe('UiConfigController', () => {
         undefined,
       );
 
-      expect(mockUiConfigService.checkConcurrency).toHaveBeenCalledWith(
+      // 透传 undefined 让 service 走 insert().onConflictDoUpdate() 路径
+      expect(mockUiConfigService.saveUiConfig).toHaveBeenCalledWith(
         100,
+        validDto,
         undefined,
       );
-      expect(mockUiConfigService.saveUiConfig).toHaveBeenCalled();
     });
 
     it('agentId 始终从 JWT userId 解析，不读取任何客户端传参', async () => {
       mockEnergyRentalService.resolveAgentId.mockResolvedValue(100);
       mockUiConfigService.validate.mockResolvedValue(undefined);
-      mockUiConfigService.checkConcurrency.mockResolvedValue(true);
       mockUiConfigService.saveUiConfig.mockResolvedValue({
         updatedAt: 'x',
       });
@@ -206,6 +217,7 @@ describe('UiConfigController', () => {
       expect(mockUiConfigService.saveUiConfig).toHaveBeenCalledWith(
         100,
         validDto,
+        undefined,
       );
     });
 
