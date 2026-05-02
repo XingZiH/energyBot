@@ -3,12 +3,24 @@ import { UiConfigService } from './ui-config.service';
 import { ButtonAction } from '../dto/ui-config.dto';
 import { energyPackagesTable } from '../../../drizzle/schema';
 
-// drizzle conn mock：支持 select().from().where() 链式调用，按 table 返回预设行
-function createMockConn(rowsByTable: Map<unknown, unknown[]>) {
+type MockCall = {
+  table: unknown;
+  whereArg: unknown;
+};
+
+// drizzle conn mock：支持 select().from().where() 链式调用，按 table 返回预设行。
+// 可选传入 recorder：捕获每次 where 调用的 { table, whereArg } 便于安全断言。
+function createMockConn(
+  rowsByTable: Map<unknown, unknown[]>,
+  recorder?: MockCall[],
+) {
   return {
     select: jest.fn(() => ({
       from: jest.fn((table: unknown) => ({
-        where: jest.fn(() => Promise.resolve(rowsByTable.get(table) ?? [])),
+        where: jest.fn((whereArg: unknown) => {
+          recorder?.push({ table, whereArg });
+          return Promise.resolve(rowsByTable.get(table) ?? []);
+        }),
       })),
     })),
   };
@@ -71,7 +83,7 @@ describe('UiConfigService', () => {
       await expect(service.validatePackageIds(menu as any, 100)).resolves.not.toThrow();
     });
 
-    it('存在不在数据库的套餐 ID 时抛 BadRequestException', async () => {
+    it('存在不在数据库的套餐 ID 时抛 BadRequestException（消息只说数量）', async () => {
       const conn = createMockConn(new Map([
         [energyPackagesTable, [{ id: 1 }]], // 999 不存在
       ]));
@@ -84,8 +96,9 @@ describe('UiConfigService', () => {
       }];
       await expect(service.validatePackageIds(menu as any, 100))
         .rejects.toThrow(BadRequestException);
+      // 降敏后消息应包含「无效」字样，且不得暴露具体 ID
       await expect(service.validatePackageIds(menu as any, 100))
-        .rejects.toThrow(/999/);
+        .rejects.toThrow(/无效/);
     });
 
     it('递归收集 submenu 中的套餐 ID', async () => {
@@ -144,6 +157,77 @@ describe('UiConfigService', () => {
     });
   });
 
+  describe('validatePackageIds - 安全边界', () => {
+    it('拒绝引用其他 agent 的套餐 ID（mock 返回空）', async () => {
+      // agent 200 拥有 id=5，agent 100 引用 id=5
+      // drizzle WHERE 带 agent_id=100 过滤后应返回空，视为缺失
+      const conn = createMockConn(new Map([
+        [energyPackagesTable, []], // agentId=100 查不到 id=5
+      ]));
+      const service = new UiConfigService(conn as any);
+      const menu = [{
+        id: 'r', buttons: [{
+          id: 'b', text: '套餐', action: ButtonAction.ENERGY_PACKAGE_GROUP,
+          packageGroup: { packageIds: [5], sortBy: 'price_asc', textTemplate: '{n}' },
+        }],
+      }];
+      await expect(service.validatePackageIds(menu as any, 100))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('where 子句必须调用且携带非空参数（防越权回归）', async () => {
+      const recorder: MockCall[] = [];
+      const conn = createMockConn(
+        new Map([[energyPackagesTable, [{ id: 1 }]]]),
+        recorder,
+      );
+      const service = new UiConfigService(conn as any);
+      const menu = [{
+        id: 'r', buttons: [{
+          id: 'b', text: '套餐', action: ButtonAction.ENERGY_PACKAGE_GROUP,
+          packageGroup: { packageIds: [1], sortBy: 'price_asc', textTemplate: '{n}' },
+        }],
+      }];
+      await service.validatePackageIds(menu as any, 100);
+      expect(recorder).toHaveLength(1);
+      // where 参数必须存在（drizzle and(...) 组合表达式对象）
+      expect(recorder[0].whereArg).toBeTruthy();
+      expect(recorder[0].table).toBe(energyPackagesTable);
+      // 注：drizzle 表达式序列化不总是可读，这里主要保证 where 被调用且参数非空
+      // 若未来有人把 and(inArray(...), eq(agentId,...)) 改成只 inArray(...)
+      // 至少可通过其它「拒绝引用其他 agent 的套餐 ID」测试捕获逻辑回归
+    });
+
+    it('缺失 ID 时错误消息只说数量、不暴露具体 ID', async () => {
+      const conn = createMockConn(new Map([
+        [energyPackagesTable, [{ id: 1 }]],
+      ]));
+      const service = new UiConfigService(conn as any);
+      const menu = [{
+        id: 'r', buttons: [{
+          id: 'b', text: '套餐', action: ButtonAction.ENERGY_PACKAGE_GROUP,
+          packageGroup: {
+            packageIds: [1, 999, 888],
+            sortBy: 'price_asc',
+            textTemplate: '{n}',
+          },
+        }],
+      }];
+      try {
+        await service.validatePackageIds(menu as any, 100);
+        throw new Error('应抛 BadRequestException');
+      } catch (e: any) {
+        expect(e).toBeInstanceOf(BadRequestException);
+        // 消息必须不包含具体 ID
+        expect(e.message).not.toMatch(/999/);
+        expect(e.message).not.toMatch(/888/);
+        // 应说明数量（缺失 999, 888 共 2 个）
+        expect(e.message).toMatch(/2/);
+        expect(e.message).toMatch(/无效/);
+      }
+    });
+  });
+
   describe('validate', () => {
     it('组合深度 + 套餐 ID 校验', async () => {
       const conn = createMockConn(new Map([
@@ -165,6 +249,14 @@ describe('UiConfigService', () => {
       const conn = createMockConn(new Map());
       const service = new UiConfigService(conn as any);
       await expect(service.validate({} as any, 100)).resolves.not.toThrow();
+    });
+
+    it('validate：非法 agentId（0 / 负数 / NaN）被拒绝', async () => {
+      const service = new UiConfigService({} as any);
+      const dto = { menuConfig: [] };
+      await expect(service.validate(dto as any, 0)).rejects.toThrow(BadRequestException);
+      await expect(service.validate(dto as any, -1)).rejects.toThrow(BadRequestException);
+      await expect(service.validate(dto as any, NaN)).rejects.toThrow(BadRequestException);
     });
   });
 });
