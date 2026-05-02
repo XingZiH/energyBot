@@ -1,0 +1,64 @@
+<div class="designer-container" cdkDropListGroup>
+  <!-- 工具栏 -->
+  <div class="designer-toolbar">
+    <div class="toolbar-left">
+      <button
+        nz-button
+        nzType="primary"
+        (click)="save()"
+        [nzLoading]="$saving()"
+        [disabled]="!$isDirty()"
+      >
+        <span nz-icon nzType="save" nzTheme="outline"></span>
+        <span>保存菜单</span>
+      </button>
+      <button nz-button (click)="reset()" [disabled]="!$isDirty()">
+        <span nz-icon nzType="reload" nzTheme="outline"></span>
+        <span>重置</span>
+      </button>
+      <nz-divider nzType="vertical"></nz-divider>
+      <button
+        nz-button
+        nzType="text"
+        (click)="undo()"
+        nz-tooltip
+        nzTooltipTitle="撤销"
+        aria-label="撤销"
+      >
+        <span nz-icon nzType="undo" nzTheme="outline"></span>
+      </button>
+      <button
+        nz-button
+        nzType="text"
+        (click)="redo()"
+        nz-tooltip
+        nzTooltipTitle="重做"
+        aria-label="重做"
+      >
+        <span nz-icon nzType="redo" nzTheme="outline"></span>
+      </button>
+    </div>
+    <div class="toolbar-right">
+      <nz-alert
+        *ngIf="$validationError() as err"
+        class="validation-alert"
+        nzType="error"
+        [nzMessage]="err"
+        nzShowIcon
+        nzBanner
+      ></nz-alert>
+      <span class="dirty-indicator" *ngIf="$isDirty()" aria-live="polite">
+        <span nz-icon nzType="exclamation-circle" nzTheme="outline"></span>
+        <span>有未保存更改</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- 四栏布局 -->
+  <div class="designer-body">
+    <app-component-palette class="panel-palette"></app-component-palette>
+    <app-menu-canvas class="panel-canvas"></app-menu-canvas>
+    <app-property-panel class="panel-property" [agentId]="agentId()"></app-property-panel>
+    <app-telegram-preview class="panel-preview"></app-telegram-preview>
+  </div>
+</div>

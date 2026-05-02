@@ -1,0 +1,91 @@
+/**
+ * MenuDesigner 容器样式（任务 20）。
+ *
+ * 布局：flex 列 → 顶部工具栏 + 下方四栏。
+ * 主题：统一走 var(--ant-color-*)；仅边框/脏态指示使用 rgba 灰阶，因为
+ * ant-color-border 在某些主题下对比度不足、且这些分隔线语义上不应随色阶变化。
+ */
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.designer-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 600px;
+  height: 100%;
+  background-color: var(--ant-color-bg-layout);
+}
+
+.designer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 16px;
+  background-color: var(--ant-color-bg-container);
+  border-bottom: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+  flex-shrink: 0;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+
+  .validation-alert {
+    max-width: 480px;
+  }
+
+  .dirty-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ant-color-warning, #faad14);
+    font-size: 13px;
+  }
+}
+
+.designer-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+
+  .panel-palette {
+    flex: 0 0 240px;
+    min-width: 240px;
+    border-right: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+    overflow: hidden;
+  }
+
+  .panel-canvas {
+    flex: 1 1 auto;
+    min-width: 0;
+    border-right: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+    overflow: auto;
+  }
+
+  .panel-property {
+    flex: 0 0 320px;
+    min-width: 320px;
+    border-right: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+    overflow: auto;
+  }
+
+  .panel-preview {
+    flex: 0 0 360px;
+    min-width: 360px;
+    overflow: auto;
+  }
+}
