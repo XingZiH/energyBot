@@ -1,0 +1,54 @@
+<div class="template-preview">
+  <header class="preview-header">
+    <span nz-icon nzType="eye" nzTheme="outline" aria-hidden="true"></span>
+    <span class="preview-header-text">预览效果</span>
+  </header>
+
+  @if ($isEmpty()) {
+    <nz-empty
+      class="preview-empty"
+      nzNotFoundImage="simple"
+      [nzNotFoundContent]="'模板为空，无内容可预览'"
+    ></nz-empty>
+  } @else {
+    <div class="preview-content" role="region" aria-label="模板预览内容">
+      @for (seg of $segments(); track $index) {
+        @switch (seg.kind) {
+          @case ('text') {
+            <span class="seg-text">{{ seg.content }}</span>
+          }
+          @case ('var') {
+            <span
+              class="seg-var"
+              nz-tooltip
+              [nzTooltipTitle]="'变量：' + seg.varName"
+            >{{ seg.content }}</span>
+          }
+          @case ('unknown') {
+            <span
+              class="seg-unknown"
+              nz-tooltip
+              [nzTooltipTitle]="'未知变量：' + seg.varName + '（后端将保留原样）'"
+            >{{ seg.content }}</span>
+          }
+          @case ('escape') {
+            <span
+              class="seg-escape"
+              nz-tooltip
+              nzTooltipTitle="花括号转义"
+            >{{ seg.content }}</span>
+          }
+        }
+      }
+    </div>
+
+    @if (showLegend()) {
+      <footer class="preview-legend" aria-label="图例">
+        <span class="legend-label">图例：</span>
+        <span class="legend-item legend-var">变量值</span>
+        <span class="legend-item legend-unknown">未知变量</span>
+        <span class="legend-item legend-escape">转义</span>
+      </footer>
+    }
+  }
+</div>

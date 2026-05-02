@@ -55,36 +55,47 @@
             </div>
           </section>
 
-          <!-- 编辑区 -->
-          <section class="editor-area">
-            <textarea
-              #textareaRef
-              nz-input
-              class="scene-textarea"
-              [ngModel]="$draft()[scene.key]"
-              (ngModelChange)="updateScene(scene.key, $event)"
-              [nzAutosize]="{ minRows: 6, maxRows: 14 }"
-              [placeholder]="scene.defaultText"
-              [attr.aria-label]="scene.label + ' 文案编辑'"
-            ></textarea>
+          <!-- 编辑 + 预览：左右分栏，小屏自动堆叠 -->
+          <div class="editor-preview-split">
+            <!-- 编辑区 -->
+            <section class="editor-area">
+              <textarea
+                #textareaRef
+                nz-input
+                class="scene-textarea"
+                [ngModel]="$draft()[scene.key]"
+                (ngModelChange)="updateScene(scene.key, $event)"
+                [nzAutosize]="{ minRows: 6, maxRows: 14 }"
+                [placeholder]="scene.defaultText"
+                [attr.aria-label]="scene.label + ' 文案编辑'"
+              ></textarea>
 
-            @if (hasUnknownVariables(scene.key)) {
-              <nz-alert
-                class="unknown-variable-alert"
-                nzType="warning"
-                nzShowIcon
-                [nzMessage]="unknownMsgTpl"
-              ></nz-alert>
-              <ng-template #unknownMsgTpl>
-                未知变量：{{ validateScene(scene.key).join('、') }}
-              </ng-template>
-            }
+              @if (hasUnknownVariables(scene.key)) {
+                <nz-alert
+                  class="unknown-variable-alert"
+                  nzType="warning"
+                  nzShowIcon
+                  [nzMessage]="unknownMsgTpl"
+                ></nz-alert>
+                <ng-template #unknownMsgTpl>
+                  未知变量：{{ validateScene(scene.key).join('、') }}
+                </ng-template>
+              }
 
-            <div class="default-hint">
-              留空时将使用默认文案：
-              <code class="default-hint-code">{{ scene.defaultText }}</code>
-            </div>
-          </section>
+              <div class="default-hint">
+                留空时将使用默认文案：
+                <code class="default-hint-code">{{ scene.defaultText }}</code>
+              </div>
+            </section>
+
+            <!-- 预览区 -->
+            <aside class="preview-area" aria-label="消息模板预览">
+              <app-template-preview
+                [template]="$draft()[scene.key] || scene.defaultText"
+                [showLegend]="true"
+              ></app-template-preview>
+            </aside>
+          </div>
         </div>
       </nz-tab>
     }

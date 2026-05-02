@@ -28,6 +28,7 @@ import {
   SceneMetadata,
   createEmptyTemplates,
 } from './template-constants';
+import { TemplatePreviewComponent } from './template-preview.component';
 
 /**
  * MessageTemplateEditor —— 消息模板编辑器（任务 23）。
@@ -66,6 +67,7 @@ import {
     NzTabsModule,
     NzTagModule,
     NzTooltipModule,
+    TemplatePreviewComponent,
   ],
   templateUrl: './message-template-editor.component.html',
   styleUrls: ['./message-template-editor.component.less'],

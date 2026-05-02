@@ -162,10 +162,38 @@
 // 编辑区
 // ----------------------------------------------------------------------------
 
+// ----------------------------------------------------------------------------
+// 编辑 + 预览分栏
+// ----------------------------------------------------------------------------
+
+.editor-preview-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+
+  // 小屏堆叠为单列（与容器查询相比，断点更兼容旧浏览器）
+  @media (max-width: 960px) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .editor-area {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0; // 允许 textarea 在 grid 内正常收缩
+}
+
+.preview-area {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  app-template-preview {
+    display: block;
+    width: 100%;
+  }
 }
 
 .scene-textarea {

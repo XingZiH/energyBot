@@ -7,11 +7,13 @@ import {
   CheckCircleOutline,
   CloseCircleOutline,
   ExclamationCircleOutline,
+  EyeOutline,
   InfoCircleOutline,
 } from '@ant-design/icons-angular/icons';
 
 import { MessageTemplates, createEmptyMessageTemplates } from '../types';
 import { MessageTemplateEditorComponent } from './message-template-editor.component';
+import { TemplatePreviewComponent } from './template-preview.component';
 import {
   AVAILABLE_VARIABLES,
   SCENE_METADATA,
@@ -88,6 +90,7 @@ describe('MessageTemplateEditorComponent', () => {
             CheckCircleOutline,
             CloseCircleOutline,
             ExclamationCircleOutline,
+            EyeOutline,
             InfoCircleOutline,
           ],
         },
@@ -296,5 +299,43 @@ describe('MessageTemplateEditorComponent', () => {
     // warning-dot 只在 welcome tab 上出现
     const dots = el.querySelectorAll('.warning-dot');
     expect(dots.length).toBeGreaterThan(0);
+  });
+
+  // ---------- TemplatePreview 集成 ----------
+
+  it('24. 编辑区右侧嵌入 TemplatePreviewComponent', () => {
+    const previewDebug = fixture.debugElement.query(
+      By.directive(TemplatePreviewComponent),
+    );
+    expect(previewDebug).withContext(
+      '每个激活场景应渲染一个 app-template-preview',
+    ).toBeTruthy();
+  });
+
+  it('25. TemplatePreview 接收到当前 draft 作为 template input（含用户输入）', () => {
+    component.updateScene('welcome', '欢迎 {botName}');
+    fixture.detectChanges();
+
+    const previewDebug = fixture.debugElement.query(
+      By.directive(TemplatePreviewComponent),
+    );
+    const previewCmp =
+      previewDebug!.componentInstance as TemplatePreviewComponent;
+    expect(previewCmp.template()).toBe('欢迎 {botName}');
+  });
+
+  it('26. draft 为空时 TemplatePreview 回退到场景 defaultText 以保持预览可读', () => {
+    // welcome 的初值为空串（createEmptyMessageTemplates 全部字段空），
+    // 期望预览展示 scene.defaultText（与 bot 运行时的 fallback 行为对齐）
+    const welcomeDefault = SCENE_METADATA.find((s) => s.key === 'welcome')!
+      .defaultText;
+    expect(component.$draft().welcome).toBe('');
+
+    const previewDebug = fixture.debugElement.query(
+      By.directive(TemplatePreviewComponent),
+    );
+    const previewCmp =
+      previewDebug!.componentInstance as TemplatePreviewComponent;
+    expect(previewCmp.template()).toBe(welcomeDefault);
   });
 });

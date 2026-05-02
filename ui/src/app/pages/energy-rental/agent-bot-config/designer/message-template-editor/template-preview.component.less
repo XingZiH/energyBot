@@ -1,0 +1,151 @@
+// TemplatePreviewComponent 样式（任务 24）
+//
+// 色彩策略：严格通过 --ant-color-* 主题变量取色；audit:designer-theme 会拦截
+// 硬编码色值。如需扩展分段类型，请先在主题变量中寻找语义色（primary / error / warning）。
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+.template-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 6px;
+  background: var(--ant-color-bg-container);
+  box-sizing: border-box;
+}
+
+// ---------------------------------------------------------------------------
+// 标题
+// ---------------------------------------------------------------------------
+
+.preview-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.preview-header-text {
+  font-weight: 500;
+}
+
+// ---------------------------------------------------------------------------
+// 空态
+// ---------------------------------------------------------------------------
+
+.preview-empty {
+  margin: 16px 0;
+}
+
+// ---------------------------------------------------------------------------
+// 预览主体
+// ---------------------------------------------------------------------------
+
+.preview-content {
+  min-height: 60px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: var(--ant-color-bg-layout);
+  color: var(--ant-color-text);
+  font-family: var(
+    --ant-font-family-code,
+    'Monaco',
+    'Menlo',
+    'Consolas',
+    monospace
+  );
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+// 纯文本——直接继承 preview-content 的排版，不额外着色
+.seg-text {
+  color: inherit;
+}
+
+// 已识别变量：primary 主题色高亮
+.seg-var {
+  display: inline-block;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 3px;
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+  font-weight: 500;
+  cursor: help;
+}
+
+// 未知变量：error 色 + 虚线边框，用户一眼识别
+.seg-unknown {
+  display: inline-block;
+  padding: 0 4px;
+  margin: 0 1px;
+  border: 1px dashed var(--ant-color-error);
+  border-radius: 3px;
+  background: var(--ant-color-error-bg);
+  color: var(--ant-color-error);
+  cursor: help;
+}
+
+// 转义括号：低调的浅底，表示字面字符
+.seg-escape {
+  display: inline-block;
+  padding: 0 3px;
+  margin: 0 1px;
+  border-radius: 3px;
+  background: var(--ant-color-fill-secondary);
+  color: var(--ant-color-text-tertiary);
+  cursor: help;
+}
+
+// ---------------------------------------------------------------------------
+// 图例
+// ---------------------------------------------------------------------------
+
+.preview-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--ant-color-border-secondary);
+  color: var(--ant-color-text-tertiary);
+  font-size: 12px;
+}
+
+.legend-label {
+  color: var(--ant-color-text-secondary);
+}
+
+.legend-item {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.legend-var {
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+}
+
+.legend-unknown {
+  border: 1px dashed var(--ant-color-error);
+  background: var(--ant-color-error-bg);
+  color: var(--ant-color-error);
+}
+
+.legend-escape {
+  background: var(--ant-color-fill-secondary);
+  color: var(--ant-color-text-tertiary);
+}
