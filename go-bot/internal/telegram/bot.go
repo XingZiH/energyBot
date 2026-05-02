@@ -86,13 +86,16 @@ type DesignerMenuRow struct {
 }
 
 type DesignerMenuButton struct {
-	ID        string `json:"id"`
-	Text      string `json:"text"`
-	Action    string `json:"action"`
-	PackageID int    `json:"packageId"`
-	URL       string `json:"url"`
-	Message   string `json:"message"`
-	Command   string `json:"command"`
+	ID           string              `json:"id"`
+	Text         string              `json:"text"`
+	Action       ButtonAction        `json:"action"`
+	Style        *ButtonStyle        `json:"style,omitempty"`
+	URL          string              `json:"url,omitempty"`
+	Message      string              `json:"message,omitempty"`
+	Command      string              `json:"command,omitempty"`
+	PackageID    int                 `json:"packageId,omitempty"` // 保留兼容旧字段（已废弃但不移除避免编译错误）
+	Submenu      []DesignerMenuRow   `json:"submenu,omitempty"`
+	PackageGroup *PackageGroupConfig `json:"packageGroup,omitempty"`
 }
 
 type tronAddressRequest struct {
@@ -529,7 +532,7 @@ func (b *Bot) handleCustomMenuButton(ctx context.Context, chatID int64, text str
 }
 
 func (b *Bot) executeDesignerButton(ctx context.Context, chatID int64, button DesignerMenuButton) error {
-	switch strings.TrimSpace(button.Action) {
+	switch strings.TrimSpace(string(button.Action)) {
 	case "package":
 		if button.PackageID <= 0 {
 			return b.sendPackageMenu(ctx, chatID)
@@ -1348,7 +1351,7 @@ func designerButtonText(button DesignerMenuButton, packageTextByID map[int]strin
 	if text != "" {
 		return text
 	}
-	if strings.TrimSpace(button.Action) == "package" && button.PackageID > 0 {
+	if strings.TrimSpace(string(button.Action)) == "package" && button.PackageID > 0 {
 		if packageTextByID != nil {
 			if packageText := strings.TrimSpace(packageTextByID[button.PackageID]); packageText != "" {
 				return packageText
@@ -1356,7 +1359,7 @@ func designerButtonText(button DesignerMenuButton, packageTextByID map[int]strin
 		}
 		return fmt.Sprintf("套餐 %d", button.PackageID)
 	}
-	switch strings.TrimSpace(button.Action) {
+	switch strings.TrimSpace(string(button.Action)) {
 	case "address":
 		return buttonAddress
 	case "wallet":
