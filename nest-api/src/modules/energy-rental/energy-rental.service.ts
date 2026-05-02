@@ -2009,6 +2009,19 @@ export class EnergyRentalService {
       AccessScope;
   }
 
+  /**
+   * 从 userId 反推 agentId（供其他 service/controller 复用）。
+   *
+   * 安全上下文：保证返回的 agentId 确属于当前登录用户，
+   * 调用方不应再接受任何客户端提交的 agentId 参数，防止越权。
+   *
+   * @throws BadRequestException 当 userId 不属于 agent scope
+   */
+  async resolveAgentId(userId?: number): Promise<number> {
+    const scope = await this.resolveRequiredAgentScope(userId);
+    return scope.agentId!;
+  }
+
   private async findAgentWalletAccount(agentId?: number) {
     if (!agentId) return null;
     const rows = await this.getRows<Row>(agentWalletAccountsTable);
