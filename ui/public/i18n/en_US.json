@@ -128,6 +128,7 @@
     "default:system:menu": "Menu Manager",
     "default:system:dept": "Department",
     "default:system:customers": "Customers & Licenses",
+    "default:account:my-license": "My License",
     "default:energy-rental": "机器人控制",
     "default:energy-rental:dashboard": "控制台",
     "default:energy-rental:bot-config": "机器人配置",

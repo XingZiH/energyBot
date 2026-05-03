@@ -7,6 +7,7 @@ import { PermissionModule } from './permission/permission.module';
 import { EnergyRentalModule } from './energy-rental/energy-rental.module';
 import { CustomerModule } from './customer/customer.module';
 import { LicenseModule } from './license/license.module';
+import { MyLicenseModule } from './my-license/my-license.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { LicenseModule } from './license/license.module';
     EnergyRentalModule,
     CustomerModule,
     LicenseModule,
+    MyLicenseModule,
   ],
 })
 export class ApiModulesModule {}

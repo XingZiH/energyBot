@@ -30,6 +30,29 @@
         </nz-radio-group>
       </nz-form-control>
     </nz-form-item>
+  } @else {
+    <nz-form-item>
+      <nz-form-label [nzSm]="5" [nzXs]="24">开通登录</nz-form-label>
+      <nz-form-control [nzSm]="17" [nzXs]="24" nzExtra="勾选后会为该客户创建登录账号，客户登录后可在「我的 License」查看自己的 key 和安装命令">
+        <label nz-checkbox formControlName="createLogin">为该客户同步创建登录账号</label>
+      </nz-form-control>
+    </nz-form-item>
+
+    @if (addEditForm.get('createLogin')?.value) {
+      <nz-form-item>
+        <nz-form-label nzFor="loginUserName" nzRequired [nzSm]="5" [nzXs]="24">登录用户名</nz-form-label>
+        <nz-form-control [nzErrorTip]="combineTpl" [nzSm]="17" [nzXs]="24">
+          <input id="loginUserName" formControlName="loginUserName" nz-input placeholder="3-64 字符，客户登录用" maxlength="64" autocomplete="off" />
+        </nz-form-control>
+      </nz-form-item>
+
+      <nz-form-item>
+        <nz-form-label nzFor="loginPassword" nzRequired [nzSm]="5" [nzXs]="24">登录密码</nz-form-label>
+        <nz-form-control [nzErrorTip]="combineTpl" [nzSm]="17" [nzXs]="24" nzExtra="最少 6 字符；请线下安全告知客户">
+          <input id="loginPassword" type="text" formControlName="loginPassword" nz-input placeholder="明文显示以便抄录" maxlength="64" autocomplete="new-password" />
+        </nz-form-control>
+      </nz-form-item>
+    }
   }
 </form>
 

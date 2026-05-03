@@ -55,6 +55,35 @@ describe('CreateCustomerDto', () => {
     const dto = plainToInstance(CreateCustomerDto, { name: '正常名' });
     expect(await validate(dto)).toEqual([]);
   });
+
+  it('loginUserName / loginPassword 均合法时通过', async () => {
+    const dto = plainToInstance(CreateCustomerDto, {
+      name: '正常名',
+      loginUserName: 'alice',
+      loginPassword: 'secret123',
+    });
+    expect(await validate(dto)).toEqual([]);
+  });
+
+  it('loginUserName 过短被拒（<3）', async () => {
+    const dto = plainToInstance(CreateCustomerDto, {
+      name: '正常名',
+      loginUserName: 'ab',
+      loginPassword: 'secret123',
+    });
+    const errs = await expectValidationErrors(dto);
+    expect(errs.find((e) => e.property === 'loginUserName')).toBeDefined();
+  });
+
+  it('loginPassword 过短被拒（<6）', async () => {
+    const dto = plainToInstance(CreateCustomerDto, {
+      name: '正常名',
+      loginUserName: 'alice',
+      loginPassword: '123',
+    });
+    const errs = await expectValidationErrors(dto);
+    expect(errs.find((e) => e.property === 'loginPassword')).toBeDefined();
+  });
 });
 
 describe('UpdateCustomerDto', () => {

@@ -48,6 +48,10 @@ export default [
         path: 'energy-rental',
         loadChildren: () => import('../../pages/energy-rental/energy-rental-routing')
       },
+      {
+        path: 'account',
+        loadChildren: () => import('../../pages/account/account-routing')
+      },
       // 此路由用于tab刷新时占位组件
       {
         path: 'refresh-empty',

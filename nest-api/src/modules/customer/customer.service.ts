@@ -1,4 +1,6 @@
 import {
+  BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -7,8 +9,14 @@ import {
 import { DrizzleAsyncProvider } from '../../drizzle/drizzle.provider';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../drizzle/schema';
-import { customersTable, licensesTable } from '../../drizzle/schema';
+import {
+  customersTable,
+  licensesTable,
+  sysUserRoleTable,
+  userTable,
+} from '../../drizzle/schema';
 import { and, asc, desc, eq, ilike, isNull, SQL } from 'drizzle-orm';
+import * as argon2 from 'argon2';
 import { LicenseService } from '../license/license.service';
 import { TableDataInfo } from '../../common/result/result';
 import {
@@ -16,6 +24,19 @@ import {
   ListCustomerFilterDto,
   UpdateCustomerDto,
 } from './dto/customer.dto';
+
+/**
+ * 终端客户登录账号的默认部门 / 角色 id。
+ *
+ * 约束：
+ * - department_id = 1 在 seed 数据里对应"Ant科技"（项目自带根部门）
+ * - role_id = 3 对应"用户"（最低权限角色），且已在 20260503-my-license.sql migration 里
+ *   授予了 default:account:my-license 与 reveal 两个权限码
+ *
+ * 如果未来部署的租户修改了种子数据，这里需要随 migration 一起改。
+ */
+const DEFAULT_CUSTOMER_LOGIN_DEPARTMENT_ID = 1;
+const DEFAULT_CUSTOMER_LOGIN_ROLE_ID = 3;
 
 /**
  * Customer 业务服务。
@@ -34,6 +55,35 @@ export class CustomerService {
   ) {}
 
   async create(dto: CreateCustomerDto, createdBy: number) {
+    // 参数联动校验：loginUserName / loginPassword 要么都给，要么都不给
+    const hasLoginName = !!dto.loginUserName?.trim();
+    const hasLoginPwd = !!dto.loginPassword;
+    if (hasLoginName !== hasLoginPwd) {
+      throw new BadRequestException(
+        'loginUserName 和 loginPassword 必须同时提供或同时省略',
+      );
+    }
+    const wantCreateUser = hasLoginName && hasLoginPwd;
+
+    // 若要同步建登录账号，先检查用户名是否已被占用（事务里再加乐观锁意义不大，唯一约束靠应用层拦截）
+    if (wantCreateUser) {
+      const existing = await this.conn
+        .select({ id: userTable.id })
+        .from(userTable)
+        .where(eq(userTable.userName, dto.loginUserName!.trim()))
+        .limit(1);
+      if (existing.length > 0) {
+        throw new ConflictException(
+          `登录用户名 ${dto.loginUserName} 已被占用`,
+        );
+      }
+    }
+
+    // 登录密码 hash 提前算好，避免在事务里做 CPU 密集操作导致连接占用
+    const hashedPwd = wantCreateUser
+      ? await argon2.hash(dto.loginPassword!)
+      : null;
+
     const inserted = await this.conn.transaction(async (db) => {
       const [row] = await db
         .insert(customersTable)
@@ -44,6 +94,33 @@ export class CustomerService {
           createdBy,
         })
         .returning({ id: customersTable.id });
+
+      if (wantCreateUser) {
+        // 建 user 行：
+        //   - userName / password 来自 DTO
+        //   - available=true、sex=0（未设置）、mobile=''（允许空字符串，因为 notNull 但无长度下限校验）
+        //   - departmentId = 1（Ant科技）
+        //   - customerId = 新客户 id → 供 MyLicenseService 按 JWT.userId → customerId → license 查找
+        const [newUser] = await db
+          .insert(userTable)
+          .values({
+            userName: dto.loginUserName!.trim(),
+            password: hashedPwd!,
+            available: true,
+            sex: 0,
+            mobile: '',
+            departmentId: DEFAULT_CUSTOMER_LOGIN_DEPARTMENT_ID,
+            customerId: row.id,
+          })
+          .returning({ id: userTable.id });
+
+        // 绑定默认角色（role_id=3 "用户"）
+        await db.insert(sysUserRoleTable).values({
+          userId: newUser.id,
+          roleId: DEFAULT_CUSTOMER_LOGIN_ROLE_ID,
+        });
+      }
+
       return row;
     });
 
@@ -53,6 +130,9 @@ export class CustomerService {
 
     return {
       customerId: inserted.id,
+      // 让前端可据此决定是否展示"登录账号已创建"提示
+      loginUserCreated: wantCreateUser,
+      loginUserName: wantCreateUser ? dto.loginUserName!.trim() : null,
       ...credential,
     };
   }

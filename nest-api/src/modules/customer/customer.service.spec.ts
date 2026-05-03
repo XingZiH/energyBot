@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { CustomerService } from './customer.service';
 
 describe('CustomerService', () => {
@@ -10,6 +10,7 @@ describe('CustomerService', () => {
       selectIndex: 0,
       countResponses: [] as number[],
       countIndex: 0,
+      insertReturnIds: [] as number[],
     };
     const buildSelectChain = (rows: any) => ({
       from: jest.fn(() => ({
@@ -24,6 +25,8 @@ describe('CustomerService', () => {
               };
               return withLimit;
             }),
+            // 直接 .limit(n) 也要支持（create 里 userName 查重用）
+            limit: jest.fn(() => Promise.resolve(rows)),
             then: (resolve: any) => resolve(rows),
           };
           return withOrder;
@@ -32,12 +35,16 @@ describe('CustomerService', () => {
     });
     const conn: any = {
       insert: jest.fn(() => ({
-        values: jest.fn((values: any) => ({
-          returning: jest.fn(() => {
-            state.inserts.push(values);
-            return Promise.resolve([{ id: 100 }]);
-          }),
-        })),
+        values: jest.fn((values: any) => {
+          state.inserts.push(values);
+          const nextId = state.insertReturnIds.shift() ?? 100;
+          // 返回对象同时支持 .returning() 链式与 await（无 returning 的场景）
+          const result: any = {
+            returning: jest.fn(() => Promise.resolve([{ id: nextId }])),
+            then: (resolve: any) => resolve(undefined),
+          };
+          return result;
+        }),
       })),
       update: jest.fn(() => ({
         set: jest.fn((set: any) => ({
@@ -93,6 +100,77 @@ describe('CustomerService', () => {
       expect(license.generate).toHaveBeenCalledWith(100, 7);
       expect(result.customerId).toBe(100);
       expect(result.licenseKey).toBe('ebt_TEST');
+      expect(result.loginUserCreated).toBe(false);
+    });
+
+    it('提供 loginUserName 但缺 loginPassword 时抛 BadRequest', async () => {
+      const { svc, license } = createService();
+      await expect(
+        svc.create(
+          { name: '客户甲', loginUserName: 'alice' } as any,
+          7,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(license.generate).not.toHaveBeenCalled();
+    });
+
+    it('提供 loginPassword 但缺 loginUserName 时抛 BadRequest', async () => {
+      const { svc, license } = createService();
+      await expect(
+        svc.create(
+          { name: '客户甲', loginPassword: 'secret123' } as any,
+          7,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(license.generate).not.toHaveBeenCalled();
+    });
+
+    it('同时提供 loginUserName/Password 时事务里创建 user + sys_user_role 并绑定 customer_id', async () => {
+      const { svc, conn, license } = createService();
+      // 查重 select：用户名未被占用
+      conn._state.selectResponses.push([]);
+      // customers insert → id=200；user insert → id=555；sys_user_role insert
+      conn._state.insertReturnIds.push(200, 555);
+
+      const result = await svc.create(
+        {
+          name: '客户乙',
+          loginUserName: 'alice',
+          loginPassword: 'secret123',
+        } as any,
+        7,
+      );
+
+      // 插入顺序：customers(1) → user(2) → sys_user_role(3)
+      expect(conn._state.inserts).toHaveLength(3);
+      const [customerIns, userIns, roleIns] = conn._state.inserts;
+      expect(customerIns.name).toBe('客户乙');
+      expect(userIns.userName).toBe('alice');
+      expect(userIns.customerId).toBe(200);
+      expect(userIns.available).toBe(true);
+      expect(userIns.password).toMatch(/^\$argon2/); // argon2 hash 前缀
+      expect(roleIns.userId).toBe(555);
+      expect(roleIns.roleId).toBe(3); // DEFAULT_CUSTOMER_LOGIN_ROLE_ID
+      expect(license.generate).toHaveBeenCalledWith(200, 7);
+      expect(result.loginUserCreated).toBe(true);
+      expect(result.loginUserName).toBe('alice');
+    });
+
+    it('loginUserName 已被占用时抛 Conflict 且不 insert', async () => {
+      const { svc, conn, license } = createService();
+      conn._state.selectResponses.push([{ id: 999 }]); // 命中已存在用户
+      await expect(
+        svc.create(
+          {
+            name: '客户丙',
+            loginUserName: 'taken',
+            loginPassword: 'secret123',
+          } as any,
+          7,
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(conn._state.inserts).toHaveLength(0);
+      expect(license.generate).not.toHaveBeenCalled();
     });
   });
 

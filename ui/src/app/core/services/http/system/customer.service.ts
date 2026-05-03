@@ -48,6 +48,11 @@ export interface CreateCustomerParam {
   name: string;
   contact?: string;
   remark?: string;
+  /**
+   * 可选：同步为客户开通登录账号。两者必须同时提供或同时省略，否则后端 400。
+   */
+  loginUserName?: string;
+  loginPassword?: string;
 }
 
 export interface UpdateCustomerParam {
@@ -73,6 +78,13 @@ export interface LicenseCredential {
   licenseKey: string;
   licenseSecret: string;
   installCommand: string;
+  /**
+   * 是否同步创建了终端登录账号。仅 createCustomer 接口填充；
+   * revoke / reissue 不涉及账号，永远是 undefined。
+   */
+  loginUserCreated?: boolean;
+  /** 创建的登录账号用户名（仅 loginUserCreated=true 时出现） */
+  loginUserName?: string | null;
 }
 
 /** revoke 请求返回：反映幂等性（0 表示无可吊销，1+ 表示实际吊销条数）。 */

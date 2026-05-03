@@ -30,6 +30,9 @@ export const userTable = pgTable('user', {
   telephone: varchar({ length: 20 }), // 电话号码
   departmentId: integer('department_id').notNull(), // 部门 ID
   lastLoginTime: timestamp('last_login_time').defaultNow(), // 最后登录时间
+  // 绑定的客户 id（仅终端客户账号会填，内部操作员/管理员为 NULL）。
+  // 新建客户时可由管理端同步创建登录账号并写入此字段。
+  customerId: integer('customer_id'),
   ...timestamps,
 });
 

@@ -1,0 +1,134 @@
+<app-page-header [pageHeaderInfo]="pageHeaderInfo"></app-page-header>
+
+<nz-card nzBordered="false" [nzLoading]="loading()">
+  @if (errorMessage() && !view()) {
+    <nz-alert
+      nzType="info"
+      nzShowIcon
+      nzMessage="当前账号暂无 License"
+      [nzDescription]="errorMessage()!"
+    ></nz-alert>
+  } @else if (view(); as v) {
+    <nz-descriptions nzBordered [nzColumn]="1" nzSize="middle">
+      <nz-descriptions-item nzTitle="客户名称">
+        {{ v.customerName }}
+        @if (v.customerStatus === 'suspended') {
+          <nz-tag nzColor="orange" class="ml-8">账号已暂停</nz-tag>
+        }
+      </nz-descriptions-item>
+
+      <nz-descriptions-item nzTitle="License 状态">
+        @switch (v.licenseStatus) {
+          @case ('active') {
+            <nz-tag nzColor="green">
+              <nz-icon nzType="check-circle" nzTheme="fill"></nz-icon>
+              有效
+            </nz-tag>
+          }
+          @case ('revoked') {
+            <nz-tag nzColor="red">
+              <nz-icon nzType="close-circle" nzTheme="fill"></nz-icon>
+              已吊销
+            </nz-tag>
+          }
+          @case ('none') {
+            <nz-tag nzColor="default">未颁发</nz-tag>
+          }
+        }
+      </nz-descriptions-item>
+
+      @if (v.licenseKey) {
+        <nz-descriptions-item nzTitle="License Key">
+          <nz-space nzAlign="center">
+            <span *nzSpaceItem class="mono license-key">{{ v.licenseKey }}</span>
+            <button *nzSpaceItem nz-button nzType="link" nzSize="small" (click)="copy(v.licenseKey, 'License Key')">
+              <nz-icon nzType="copy"></nz-icon>
+              复制
+            </button>
+          </nz-space>
+        </nz-descriptions-item>
+      }
+
+      @if (v.issuedAt) {
+        <nz-descriptions-item nzTitle="颁发时间">
+          {{ v.issuedAt | date: 'yyyy-MM-dd HH:mm:ss' }}
+        </nz-descriptions-item>
+      }
+
+      @if (v.licenseStatus === 'active') {
+        <nz-descriptions-item nzTitle="最近心跳">
+          @if (v.lastSeenAt) {
+            {{ v.lastSeenAt | date: 'yyyy-MM-dd HH:mm:ss' }}
+          } @else {
+            <nz-tag nzColor="default">从未上线</nz-tag>
+          }
+        </nz-descriptions-item>
+      }
+
+      @if (v.licenseStatus === 'revoked') {
+        <nz-descriptions-item nzTitle="吊销时间">
+          {{ v.revokedAt | date: 'yyyy-MM-dd HH:mm:ss' }}
+        </nz-descriptions-item>
+        @if (v.revokedReason) {
+          <nz-descriptions-item nzTitle="吊销原因">
+            {{ v.revokedReason }}
+          </nz-descriptions-item>
+        }
+      }
+    </nz-descriptions>
+
+    @if (v.licenseStatus === 'active') {
+      <nz-divider nzOrientation="left" nzText="一键部署命令"></nz-divider>
+
+      @if (!installCommand()) {
+        <p>点击下方按钮查看安装命令，命令中包含 licenseSecret 明文（仅对你本人可见）。</p>
+        <button
+          nz-button
+          nzType="primary"
+          [nzLoading]="loadingInstall()"
+          (click)="revealInstallCommand()"
+        >
+          <nz-icon nzType="eye"></nz-icon>
+          查看安装命令
+        </button>
+      } @else {
+        <nz-alert
+          nzType="warning"
+          nzShowIcon
+          nzMessage="安装命令含 secret 明文，请避免在公共屏幕展示"
+        ></nz-alert>
+        <pre class="install-command">{{ installCommand() }}</pre>
+        <nz-space>
+          <button *nzSpaceItem nz-button nzType="primary" (click)="copy(installCommand(), '安装命令')">
+            <nz-icon nzType="copy"></nz-icon>
+            复制安装命令
+          </button>
+          <button *nzSpaceItem nz-button (click)="hideInstallCommand()">
+            <nz-icon nzType="eye-invisible"></nz-icon>
+            收起
+          </button>
+        </nz-space>
+      }
+    }
+
+    @if (v.licenseStatus === 'revoked') {
+      <nz-divider></nz-divider>
+      <nz-alert
+        nzType="error"
+        nzShowIcon
+        nzMessage="License 已吊销"
+        nzDescription="如需重新开通，请联系管理员为你颁发新的 license。"
+      ></nz-alert>
+    }
+
+    @if (v.licenseStatus === 'none') {
+      <nz-divider></nz-divider>
+      <nz-alert
+        nzType="info"
+        nzShowIcon
+        nzMessage="尚未颁发 License"
+        nzDescription="请联系管理员为你的账号颁发 license 后再来查看。"
+      ></nz-alert>
+    }
+  }
+</nz-card>
