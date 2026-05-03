@@ -7,6 +7,7 @@ import {
   BulbOutline,
   CheckOutline,
   CloseOutline,
+  ExportOutline,
   MehOutline,
   MessageOutline,
   MoonOutline,
@@ -92,6 +93,7 @@ describe('TelegramPreviewComponent', () => {
             BulbOutline,
             CheckOutline,
             CloseOutline,
+            ExportOutline,
             MehOutline,
             MessageOutline,
             MoonOutline,
@@ -153,19 +155,19 @@ describe('TelegramPreviewComponent', () => {
   });
 
   // 6
-  it('6. 根菜单（breadcrumb.length=1）渲染为 Reply Keyboard', () => {
+  it('6. 根菜单（breadcrumb.length=1）也用 Inline Keyboard（v3：全部 inline）', () => {
     tree.setRootMenu([row('r1', [btn('b1', '主菜单A')])]);
     fixture.detectChanges();
 
-    expect(component.$isInline()).toBeFalse();
+    expect(component.$isInline()).toBeTrue();
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('.tg-reply-keyboard')).toBeTruthy();
-    expect(el.querySelector('.tg-inline-keyboard')).toBeNull();
-    expect(el.querySelector('.tg-reply-button')!.textContent).toContain('主菜单A');
+    expect(el.querySelector('.tg-inline-keyboard')).toBeTruthy();
+    expect(el.querySelector('.tg-reply-keyboard')).toBeNull();
+    expect(el.querySelector('.tg-inline-button')!.textContent).toContain('主菜单A');
   });
 
   // 7
-  it('7. 子菜单（breadcrumb.length>1）渲染为 Inline Keyboard', () => {
+  it('7. 子菜单（breadcrumb.length>1）同样渲染为 Inline Keyboard', () => {
     tree.setRootMenu([
       row('r1', [
         {
@@ -218,7 +220,7 @@ describe('TelegramPreviewComponent', () => {
   it('9. 按钮 text 空时显示 "(未命名)"', () => {
     tree.setRootMenu([row('r1', [btn('b1', '')])]);
     fixture.detectChanges();
-    const btnEl = fixture.nativeElement.querySelector('.tg-reply-button') as HTMLElement;
+    const btnEl = fixture.nativeElement.querySelector('.tg-inline-button') as HTMLElement;
     expect(btnEl.textContent).toContain('(未命名)');
   });
 
@@ -525,7 +527,7 @@ describe('TelegramPreviewComponent', () => {
     fixture.detectChanges();
     component.selectButton('b1');
     fixture.detectChanges();
-    const btnEl = fixture.nativeElement.querySelector('.tg-reply-button') as HTMLElement;
+    const btnEl = fixture.nativeElement.querySelector('.tg-inline-button') as HTMLElement;
     expect(btnEl.classList.contains('is-selected')).toBeTrue();
   });
 
@@ -546,5 +548,46 @@ describe('TelegramPreviewComponent', () => {
 
     const empty = fixture.nativeElement.querySelector('.tg-empty-row');
     expect(empty).toBeTruthy();
+  });
+
+  // ---------- v3：URL 按钮视觉区分 ----------
+  it('30. URL 按钮带 data-action="URL" 属性 + url-indicator 箭头 icon', () => {
+    tree.setRootMenu([
+      row('r1', [
+        {
+          id: 'u1',
+          text: '官网',
+          action: ButtonAction.URL,
+          url: 'https://example.com',
+        },
+      ]),
+    ]);
+    fixture.detectChanges();
+
+    const btnEl = fixture.nativeElement.querySelector('.tg-inline-button') as HTMLElement;
+    expect(btnEl.getAttribute('data-action')).toBe(ButtonAction.URL);
+    // URL 按钮右上角出框箭头
+    expect(btnEl.querySelector('.tg-inline-url-indicator')).toBeTruthy();
+    // SUBMENU 箭头不应该出现
+    expect(btnEl.querySelector('.tg-inline-submenu-indicator')).toBeNull();
+  });
+
+  it('31. SUBMENU 按钮 data-action="SUBMENU" + submenu-indicator，无 url-indicator', () => {
+    tree.setRootMenu([
+      row('r1', [
+        {
+          id: 's1',
+          text: '分组',
+          action: ButtonAction.SUBMENU,
+          submenu: [],
+        },
+      ]),
+    ]);
+    fixture.detectChanges();
+
+    const btnEl = fixture.nativeElement.querySelector('.tg-inline-button') as HTMLElement;
+    expect(btnEl.getAttribute('data-action')).toBe(ButtonAction.SUBMENU);
+    expect(btnEl.querySelector('.tg-inline-submenu-indicator')).toBeTruthy();
+    expect(btnEl.querySelector('.tg-inline-url-indicator')).toBeNull();
   });
 });

@@ -96,6 +96,7 @@
             *ngFor="let btn of row.buttons; trackBy: trackByButtonId"
             class="tg-inline-button"
             [class.is-selected]="$selectedId() === btn.id"
+            [attr.data-action]="btn.action"
             [title]="getButtonTooltip(btn)"
             cdkDrag
             [cdkDragData]="btn"
@@ -108,6 +109,14 @@
               class="tg-inline-submenu-indicator"
               nz-icon
               nzType="right"
+              nzTheme="outline"
+              aria-hidden="true"
+            ></span>
+            <span
+              *ngIf="btn.action === ButtonAction.URL"
+              class="tg-inline-url-indicator"
+              nz-icon
+              nzType="export"
               nzTheme="outline"
               aria-hidden="true"
             ></span>
@@ -157,75 +166,6 @@
           </span>
         </div>
       </div>
-    </div>
-  </div>
-
-  <!-- ============ Reply Keyboard：根层常驻底部 ============ -->
-  <div class="tg-reply-keyboard" *ngIf="!$isInline()">
-    <div
-      class="tg-reply-row"
-      *ngFor="let row of $currentMenu(); let rowIdx = index; trackBy: trackByRowId"
-      cdkDropList
-      [id]="rowListId(rowIdx)"
-      [cdkDropListData]="row.buttons"
-      cdkDropListOrientation="horizontal"
-      (cdkDropListDropped)="onDropToRow($event, rowIdx)"
-    >
-      <div
-        *ngFor="let btn of row.buttons; trackBy: trackByButtonId"
-        class="tg-reply-button"
-        [class.is-selected]="$selectedId() === btn.id"
-        [title]="getButtonTooltip(btn)"
-        cdkDrag
-        [cdkDragData]="btn"
-        (click)="selectButton(btn.id, $event)"
-        (dblclick)="enterButtonSubmenu(btn)"
-      >
-        <span class="tg-reply-button-text">{{ btn.text || '(未命名)' }}</span>
-        <button
-          type="button"
-          class="tg-button-remove"
-          nz-button
-          nzType="text"
-          nzSize="small"
-          nz-popconfirm
-          nzPopconfirmTitle="确定删除该按钮？"
-          nzOkText="删除"
-          nzCancelText="取消"
-          (nzOnConfirm)="removeButton(btn.id)"
-          (click)="$event.stopPropagation()"
-          aria-label="删除按钮"
-        >
-          <span nz-icon nzType="close" nzTheme="outline"></span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 根层空态落点 -->
-    <div
-      class="tg-empty-row"
-      *ngIf="$currentMenu().length === 0"
-      cdkDropList
-      [id]="newRowListId"
-      [cdkDropListData]="emptyButtons"
-      (cdkDropListDropped)="onDropToNewRow($event)"
-    >
-      <span class="tg-empty-hint">拖入组件开始设计...</span>
-    </div>
-
-    <!-- 新行落点 -->
-    <div
-      *ngIf="$canAddRow() && $currentMenu().length > 0"
-      class="tg-new-row-slot"
-      cdkDropList
-      [id]="newRowListId"
-      [cdkDropListData]="emptyButtons"
-      (cdkDropListDropped)="onDropToNewRow($event)"
-    >
-      <span class="tg-new-row-hint">
-        <span nz-icon nzType="plus" nzTheme="outline"></span>
-        拖到此处新建一行
-      </span>
     </div>
   </div>
 

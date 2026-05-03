@@ -19,10 +19,13 @@
 @tg-light-inline-bg: #ffffff;
 @tg-light-inline-text: #1967d2;
 @tg-light-inline-border: #e0e0e0;
-@tg-light-reply-bg: #f5f5f5;
-@tg-light-reply-button-bg: #ffffff;
-@tg-light-reply-button-text: #000000;
-@tg-light-reply-button-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+// URL 类按钮：浅绿底 + 深绿字 + 右上角出框箭头，
+// 与 Telegram inline keyboard 真机 URL button 视觉一致。
+@tg-light-inline-url-bg: #e7f5d9;
+@tg-light-inline-url-text: #2d6b0f;
+@tg-light-inline-url-border: #bfe09a;
+// Reply Keyboard 变量已随 v3 UX 移除（全部菜单改为 inline），仅保留
+// header / footer / check 等共享色。
 @tg-light-header-bg: #ffffff;
 @tg-light-header-text: #000000;
 @tg-light-header-muted: #707579;
@@ -42,9 +45,9 @@
 @tg-dark-inline-bg: #182533;
 @tg-dark-inline-text: #64a6ef;
 @tg-dark-inline-border: #2a3f55;
-@tg-dark-reply-bg: #1e2835;
-@tg-dark-reply-button-bg: #2a3f55;
-@tg-dark-reply-button-text: #ffffff;
+@tg-dark-inline-url-bg: #2e4a2a;
+@tg-dark-inline-url-text: #b6e39b;
+@tg-dark-inline-url-border: #3f6839;
 @tg-dark-header-bg: #17212b;
 @tg-dark-header-text: #ffffff;
 @tg-dark-header-muted: #8a9aa8;
@@ -337,6 +340,22 @@
   &.cdk-drag-placeholder {
     opacity: 0.3;
   }
+
+  // URL 类按钮：浅绿底 + 深绿字（参考真机 Telegram inline URL button）
+  &[data-action='URL'] {
+    background: @tg-light-inline-url-bg;
+    color: @tg-light-inline-url-text;
+    border-color: @tg-light-inline-url-border;
+
+    &:hover {
+      background: darken(@tg-light-inline-url-bg, 4%);
+    }
+
+    &.is-selected {
+      border-color: @tg-light-inline-url-text;
+      box-shadow: 0 0 0 2px rgba(45, 107, 15, 0.25);
+    }
+  }
 }
 
 .tg-inline-button-text {
@@ -350,71 +369,13 @@
   opacity: 0.7;
 }
 
-// ============ Reply Keyboard ============
-.tg-reply-keyboard {
-  flex-shrink: 0;
-  background: @tg-light-reply-bg;
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border-top: 1px solid @tg-light-header-border;
-}
-
-.tg-reply-row {
-  display: flex;
-  gap: 4px;
-  min-height: 36px;
-}
-
-.tg-reply-button {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 10px 8px;
-  background: @tg-light-reply-button-bg;
-  color: @tg-light-reply-button-text;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  box-shadow: @tg-light-reply-button-shadow;
-  overflow: hidden;
-  white-space: nowrap;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  user-select: none;
-  transition:
-    box-shadow 0.15s ease,
-    transform 0.05s ease;
-
-  .tg-reply-button-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &:hover {
-    .tg-button-remove {
-      opacity: 1;
-      pointer-events: auto;
-    }
-  }
-
-  &.is-selected {
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.1),
-      0 0 0 2px rgba(25, 103, 210, 0.25);
-  }
-
-  &.cdk-drag-preview {
-    opacity: 0.85;
-  }
-
-  &.cdk-drag-placeholder {
-    opacity: 0.3;
-  }
+.tg-inline-url-indicator {
+  // 出框箭头 icon：定位到按钮右上角，尺寸紧凑不干扰文字
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 10px;
+  opacity: 0.7;
 }
 
 // ============ 编辑态：删除按钮 / 新行落点 / 空态 ============
@@ -473,16 +434,6 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-
-// Reply Keyboard 区域的新行/空态视觉
-.tg-reply-keyboard {
-  .tg-new-row-slot,
-  .tg-empty-row {
-    border-color: rgba(0, 0, 0, 0.12);
-    color: @tg-light-reply-button-text;
-    background: rgba(255, 255, 255, 0.7);
-  }
 }
 
 // ============ Footer 输入框（纯装饰） ============
@@ -609,29 +560,20 @@
       border-color: @tg-dark-inline-text;
       box-shadow: 0 0 0 2px rgba(100, 166, 239, 0.3);
     }
-  }
 
-  .tg-reply-keyboard {
-    background: @tg-dark-reply-bg;
-    border-top-color: @tg-dark-header-border;
+    &[data-action='URL'] {
+      background: @tg-dark-inline-url-bg;
+      color: @tg-dark-inline-url-text;
+      border-color: @tg-dark-inline-url-border;
 
-    .tg-new-row-slot,
-    .tg-empty-row {
-      border-color: rgba(255, 255, 255, 0.14);
-      color: @tg-dark-reply-button-text;
-      background: rgba(255, 255, 255, 0.04);
-    }
-  }
+      &:hover {
+        background: lighten(@tg-dark-inline-url-bg, 4%);
+      }
 
-  .tg-reply-button {
-    background: @tg-dark-reply-button-bg;
-    color: @tg-dark-reply-button-text;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-
-    &.is-selected {
-      box-shadow:
-        0 1px 2px rgba(0, 0, 0, 0.35),
-        0 0 0 2px rgba(100, 166, 239, 0.35);
+      &.is-selected {
+        border-color: @tg-dark-inline-url-text;
+        box-shadow: 0 0 0 2px rgba(182, 227, 155, 0.3);
+      }
     }
   }
 

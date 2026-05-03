@@ -74,10 +74,14 @@ export class TelegramPreviewComponent {
   readonly $darkMode = signal(false);
 
   /**
-   * 约定：根层用 Reply Keyboard，子层用 Inline Keyboard。
-   * 与实际 Telegram Bot 常见模式一致：主菜单常驻底部键盘，子菜单则随消息 inline。
+   * 全部菜单层级统一用 Inline Keyboard 渲染——按钮紧贴机器人气泡下方。
+   * 这是 v3 UX 调整：之前根层走 ReplyKeyboard（常驻底部），与用户直觉和实际
+   * Telegram bot 的 /start 回复一致性不符；改成永远 inline 更符合用户期待
+   * （参考图：每条 bot 消息下面都有自己的 inline 键盘）。
+   *
+   * 保留该 computed 以兼容已有的 DOM selector 断言，恒为 true。
    */
-  readonly $isInline = computed(() => this.$breadcrumb().length > 1);
+  readonly $isInline = computed(() => true);
 
   readonly $canAddRow = computed(() => this.$currentMenu().length < this.maxRows);
 
