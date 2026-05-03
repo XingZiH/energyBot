@@ -66,3 +66,13 @@ ui/playwright-report/
 ui/test-results/
 ui/blob-report/
 ui/playwright/.cache/
+
+# Secrets - 永远不进仓库
+nest-api/.env
+nest-api/.env.*
+go-bot/.env
+go-bot/.env.*
+.env
+.env.*
+!.env.example
+!**/.env.example

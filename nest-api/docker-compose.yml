@@ -1,4 +1,6 @@
 # docker-compose.yml
+# ⚠️ 仅供本地开发使用 —— 只起一个 postgres，供 nest-api 本地 npm run start:dev 连接
+#    生产部署请用仓库根目录的 docker-compose.prod.yml（包含 ui + nest-api + go-bot + postgres）
 # https://juejin.cn/post/7112694027212259364
 services:
 

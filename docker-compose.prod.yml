@@ -1,0 +1,105 @@
+# docker-compose.prod.yml
+# 生产编排：ui (nginx) + nest-api + go-bot + postgres
+#
+# 用法:
+#   cp .env.example .env  # 然后填值
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# 设计:
+#   - 双网络: backend（内部通信）+ frontend（ui 对外）
+#   - 只有 ui 服务暴露到 host（${UI_PORT:-80}），IP 直接暴露
+#   - nest-api 不直暴，由 ui nginx 反代 /api/
+#   - postgres 不暴露，仅 docker 内网可访问
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  nest-api:
+    image: energybot-api:${IMAGE_TAG:-latest}
+    build:
+      context: ./nest-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+      PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    # 说明：nest-api 当前没有 /health endpoint（侦察结果），
+    # 暂不配 healthcheck；ui 反代时若 nest-api 未就绪会返回 502，
+    # 待后续新增 /health 后再补。参考: src/enum/config.enum.ts
+
+  go-bot:
+    image: energybot-bot:${IMAGE_TAG:-latest}
+    build:
+      context: ./go-bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # 必填
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TRON_API_BASE_URL: ${TRON_API_BASE_URL}
+      TRON_API_KEY: ${TRON_API_KEY}
+      PLATFORM_RECEIVE_ADDRESS: ${PLATFORM_RECEIVE_ADDRESS}
+      # 能量供应商分支
+      ENERGY_PROVIDER: ${ENERGY_PROVIDER:-justlend}
+      JUSTLEND_CONTRACT_ADDRESS: ${JUSTLEND_CONTRACT_ADDRESS:-}
+      JUSTLEND_PAYER_PRIVATE_KEY: ${JUSTLEND_PAYER_PRIVATE_KEY:-}
+      CATFEE_ENVIRONMENT: ${CATFEE_ENVIRONMENT:-nile}
+      CATFEE_PROD_API_KEY: ${CATFEE_PROD_API_KEY:-}
+      CATFEE_PROD_API_SECRET: ${CATFEE_PROD_API_SECRET:-}
+      CATFEE_NILE_API_KEY: ${CATFEE_NILE_API_KEY:-}
+      CATFEE_NILE_API_SECRET: ${CATFEE_NILE_API_SECRET:-}
+      # 内部服务发现（docker DNS）
+      NEST_API_URL: http://nest-api:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nest-api:
+        condition: service_started
+    networks:
+      - backend
+
+  ui:
+    image: energybot-ui:${IMAGE_TAG:-latest}
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${UI_PORT:-80}:80"
+    depends_on:
+      - nest-api
+    networks:
+      - frontend
+
+volumes:
+  postgres-data:
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
