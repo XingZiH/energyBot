@@ -297,4 +297,53 @@ export class CustomerService {
     }
     return cmd;
   }
+
+  /**
+   * 在给定事务里为一个**已存在的 user** 自动开通 customer + license，并将 user.customer_id 回填。
+   *
+   * 场景：
+   * 1. AuthService.signup —— 自助注册。user 已在同一事务中插入，调用本方法完成"注册即发 license"
+   * 2. UserService.create —— 后台运营建用户。同上
+   * 3. 存量补齐 CLI —— 对历史 user 逐条补齐
+   *
+   * 约定：
+   * - 只在传入 tx 上操作，失败由调用方回滚；不触碰 this.conn
+   * - customer.name 默认 = userName；后期客户可在「我的 License」改（本期不做）
+   * - 返回 license 凭据给上层决定是否展示（signup 返回前端；CLI 打印；UserService 丢弃）
+   *
+   * @param tx        Drizzle 事务句柄（必填，强制调用方承担事务）
+   * @param userId    已插入的 user.id
+   * @param userName  用于填 customer.name
+   * @param issuedBy  审计：颁发人 userId。signup 场景 = 自己；后台建账号 = 操作管理员
+   */
+  async provisionForUser(
+    tx: NodePgDatabase<typeof schema>,
+    userId: number,
+    userName: string,
+    issuedBy: number,
+  ) {
+    const [customerRow] = await tx
+      .insert(customersTable)
+      .values({
+        name: userName,
+        createdBy: issuedBy,
+      })
+      .returning({ id: customersTable.id });
+
+    await tx
+      .update(userTable)
+      .set({ customerId: customerRow.id })
+      .where(eq(userTable.id, userId));
+
+    const credential = await this.licenseService.generate(
+      customerRow.id,
+      issuedBy,
+      tx,
+    );
+
+    return {
+      customerId: customerRow.id,
+      ...credential,
+    };
+  }
 }

@@ -26,6 +26,7 @@ import { ConfigEnum } from '../../enum/config.enum';
 import * as argon2 from 'argon2';
 import { SignupUserDto } from './dto/signin-user.dto';
 import { normalizeMenuAuthCodes } from './auth-menu-policy';
+import { CustomerService } from '../customer/customer.service';
 
 const USER_ROLE_NAME = '用户';
 const LEGACY_AGENT_ROLE_NAME = '代理商';
@@ -46,6 +47,7 @@ export class AuthService {
     private jwt: JwtService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @Inject(DrizzleAsyncProvider) private conn: NodePgDatabase<typeof schema>,
+    private readonly customerService: CustomerService,
   ) {}
 
   // 登录
@@ -130,7 +132,24 @@ export class AuthService {
         botStatus: 'disabled',
       });
 
-      return { userId: createdUser.id, agentId: agent.id };
+      // 自助注册同事务开通 customer + license，并回填 user.customer_id。
+      // 这样用户首次登录立刻可在「我的 License」看到，无需管理员介入。
+      // issuedBy 使用新用户自己的 id 作为自颁发审计记录。
+      const licenseCredential = await this.customerService.provisionForUser(
+        db,
+        createdUser.id,
+        userName,
+        createdUser.id,
+      );
+
+      return {
+        userId: createdUser.id,
+        agentId: agent.id,
+        customerId: licenseCredential.customerId,
+        licenseKey: licenseCredential.licenseKey,
+        licenseSecret: licenseCredential.licenseSecret,
+        installCommand: licenseCredential.installCommand,
+      };
     });
 
     return result;

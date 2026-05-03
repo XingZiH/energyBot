@@ -299,4 +299,31 @@ describe('CustomerService', () => {
       await expect(svc.getInstallCommand(1)).rejects.toThrow(NotFoundException);
     });
   });
+
+  describe('provisionForUser', () => {
+    it('在传入 tx 上建 customer、回填 user.customer_id 并调 license.generate(tx)', async () => {
+      const { svc, conn, license } = createService();
+      conn._state.insertReturnIds.push(321);
+
+      const result = await svc.provisionForUser(conn, 42, 'alice', 42);
+
+      // 插入了 customer
+      expect(conn._state.inserts).toHaveLength(1);
+      expect(conn._state.inserts[0]).toMatchObject({
+        name: 'alice',
+        createdBy: 42,
+      });
+      // 回填 user.customer_id
+      expect(conn._state.updates).toHaveLength(1);
+      expect(conn._state.updates[0].set).toEqual({ customerId: 321 });
+      // license.generate 收到 tx
+      expect(license.generate).toHaveBeenCalledWith(321, 42, conn);
+      expect(result).toEqual({
+        customerId: 321,
+        licenseKey: 'ebt_TEST',
+        licenseSecret: 'secret',
+        installCommand: 'cmd',
+      });
+    });
+  });
 });

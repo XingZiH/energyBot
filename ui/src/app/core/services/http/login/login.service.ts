@@ -17,6 +17,22 @@ export interface UserSignup extends UserLogin {
   email?: string;
 }
 
+/**
+ * signup 接口响应。
+ *
+ * 后端在注册成功时同事务开通了 customer + license，licenseSecret 明文**只在此次响应
+ * 中出现**；前端必须立即展示并提醒用户保存。后续只能通过「我的 License」→ reveal
+ * 拿回 installCommand，不会再有明文 secret。
+ */
+export interface UserSignupResult {
+  userId: number;
+  agentId: number;
+  customerId: number;
+  licenseKey: string;
+  licenseSecret: string;
+  installCommand: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -28,7 +44,7 @@ export class LoginService {
     return this.http.post('/auth/signin', params, { needSuccessInfo: false });
   }
 
-  public signup(params: UserSignup): Observable<{ userId: number; agentId: number }> {
+  public signup(params: UserSignup): Observable<UserSignupResult> {
     return this.http.post('/auth/signup', params, { needSuccessInfo: true });
   }
 

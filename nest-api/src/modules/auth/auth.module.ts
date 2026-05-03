@@ -8,11 +8,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ConfigEnum } from '../../enum/config.enum';
 import { JwtStrategy } from './auth.strategy';
 import { DrizzleModule } from '../../drizzle/drizzle.module';
+import { CustomerModule } from '../customer/customer.module';
 
 @Module({
   imports: [
     UserModule,
     DrizzleModule,
+    CustomerModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

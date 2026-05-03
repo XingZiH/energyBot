@@ -24,15 +24,23 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { ConfigEnum } from '../../enum/config.enum';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import * as argon2 from 'argon2';
+import { CustomerService } from '../customer/customer.service';
 
 @Injectable()
 export class UserService {
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @Inject(DrizzleAsyncProvider) private conn: NodePgDatabase<typeof schema>,
+    private readonly customerService: CustomerService,
   ) {}
 
-  async create(data: CreateUserDto) {
+  /**
+   * 后台管理员创建用户。
+   *
+   * 同 signup 一样走"注册即发 license"流程：在同一事务里补建 customer + license 并回填
+   * user.customer_id。审计字段 issuedBy 取操作管理员 id（由 controller 从 JWT 传入）。
+   */
+  async create(data: CreateUserDto, createdBy: number) {
     const { roleId, ...user } = data;
     // 对用户密码使用argon2进行加密
     user.password = await argon2.hash(user.password);
@@ -47,6 +55,14 @@ export class UserService {
       await db
         .insert(sysUserRoleTable)
         .values(roleId.map((v) => ({ userId: addUser[0].id, roleId: v })));
+
+      // 同事务开通 customer + license 并回填 user.customer_id
+      await this.customerService.provisionForUser(
+        db,
+        addUser[0].id,
+        user.userName,
+        createdBy,
+      );
     });
     return null;
   }

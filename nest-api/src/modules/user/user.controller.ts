@@ -6,6 +6,7 @@ import {
   ParseIntPipe,
   Post,
   Put,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { UserService } from './user.service';
@@ -27,8 +28,12 @@ export class UserController {
   @Post('create')
   @UseGuards(JwtGuard, AuthGuard)
   @Permission('default:system:account:add')
-  async create(@Body() createUserDto: CreateUserDto) {
-    const data = await this.userService.create(createUserDto);
+  async create(
+    @Body() createUserDto: CreateUserDto,
+    @Req() req: { user?: { userId?: number } },
+  ) {
+    const createdBy = req.user?.userId ?? 0;
+    const data = await this.userService.create(createUserDto, createdBy);
     return ResultData.success(data);
   }
 

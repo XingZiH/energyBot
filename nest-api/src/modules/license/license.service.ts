@@ -72,15 +72,27 @@ export class LicenseService {
   }
 
   /**
-   * 为指定客户生成新 license。返回明文 key + secret，调用方（CustomerService）
+   * 为指定客户生成新 license。返回明文 key + secret，调用方
    * 只能在此次调用中看到 secret 明文——写入 DB 的是加密密文。
+   *
+   * @param customerId  目标客户 id
+   * @param issuedBy    颁发人 userId（审计字段）
+   * @param tx          可选 Drizzle 事务句柄。当调用方需要把 license 与 user/customer
+   *                    创建放在同一事务（signup 自助注册、存量补齐脚本）时传入，
+   *                    事务失败会连带回滚这条 license。不传时使用默认连接（兼容
+   *                    原有"事务外补发"语义，如 CustomerService.create 的 admin 运营路径）。
    */
-  async generate(customerId: number, issuedBy: number) {
+  async generate(
+    customerId: number,
+    issuedBy: number,
+    tx?: NodePgDatabase<typeof schema>,
+  ) {
     const licenseKey = generateLicenseKey();
     const licenseSecret = generateLicenseSecret();
     const secretCipher = aesGcmEncryptToBase64(licenseSecret, this.encKey);
 
-    await this.conn.insert(licensesTable).values({
+    const executor = tx ?? this.conn;
+    await executor.insert(licensesTable).values({
       customerId,
       licenseKey,
       secretCipher,

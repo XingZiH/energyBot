@@ -42,3 +42,11 @@
     </div>
   </form>
 </div>
+
+<app-license-credential-drawer
+  [visible]="drawerVisible()"
+  [credential]="credential()"
+  title="你的 License 凭据"
+  [showSecret]="true"
+  (visibleChange)="onDrawerClose($event)"
+/>
