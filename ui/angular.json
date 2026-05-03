@@ -117,6 +117,7 @@
           },
           "configurations": {
             "production": {
+              "baseHref": "/ng-antd-admin/",
               "budgets": [
                 {
                   "type": "initial",
