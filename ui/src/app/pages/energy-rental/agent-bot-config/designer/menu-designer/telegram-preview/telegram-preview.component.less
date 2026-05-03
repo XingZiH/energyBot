@@ -1,5 +1,5 @@
 /**
- * TelegramPreview 样式。
+ * TelegramPreview 样式 — 仿真 Telegram Desktop 聊天窗。
  *
  * 严格例外：本组件允许硬编码 Telegram 官方配色（浅/深主题各一套），
  * 不走 --ant-color-* CSS 变量。原因：这是"模拟 Telegram 聊天界面"的设计目标，
@@ -9,10 +9,13 @@
  */
 
 // ---------------- 浅色主题（Telegram Light） ----------------
-@tg-light-chat-bg: #e5f3ff;
+@tg-light-chat-bg: #dcefc4;              // 壁纸底色（浅绿）
+@tg-light-chat-doodle: #c6e3a8;          // 壁纸涂鸦点缀色
 @tg-light-bubble-bg: #ffffff;
 @tg-light-bubble-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 @tg-light-bubble-text: #000000;
+@tg-light-user-bubble-bg: #dcf8c6;        // 用户气泡浅绿
+@tg-light-user-bubble-text: #000000;
 @tg-light-inline-bg: #ffffff;
 @tg-light-inline-text: #1967d2;
 @tg-light-inline-border: #e0e0e0;
@@ -22,12 +25,20 @@
 @tg-light-reply-button-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 @tg-light-header-bg: #ffffff;
 @tg-light-header-text: #000000;
+@tg-light-header-muted: #707579;
 @tg-light-header-border: #e0e0e0;
+@tg-light-avatar-bg: #5288c1;
+@tg-light-footer-bg: #ffffff;
+@tg-light-footer-input-bg: #f1f3f5;
+@tg-light-check: #4fae4e;
 
 // ---------------- 深色主题（Telegram Dark） ----------------
 @tg-dark-chat-bg: #0e1621;
+@tg-dark-chat-doodle: #142030;
 @tg-dark-bubble-bg: #182533;
 @tg-dark-bubble-text: #ffffff;
+@tg-dark-user-bubble-bg: #2b5278;
+@tg-dark-user-bubble-text: #ffffff;
 @tg-dark-inline-bg: #182533;
 @tg-dark-inline-text: #64a6ef;
 @tg-dark-inline-border: #2a3f55;
@@ -36,12 +47,16 @@
 @tg-dark-reply-button-text: #ffffff;
 @tg-dark-header-bg: #17212b;
 @tg-dark-header-text: #ffffff;
+@tg-dark-header-muted: #8a9aa8;
 @tg-dark-header-border: #2a3f55;
+@tg-dark-avatar-bg: #3a6b9f;
+@tg-dark-footer-bg: #17212b;
+@tg-dark-footer-input-bg: #242f3d;
 
 :host {
   display: flex;
   width: 100%;
-  max-width: 520px;
+  max-width: 560px;
   min-width: 320px;
   height: 100%;
 }
@@ -51,8 +66,9 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
+  min-height: 560px;
   box-sizing: border-box;
-  background: @tg-light-chat-bg;
+  background: @tg-light-header-bg;
   color: @tg-light-bubble-text;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   transition: background-color 0.2s ease;
@@ -63,26 +79,80 @@
   overflow: hidden;
 }
 
-// ---------------- Header ----------------
+// ============ Header ============
 .tg-header {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 8px 14px;
   background: @tg-light-header-bg;
   color: @tg-light-header-text;
   border-bottom: 1px solid @tg-light-header-border;
-  gap: 8px;
+  gap: 12px;
+}
+
+.tg-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tg-avatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: @tg-light-avatar-bg;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 16px;
+  user-select: none;
+}
+
+.tg-header-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.tg-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.2;
+}
+
+.tg-header-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: @tg-light-header-text;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tg-header-tag {
+  font-size: 11px;
+  color: @tg-light-header-muted;
+  flex-shrink: 0;
 }
 
 .tg-header-crumbs {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
+  line-height: 1.2;
 
   .tg-breadcrumb {
-    font-size: 13px;
+    font-size: 12px;
+    color: @tg-light-header-muted;
 
     a {
       cursor: pointer;
@@ -96,35 +166,108 @@
 }
 
 .tg-breadcrumb-text {
-  font-weight: 600;
+  font-weight: 500;
+  color: @tg-light-header-muted;
 }
 
-.tg-theme-toggle {
+.tg-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.tg-header-icon-btn {
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  color: inherit;
+  padding: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: @tg-light-header-muted;
   font-size: 16px;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: rgba(0, 0, 0, 0.06);
+    color: @tg-light-header-text;
   }
 }
 
-// ---------------- 聊天区域 ----------------
+// ============ 聊天区：壁纸 ============
 .tg-chat {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 12px;
+  padding: 16px 12px;
   box-sizing: border-box;
+  background-color: @tg-light-chat-bg;
+  // 浅色 Telegram 涂鸦壁纸（SVG 内联，轻量~2KB）
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='%23c6e3a8' fill-opacity='0.55'><circle cx='20' cy='20' r='3'/><circle cx='95' cy='40' r='2'/><circle cx='60' cy='70' r='2.5'/><circle cx='30' cy='95' r='2'/><circle cx='105' cy='100' r='2.5'/><path d='M55 20 l6 0 l-3 -5 z'/><path d='M88 78 l6 0 l-3 -5 z'/><path d='M10 55 q 5 -6 10 0 q -5 6 -10 0 z'/><path d='M78 15 q 5 -6 10 0 q -5 6 -10 0 z'/><path d='M40 45 q 4 -5 8 0 q -4 5 -8 0 z'/><path d='M72 100 q 4 -5 8 0 q -4 5 -8 0 z'/><path d='M22 75 q 5 -6 10 0 q -5 6 -10 0 z'/></g></svg>");
+  background-repeat: repeat;
+  background-size: 120px 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+// ============ 用户气泡：/start 装饰 ============
+.tg-user-message {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 2px;
+}
+
+.tg-user-bubble {
+  max-width: 70%;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 6px;
+  background: @tg-light-user-bubble-bg;
+  color: @tg-light-user-bubble-text;
+  padding: 6px 10px;
+  border-radius: 12px 12px 4px 12px;
+  box-shadow: @tg-light-bubble-shadow;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.tg-user-bubble-text {
+  word-break: break-word;
+}
+
+.tg-user-bubble-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: @tg-light-header-muted;
+  flex-shrink: 0;
+  margin-bottom: -1px;
+}
+
+.tg-user-bubble-check {
+  color: @tg-light-check;
+  font-size: 12px;
+}
+
+// ============ 机器人气泡 + 按钮 ============
+.tg-bot-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 2px;
+  max-width: 80%;
 }
 
 .tg-bot-bubble {
-  max-width: 80%;
+  max-width: 100%;
   display: inline-block;
   background: @tg-light-bubble-bg;
   color: @tg-light-bubble-text;
@@ -134,20 +277,21 @@
   font-size: 14px;
   line-height: 1.4;
   word-break: break-word;
+  white-space: pre-wrap;
 }
 
-// ---------------- Inline Keyboard ----------------
+// ============ Inline Keyboard ============
 .tg-inline-keyboard {
-  margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 80%;
+  width: 100%;
 }
 
 .tg-inline-row {
   display: flex;
   gap: 4px;
+  min-height: 36px;
 }
 
 .tg-inline-button {
@@ -206,7 +350,7 @@
   opacity: 0.7;
 }
 
-// ---------------- Reply Keyboard ----------------
+// ============ Reply Keyboard ============
 .tg-reply-keyboard {
   flex-shrink: 0;
   background: @tg-light-reply-bg;
@@ -214,11 +358,13 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  border-top: 1px solid @tg-light-header-border;
 }
 
 .tg-reply-row {
   display: flex;
   gap: 4px;
+  min-height: 36px;
 }
 
 .tg-reply-button {
@@ -271,7 +417,7 @@
   }
 }
 
-// ---------------- 编辑态：删除按钮 / 新行落点 / 空态 ----------------
+// ============ 编辑态：删除按钮 / 新行落点 / 空态 ============
 .tg-button-remove {
   position: absolute !important;
   top: -6px;
@@ -301,13 +447,14 @@
   align-items: center;
   justify-content: center;
   min-height: 36px;
-  margin-top: 6px;
+  margin-top: 4px;
   padding: 6px 10px;
   border: 1px dashed @tg-light-inline-border;
   border-radius: 6px;
   color: @tg-light-inline-text;
   font-size: 12px;
   opacity: 0.7;
+  background: rgba(255, 255, 255, 0.5);
   transition:
     opacity 0.15s ease,
     border-color 0.15s ease,
@@ -317,7 +464,7 @@
   &:global(.cdk-drop-list-dragging) {
     opacity: 1;
     border-color: @tg-light-inline-text;
-    background: rgba(25, 103, 210, 0.06);
+    background: rgba(25, 103, 210, 0.08);
   }
 }
 
@@ -328,21 +475,68 @@
   gap: 4px;
 }
 
-// Reply Keyboard 区域的新行/空态保持和 inline 一致的视觉，只改文字色
+// Reply Keyboard 区域的新行/空态视觉
 .tg-reply-keyboard {
   .tg-new-row-slot,
   .tg-empty-row {
     border-color: rgba(0, 0, 0, 0.12);
     color: @tg-light-reply-button-text;
+    background: rgba(255, 255, 255, 0.7);
   }
 }
 
-// ---------------- 面包屑底部提示（已迁移到 header，此块保留以备回退） ----------------
-// (已废弃：tg-breadcrumb-hint / tg-breadcrumb-text-old)
+// ============ Footer 输入框（纯装饰） ============
+.tg-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  background: @tg-light-footer-bg;
+  border-top: 1px solid @tg-light-header-border;
+}
+
+.tg-footer-icon-btn {
+  background: transparent;
+  border: none;
+  padding: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: @tg-light-header-muted;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: not-allowed;  // 装饰元素不可交互
+  opacity: 0.6;
+}
+
+.tg-footer-input {
+  flex: 1;
+  background: @tg-light-footer-input-bg;
+  border: none;
+  outline: none;
+  padding: 8px 12px;
+  border-radius: 18px;
+  font-size: 14px;
+  color: @tg-light-bubble-text;
+  cursor: not-allowed;
+
+  &::placeholder {
+    color: @tg-light-header-muted;
+  }
+
+  &:disabled {
+    background: @tg-light-footer-input-bg;
+    color: @tg-light-header-muted;
+  }
+}
 
 // ================ 深色主题 ================
 .tg-preview.dark-mode {
-  background: @tg-dark-chat-bg;
+  background: @tg-dark-header-bg;
   color: @tg-dark-bubble-text;
 
   .tg-header {
@@ -350,13 +544,49 @@
     color: @tg-dark-header-text;
     border-bottom-color: @tg-dark-header-border;
 
+    .tg-header-name {
+      color: @tg-dark-header-text;
+    }
+
+    .tg-header-tag,
+    .tg-breadcrumb-text {
+      color: @tg-dark-header-muted;
+    }
+
     .tg-breadcrumb a {
       color: @tg-dark-inline-text;
     }
   }
 
-  .tg-theme-toggle:hover {
-    background: rgba(255, 255, 255, 0.08);
+  .tg-avatar {
+    background: @tg-dark-avatar-bg;
+  }
+
+  .tg-header-icon-btn {
+    color: @tg-dark-header-muted;
+
+    &:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.08);
+      color: @tg-dark-header-text;
+    }
+  }
+
+  .tg-chat {
+    background-color: @tg-dark-chat-bg;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><g fill='%23142030' fill-opacity='0.55'><circle cx='20' cy='20' r='3'/><circle cx='95' cy='40' r='2'/><circle cx='60' cy='70' r='2.5'/><circle cx='30' cy='95' r='2'/><circle cx='105' cy='100' r='2.5'/><path d='M55 20 l6 0 l-3 -5 z'/><path d='M88 78 l6 0 l-3 -5 z'/><path d='M10 55 q 5 -6 10 0 q -5 6 -10 0 z'/><path d='M78 15 q 5 -6 10 0 q -5 6 -10 0 z'/><path d='M40 45 q 4 -5 8 0 q -4 5 -8 0 z'/><path d='M72 100 q 4 -5 8 0 q -4 5 -8 0 z'/><path d='M22 75 q 5 -6 10 0 q -5 6 -10 0 z'/></g></svg>");
+  }
+
+  .tg-user-bubble {
+    background: @tg-dark-user-bubble-bg;
+    color: @tg-dark-user-bubble-text;
+
+    .tg-user-bubble-meta {
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .tg-user-bubble-check {
+      color: #5ec489;
+    }
   }
 
   .tg-bot-bubble {
@@ -383,11 +613,13 @@
 
   .tg-reply-keyboard {
     background: @tg-dark-reply-bg;
+    border-top-color: @tg-dark-header-border;
 
     .tg-new-row-slot,
     .tg-empty-row {
       border-color: rgba(255, 255, 255, 0.14);
       color: @tg-dark-reply-button-text;
+      background: rgba(255, 255, 255, 0.04);
     }
   }
 
@@ -407,6 +639,7 @@
   .tg-empty-row {
     border-color: @tg-dark-inline-border;
     color: @tg-dark-inline-text;
+    background: rgba(255, 255, 255, 0.03);
 
     &:global(.cdk-drop-list-receiving),
     &:global(.cdk-drop-list-dragging) {
@@ -418,5 +651,28 @@
   .tg-button-remove {
     background: @tg-dark-bubble-bg !important;
     color: @tg-dark-bubble-text !important;
+  }
+
+  .tg-footer {
+    background: @tg-dark-footer-bg;
+    border-top-color: @tg-dark-header-border;
+  }
+
+  .tg-footer-icon-btn {
+    color: @tg-dark-header-muted;
+  }
+
+  .tg-footer-input {
+    background: @tg-dark-footer-input-bg;
+    color: @tg-dark-bubble-text;
+
+    &::placeholder {
+      color: @tg-dark-header-muted;
+    }
+
+    &:disabled {
+      background: @tg-dark-footer-input-bg;
+      color: @tg-dark-header-muted;
+    }
   }
 }

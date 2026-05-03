@@ -5,11 +5,18 @@ import { By } from '@angular/platform-browser';
 import { NZ_ICONS, NzIconModule } from 'ng-zorro-antd/icon';
 import {
   BulbOutline,
+  CheckOutline,
   CloseOutline,
+  MehOutline,
   MessageOutline,
   MoonOutline,
+  MoreOutline,
+  PaperClipOutline,
   PlusOutline,
   RightOutline,
+  SearchOutline,
+  SoundOutline,
+  UnorderedListOutline,
 } from '@ant-design/icons-angular/icons';
 
 import { ButtonAction, MenuButton, MenuRow } from '../../types';
@@ -81,7 +88,21 @@ describe('TelegramPreviewComponent', () => {
         MenuTreeService,
         {
           provide: NZ_ICONS,
-          useValue: [BulbOutline, CloseOutline, MessageOutline, MoonOutline, PlusOutline, RightOutline],
+          useValue: [
+            BulbOutline,
+            CheckOutline,
+            CloseOutline,
+            MehOutline,
+            MessageOutline,
+            MoonOutline,
+            MoreOutline,
+            PaperClipOutline,
+            PlusOutline,
+            RightOutline,
+            SearchOutline,
+            SoundOutline,
+            UnorderedListOutline,
+          ],
         },
       ],
     }).compileComponents();
@@ -108,11 +129,12 @@ describe('TelegramPreviewComponent', () => {
   });
 
   // 3
-  it('3. 空菜单 + 空 welcomeText → 气泡显示引导占位', () => {
+  it('3. 空菜单 + 空 welcomeText → 气泡显示 fallback 引导文案', () => {
     expect(tree.$currentMenu().length).toBe(0);
-    expect(component.$bubbleText()).toContain('请从左侧拖入组件');
+    expect(component.$bubbleText()).toBe(TelegramPreviewComponent.WELCOME_TEXT_FALLBACK);
     const bubble = fixture.nativeElement.querySelector('.tg-bot-bubble') as HTMLElement;
-    expect(bubble.textContent).toContain('请从左侧拖入组件');
+    expect(bubble.textContent).toContain('欢迎语');
+    expect(bubble.textContent).toContain('/start');
   });
 
   // 4
@@ -124,10 +146,10 @@ describe('TelegramPreviewComponent', () => {
   });
 
   // 5
-  it('5. 有按钮但无 welcomeText → 气泡显示 "请选择："', () => {
+  it('5. 有按钮但无 welcomeText → 气泡仍显示 fallback（不再是"请选择："）', () => {
     tree.setRootMenu([row('r1', [btn('b1', 'A')])]);
     fixture.detectChanges();
-    expect(component.$bubbleText()).toBe('请选择：');
+    expect(component.$bubbleText()).toBe(TelegramPreviewComponent.WELCOME_TEXT_FALLBACK);
   });
 
   // 6

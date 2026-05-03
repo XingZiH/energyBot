@@ -81,12 +81,29 @@ export class TelegramPreviewComponent {
 
   readonly $canAddRow = computed(() => this.$currentMenu().length < this.maxRows);
 
-  /** 气泡显示文本：优先 welcomeText；空 + 空菜单时显示引导占位 */
+  /** welcomeText 空时的气泡占位——提示用户去顶部 textarea 配置 */
+  static readonly WELCOME_TEXT_FALLBACK =
+    '/start 后机器人将回复此文案，在顶部「欢迎语」输入框填写…';
+
+  /**
+   * Bot 气泡显示内容：
+   * - welcomeText 非空 → 原样显示（用户真实的 /start 回复）
+   * - welcomeText 为空 → 固定占位提示，引导用户去顶部输入框填写
+   *
+   * 注意：即使菜单里已有按钮，welcomeText 为空时也显示占位，
+   * 因为 bot 的 /start 逻辑里 welcomeText 才是首条消息，按钮只是附带。
+   */
   readonly $bubbleText = computed(() => {
     const w = this.$welcomeText().trim();
-    if (w) return w;
-    return this.$currentMenu().length === 0 ? '请从左侧拖入组件开始设计菜单...' : '请选择：';
+    return w || TelegramPreviewComponent.WELCOME_TEXT_FALLBACK;
   });
+
+  /** 占位用户气泡的固定时间显示——纯装饰 */
+  readonly USER_BUBBLE_TIME = '22:33';
+  /** 占位机器人名 */
+  readonly BOT_DISPLAY_NAME = '我的机器人';
+  /** 占位机器人头像字母（用首字母圈） */
+  readonly BOT_AVATAR_LETTER = 'B';
 
   readonly $breadcrumbText = computed(() =>
     this.$breadcrumb()

@@ -1,111 +1,166 @@
+<!--
+  TelegramPreview 模板 — 仿真 Telegram Desktop 聊天窗。
+  布局：
+    .tg-preview
+      ├── .tg-header       头像 + 机器人名 + 标签 + 搜索 + 菜单 + 面包屑 + 明暗切换
+      ├── .tg-chat         壁纸背景 + /start 用户气泡 + bot 欢迎语气泡 + inline 按钮
+      ├── .tg-reply-keyboard  根层键盘（保留原结构）
+      └── .tg-footer       装饰输入框
+  保留 class：.tg-bot-bubble / .tg-reply-keyboard / .tg-inline-keyboard /
+              .tg-reply-button / .tg-inline-button / .tg-empty-row /
+              .tg-new-row-slot / .tg-button-remove / .tg-header .tg-breadcrumb
+  （单元测试通过这些 selector 取 DOM）
+-->
 <div class="tg-preview" [class.dark-mode]="$darkMode()" (click)="selectButton('')">
-  <!-- Header：面包屑 + 主题切换 -->
+  <!-- ============ Header ============ -->
   <div class="tg-header">
-    <div class="tg-header-crumbs">
-      <nz-breadcrumb nzSeparator=">" class="tg-breadcrumb">
-        <nz-breadcrumb-item *ngFor="let crumb of $breadcrumb(); let i = index; let last = last">
-          <a *ngIf="!last; else lastCrumb" (click)="navigateCrumb(i); $event.stopPropagation()">{{ crumb.label }}</a>
-          <ng-template #lastCrumb>
-            <span class="tg-breadcrumb-text">{{ crumb.label }}</span>
-          </ng-template>
-        </nz-breadcrumb-item>
-      </nz-breadcrumb>
-    </div>
-    <button
-      type="button"
-      class="tg-theme-toggle"
-      (click)="toggleDarkMode(); $event.stopPropagation()"
-      [attr.aria-label]="$darkMode() ? '切换到浅色' : '切换到深色'"
-      [title]="$darkMode() ? '切换到浅色' : '切换到深色'"
-    >
-      <span nz-icon [nzType]="$darkMode() ? 'bulb' : 'moon'" nzTheme="outline"></span>
-    </button>
-  </div>
-
-  <!-- 聊天区域 -->
-  <div class="tg-chat">
-    <!-- Bot 气泡：welcomeText 或空态提示 -->
-    <div class="tg-bot-bubble">{{ $bubbleText() }}</div>
-
-    <!-- Inline Keyboard：子层 + 拖拽目标 -->
-    <div class="tg-inline-keyboard" *ngIf="$isInline()">
-      <div
-        class="tg-inline-row"
-        *ngFor="let row of $currentMenu(); let rowIdx = index; trackBy: trackByRowId"
-        cdkDropList
-        [id]="rowListId(rowIdx)"
-        [cdkDropListData]="row.buttons"
-        cdkDropListOrientation="horizontal"
-        (cdkDropListDropped)="onDropToRow($event, rowIdx)"
-      >
-        <div
-          *ngFor="let btn of row.buttons; trackBy: trackByButtonId"
-          class="tg-inline-button"
-          [class.is-selected]="$selectedId() === btn.id"
-          [title]="getButtonTooltip(btn)"
-          cdkDrag
-          [cdkDragData]="btn"
-          (click)="selectButton(btn.id, $event)"
-          (dblclick)="enterButtonSubmenu(btn)"
-        >
-          <span class="tg-inline-button-text">{{ btn.text || '(未命名)' }}</span>
-          <span
-            *ngIf="btn.action === ButtonAction.SUBMENU"
-            class="tg-inline-submenu-indicator"
-            nz-icon
-            nzType="right"
-            nzTheme="outline"
-            aria-hidden="true"
-          ></span>
-          <button
-            type="button"
-            class="tg-button-remove"
-            nz-button
-            nzType="text"
-            nzSize="small"
-            nz-popconfirm
-            nzPopconfirmTitle="确定删除该按钮？"
-            nzOkText="删除"
-            nzCancelText="取消"
-            (nzOnConfirm)="removeButton(btn.id)"
-            (click)="$event.stopPropagation()"
-            aria-label="删除按钮"
-          >
-            <span nz-icon nzType="close" nzTheme="outline"></span>
-          </button>
+    <div class="tg-header-left">
+      <div class="tg-avatar" aria-hidden="true">{{ BOT_AVATAR_LETTER }}</div>
+      <div class="tg-header-meta">
+        <div class="tg-header-title">
+          <span class="tg-header-name">{{ BOT_DISPLAY_NAME }}</span>
+          <span class="tg-header-tag">机器人</span>
+        </div>
+        <div class="tg-header-crumbs">
+          <nz-breadcrumb nzSeparator=">" class="tg-breadcrumb">
+            <nz-breadcrumb-item *ngFor="let crumb of $breadcrumb(); let i = index; let last = last">
+              <a *ngIf="!last; else lastCrumb" (click)="navigateCrumb(i); $event.stopPropagation()">{{ crumb.label }}</a>
+              <ng-template #lastCrumb>
+                <span class="tg-breadcrumb-text">{{ crumb.label }}</span>
+              </ng-template>
+            </nz-breadcrumb-item>
+          </nz-breadcrumb>
         </div>
       </div>
-
-      <!-- 空占位：子层无内容时，仍需一个落点让 palette 可拖入 -->
-      <div
-        class="tg-empty-row"
-        *ngIf="$currentMenu().length === 0"
-        cdkDropList
-        [id]="newRowListId"
-        [cdkDropListData]="emptyButtons"
-        (cdkDropListDropped)="onDropToNewRow($event)"
+    </div>
+    <div class="tg-header-actions">
+      <button
+        type="button"
+        class="tg-header-icon-btn"
+        aria-label="搜索"
+        title="搜索（仅预览）"
+        (click)="$event.stopPropagation()"
       >
-        <span class="tg-empty-hint">拖入组件开始设计...</span>
-      </div>
-
-      <!-- 新行落点 -->
-      <div
-        *ngIf="$canAddRow() && $currentMenu().length > 0"
-        class="tg-new-row-slot"
-        cdkDropList
-        [id]="newRowListId"
-        [cdkDropListData]="emptyButtons"
-        (cdkDropListDropped)="onDropToNewRow($event)"
+        <span nz-icon nzType="search" nzTheme="outline"></span>
+      </button>
+      <button
+        type="button"
+        class="tg-header-icon-btn"
+        (click)="toggleDarkMode(); $event.stopPropagation()"
+        [attr.aria-label]="$darkMode() ? '切换到浅色' : '切换到深色'"
+        [title]="$darkMode() ? '切换到浅色' : '切换到深色'"
       >
-        <span class="tg-new-row-hint">
-          <span nz-icon nzType="plus" nzTheme="outline"></span>
-          拖到此处新建一行
+        <span nz-icon [nzType]="$darkMode() ? 'bulb' : 'moon'" nzTheme="outline"></span>
+      </button>
+      <button
+        type="button"
+        class="tg-header-icon-btn"
+        aria-label="更多"
+        title="更多（仅预览）"
+        (click)="$event.stopPropagation()"
+      >
+        <span nz-icon nzType="more" nzTheme="outline"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============ 聊天区 ============ -->
+  <div class="tg-chat">
+    <!-- 用户消息：/start 装饰气泡 -->
+    <div class="tg-user-message">
+      <div class="tg-user-bubble">
+        <span class="tg-user-bubble-text">/start</span>
+        <span class="tg-user-bubble-meta">
+          <span class="tg-user-bubble-time">{{ USER_BUBBLE_TIME }}</span>
+          <span class="tg-user-bubble-check" nz-icon nzType="check" nzTheme="outline" aria-hidden="true"></span>
         </span>
       </div>
     </div>
+
+    <!-- Bot 消息：welcomeText 气泡 + 按钮 -->
+    <div class="tg-bot-message">
+      <div class="tg-bot-bubble">{{ $bubbleText() }}</div>
+
+      <!-- Inline Keyboard：子层 -->
+      <div class="tg-inline-keyboard" *ngIf="$isInline()">
+        <div
+          class="tg-inline-row"
+          *ngFor="let row of $currentMenu(); let rowIdx = index; trackBy: trackByRowId"
+          cdkDropList
+          [id]="rowListId(rowIdx)"
+          [cdkDropListData]="row.buttons"
+          cdkDropListOrientation="horizontal"
+          (cdkDropListDropped)="onDropToRow($event, rowIdx)"
+        >
+          <div
+            *ngFor="let btn of row.buttons; trackBy: trackByButtonId"
+            class="tg-inline-button"
+            [class.is-selected]="$selectedId() === btn.id"
+            [title]="getButtonTooltip(btn)"
+            cdkDrag
+            [cdkDragData]="btn"
+            (click)="selectButton(btn.id, $event)"
+            (dblclick)="enterButtonSubmenu(btn)"
+          >
+            <span class="tg-inline-button-text">{{ btn.text || '(未命名)' }}</span>
+            <span
+              *ngIf="btn.action === ButtonAction.SUBMENU"
+              class="tg-inline-submenu-indicator"
+              nz-icon
+              nzType="right"
+              nzTheme="outline"
+              aria-hidden="true"
+            ></span>
+            <button
+              type="button"
+              class="tg-button-remove"
+              nz-button
+              nzType="text"
+              nzSize="small"
+              nz-popconfirm
+              nzPopconfirmTitle="确定删除该按钮？"
+              nzOkText="删除"
+              nzCancelText="取消"
+              (nzOnConfirm)="removeButton(btn.id)"
+              (click)="$event.stopPropagation()"
+              aria-label="删除按钮"
+            >
+              <span nz-icon nzType="close" nzTheme="outline"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 子层空占位：仍需一个落点让 palette 可拖入 -->
+        <div
+          class="tg-empty-row"
+          *ngIf="$currentMenu().length === 0"
+          cdkDropList
+          [id]="newRowListId"
+          [cdkDropListData]="emptyButtons"
+          (cdkDropListDropped)="onDropToNewRow($event)"
+        >
+          <span class="tg-empty-hint">拖入组件开始设计...</span>
+        </div>
+
+        <!-- 新行落点 -->
+        <div
+          *ngIf="$canAddRow() && $currentMenu().length > 0"
+          class="tg-new-row-slot"
+          cdkDropList
+          [id]="newRowListId"
+          [cdkDropListData]="emptyButtons"
+          (cdkDropListDropped)="onDropToNewRow($event)"
+        >
+          <span class="tg-new-row-hint">
+            <span nz-icon nzType="plus" nzTheme="outline"></span>
+            拖到此处新建一行
+          </span>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- Reply Keyboard：根层 + 拖拽目标 -->
+  <!-- ============ Reply Keyboard：根层常驻底部 ============ -->
   <div class="tg-reply-keyboard" *ngIf="!$isInline()">
     <div
       class="tg-reply-row"
@@ -172,5 +227,29 @@
         拖到此处新建一行
       </span>
     </div>
+  </div>
+
+  <!-- ============ 底部输入框（纯装饰） ============ -->
+  <div class="tg-footer" (click)="$event.stopPropagation()">
+    <button type="button" class="tg-footer-icon-btn" aria-label="菜单" disabled title="装饰元素">
+      <span nz-icon nzType="unordered-list" nzTheme="outline"></span>
+    </button>
+    <button type="button" class="tg-footer-icon-btn" aria-label="附件" disabled title="装饰元素">
+      <span nz-icon nzType="paper-clip" nzTheme="outline"></span>
+    </button>
+    <input
+      class="tg-footer-input"
+      type="text"
+      readonly
+      disabled
+      placeholder="输入消息..."
+      aria-label="输入消息（仅预览，不可编辑）"
+    />
+    <button type="button" class="tg-footer-icon-btn" aria-label="表情" disabled title="装饰元素">
+      <span nz-icon nzType="meh" nzTheme="outline"></span>
+    </button>
+    <button type="button" class="tg-footer-icon-btn" aria-label="录音" disabled title="装饰元素">
+      <span nz-icon nzType="sound" nzTheme="outline"></span>
+    </button>
   </div>
 </div>
