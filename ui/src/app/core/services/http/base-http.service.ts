@@ -15,6 +15,17 @@ export interface HttpCustomConfig {
   showLoading?: boolean; // 是否需要loading
   otherUrl?: boolean; // 是否是第三方接口
   loadingText?: string; // 可选：自定义Loading文案
+  /**
+   * 抑制 HTTP 错误的全局 toast（不影响 error 向 Observable 下游抛出）。
+   *
+   * 典型场景：调用方希望自己捕获特定 status（例如 409 乐观锁冲突自动重试），
+   * 避免第一次失败时的 toast 干扰用户。
+   *
+   * 注意：这只屏蔽由 HttpErrorResponse 触发的错误 toast；业务错误
+   * （ResultData.code 非 200/201）仍然会走 handleFilter 弹 toast——
+   * 本项目此路径目前未用到，故先不扩展。
+   */
+  suppressErrorToast?: boolean;
 }
 
 /**
@@ -35,6 +46,21 @@ export interface ActionResult<T> {
   code: number;
   msg: string;
   data: T;
+}
+
+/**
+ * HTTP 业务错误：保留后端解析出的 message，并附带 HTTP status。
+ *
+ * BaseHttpService.handleHttpError 抛出此类型替代裸 Error，使调用方能根据 status
+ * 判断是否需要特殊处理（例如 409 乐观锁冲突的自动重试），而不必重新 catch
+ * HttpErrorResponse 原对象——HttpErrorResponse.message 不含后端业务文案，对
+ * 用户展示不友好。
+ */
+export class HttpBusinessError extends Error {
+  constructor(message: string, readonly status: number | null) {
+    super(message);
+    this.name = 'HttpBusinessError';
+  }
 }
 
 /**
@@ -221,7 +247,7 @@ export class BaseHttpService {
   resultHandle<T>(config: HttpCustomConfig): (observable: Observable<ActionResult<T>>) => Observable<T> {
     return (observable: Observable<ActionResult<T>>) => {
       return observable.pipe(
-        catchError(error => this.handleHttpError(error)),
+        catchError(error => this.handleHttpError(error, !!config.suppressErrorToast)),
         filter(item => {
           return this.handleFilter(item, !!config.needSuccessInfo);
         }),
@@ -235,10 +261,31 @@ export class BaseHttpService {
     };
   }
 
-  private handleHttpError(error: unknown): Observable<never> {
+  private handleHttpError(error: unknown, suppressToast: boolean): Observable<never> {
     const errorMessage = this.extractErrorMessage(error);
-    this.message.error(errorMessage);
-    return throwError(() => (error instanceof Error ? error : new Error(errorMessage)));
+    if (!suppressToast) {
+      this.message.error(errorMessage);
+    }
+    return throwError(() => new HttpBusinessError(errorMessage, this.extractStatus(error)));
+  }
+
+  /**
+   * 从错误对象中提取 HTTP status。
+   *
+   * httpInterceptorService 会把 HttpErrorResponse 转成普通对象
+   * `{ code: status, message, statusCode: status }`——我们从 code/statusCode
+   * 字段读；若调用方直接抛 HttpErrorResponse（如测试场景）则读 status 字段。
+   */
+  private extractStatus(error: unknown): number | null {
+    if (error instanceof HttpErrorResponse) {
+      return error.status;
+    }
+    if (error && typeof error === 'object') {
+      const record = error as Record<string, unknown>;
+      const code = record['statusCode'] ?? record['code'] ?? record['status'];
+      return typeof code === 'number' ? code : null;
+    }
+    return null;
   }
 
   private extractErrorMessage(error: unknown): string {

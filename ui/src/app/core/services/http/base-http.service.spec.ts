@@ -132,6 +132,49 @@ describe('BaseHttpService', () => {
       req.flush({ code: 200, msg: 'ok', data: { updatedAt: '2026-05-02T12:00:00.000Z' } });
       expect(message.success).toHaveBeenCalledWith('操作成功');
     });
+
+    it('suppressErrorToast=true 时 409 不弹 toast，但错误仍向下游抛出并带 status', done => {
+      service
+        .putRaw('/energy-rental/ui-config', { foo: 'bar' }, {
+          headers: { 'If-Unmodified-Since': '2026-05-02T10:00:00.000Z' },
+          suppressErrorToast: true
+        })
+        .subscribe({
+          next: () => done.fail('expected the request to error'),
+          error: (err: Error & { status?: number | null }) => {
+            expect(message.error).not.toHaveBeenCalled();
+            expect(err.message).toContain('配置已被他人修改');
+            expect(err.status).toBe(409);
+            done();
+          }
+        });
+
+      const req = httpTesting.expectOne('/site/api/energy-rental/ui-config');
+      req.flush(
+        { message: '配置已被他人修改，请刷新后重试' },
+        { status: 409, statusText: 'Conflict' }
+      );
+    });
+
+    it('默认（未传 suppressErrorToast）时 409 仍然弹 toast', done => {
+      service
+        .putRaw('/energy-rental/ui-config', { foo: 'bar' }, {
+          headers: { 'If-Unmodified-Since': '2026-05-02T10:00:00.000Z' }
+        })
+        .subscribe({
+          next: () => done.fail('expected the request to error'),
+          error: () => {
+            expect(message.error).toHaveBeenCalledWith('配置已被他人修改，请刷新后重试');
+            done();
+          }
+        });
+
+      const req = httpTesting.expectOne('/site/api/energy-rental/ui-config');
+      req.flush(
+        { message: '配置已被他人修改，请刷新后重试' },
+        { status: 409, statusText: 'Conflict' }
+      );
+    });
   });
 
   describe('postRaw', () => {
