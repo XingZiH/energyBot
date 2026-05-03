@@ -55,6 +55,8 @@ Thumbs.db
 scripts/*
 !/ui/scripts/
 !/scripts/deploy.sh
+!/scripts/install.sh
+!/scripts/install.sh.testing.md
 
 # 视觉伴侣原型（brainstorming skill）
 .superpowers/
