@@ -1,0 +1,40 @@
+node_modules
+dist
+tmp
+out-tsc
+bazel-out
+.angular
+.vscode
+.idea
+.git
+.gitignore
+.DS_Store
+Thumbs.db
+
+# 测试产物
+playwright-report
+test-results
+blob-report
+playwright/.cache
+e2e
+
+# 日志
+*.log
+npm-debug.log*
+
+# 环境
+.env
+.env.*
+
+# 本地 skills/agents 配置
+.claude
+.agent
+.agents
+.trae
+.superpowers
+
+# 文档 & 截图（不参与构建）
+projectImg
+docs
+*.md
+!README.md
