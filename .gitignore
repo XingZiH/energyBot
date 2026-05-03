@@ -60,3 +60,9 @@ scripts
 
 # Go bot 本地编译产物
 go-bot/energy-bot
+
+# Playwright E2E 产物（任务 28）
+ui/playwright-report/
+ui/test-results/
+ui/blob-report/
+ui/playwright/.cache/

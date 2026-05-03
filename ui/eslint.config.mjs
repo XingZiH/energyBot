@@ -21,7 +21,10 @@ export default tseslint.config(
       'lib/',
       'dist/',
       'junit/',
-      'coverage-report/'
+      'coverage-report/',
+      'e2e/',
+      'playwright-report/',
+      'test-results/'
     ]
   },
   {
