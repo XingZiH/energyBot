@@ -1,11 +1,20 @@
-<div class="tg-preview" [class.dark-mode]="$darkMode()">
-  <!-- Header：标题 + 主题切换 -->
+<div class="tg-preview" [class.dark-mode]="$darkMode()" (click)="selectButton('')">
+  <!-- Header：面包屑 + 主题切换 -->
   <div class="tg-header">
-    <span class="tg-header-title">预览</span>
+    <div class="tg-header-crumbs">
+      <nz-breadcrumb nzSeparator=">" class="tg-breadcrumb">
+        <nz-breadcrumb-item *ngFor="let crumb of $breadcrumb(); let i = index; let last = last">
+          <a *ngIf="!last; else lastCrumb" (click)="navigateCrumb(i); $event.stopPropagation()">{{ crumb.label }}</a>
+          <ng-template #lastCrumb>
+            <span class="tg-breadcrumb-text">{{ crumb.label }}</span>
+          </ng-template>
+        </nz-breadcrumb-item>
+      </nz-breadcrumb>
+    </div>
     <button
       type="button"
       class="tg-theme-toggle"
-      (click)="toggleDarkMode()"
+      (click)="toggleDarkMode(); $event.stopPropagation()"
       [attr.aria-label]="$darkMode() ? '切换到浅色' : '切换到深色'"
       [title]="$darkMode() ? '切换到浅色' : '切换到深色'"
     >
@@ -15,25 +24,29 @@
 
   <!-- 聊天区域 -->
   <div class="tg-chat">
-    <!-- Bot 气泡：始终展示一条消息，触发预览的按钮菜单（或空态提示） -->
-    <div class="tg-bot-bubble">
-      <ng-container *ngIf="$currentMenu().length === 0; else hasMenu">
-        请从左侧设计菜单...
-      </ng-container>
-      <ng-template #hasMenu>请选择：</ng-template>
-    </div>
+    <!-- Bot 气泡：welcomeText 或空态提示 -->
+    <div class="tg-bot-bubble">{{ $bubbleText() }}</div>
 
-    <!-- Inline Keyboard：子菜单渲染路径 -->
-    <div class="tg-inline-keyboard" *ngIf="$isInline() && $currentMenu().length > 0">
+    <!-- Inline Keyboard：子层 + 拖拽目标 -->
+    <div class="tg-inline-keyboard" *ngIf="$isInline()">
       <div
         class="tg-inline-row"
-        *ngFor="let row of $currentMenu(); trackBy: trackByRowId"
+        *ngFor="let row of $currentMenu(); let rowIdx = index; trackBy: trackByRowId"
+        cdkDropList
+        [id]="rowListId(rowIdx)"
+        [cdkDropListData]="row.buttons"
+        cdkDropListOrientation="horizontal"
+        (cdkDropListDropped)="onDropToRow($event, rowIdx)"
       >
-        <button
+        <div
           *ngFor="let btn of row.buttons; trackBy: trackByButtonId"
-          type="button"
           class="tg-inline-button"
+          [class.is-selected]="$selectedId() === btn.id"
           [title]="getButtonTooltip(btn)"
+          cdkDrag
+          [cdkDragData]="btn"
+          (click)="selectButton(btn.id, $event)"
+          (dblclick)="enterButtonSubmenu(btn)"
         >
           <span class="tg-inline-button-text">{{ btn.text || '(未命名)' }}</span>
           <span
@@ -42,31 +55,122 @@
             nz-icon
             nzType="right"
             nzTheme="outline"
+            aria-hidden="true"
           ></span>
-        </button>
+          <button
+            type="button"
+            class="tg-button-remove"
+            nz-button
+            nzType="text"
+            nzSize="small"
+            nz-popconfirm
+            nzPopconfirmTitle="确定删除该按钮？"
+            nzOkText="删除"
+            nzCancelText="取消"
+            (nzOnConfirm)="removeButton(btn.id)"
+            (click)="$event.stopPropagation()"
+            aria-label="删除按钮"
+          >
+            <span nz-icon nzType="close" nzTheme="outline"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 空占位：子层无内容时，仍需一个落点让 palette 可拖入 -->
+      <div
+        class="tg-empty-row"
+        *ngIf="$currentMenu().length === 0"
+        cdkDropList
+        [id]="newRowListId"
+        [cdkDropListData]="emptyButtons"
+        (cdkDropListDropped)="onDropToNewRow($event)"
+      >
+        <span class="tg-empty-hint">拖入组件开始设计...</span>
+      </div>
+
+      <!-- 新行落点 -->
+      <div
+        *ngIf="$canAddRow() && $currentMenu().length > 0"
+        class="tg-new-row-slot"
+        cdkDropList
+        [id]="newRowListId"
+        [cdkDropListData]="emptyButtons"
+        (cdkDropListDropped)="onDropToNewRow($event)"
+      >
+        <span class="tg-new-row-hint">
+          <span nz-icon nzType="plus" nzTheme="outline"></span>
+          拖到此处新建一行
+        </span>
       </div>
     </div>
   </div>
 
-  <!-- Reply Keyboard：根菜单渲染路径，固定底部 -->
-  <div class="tg-reply-keyboard" *ngIf="!$isInline() && $currentMenu().length > 0">
+  <!-- Reply Keyboard：根层 + 拖拽目标 -->
+  <div class="tg-reply-keyboard" *ngIf="!$isInline()">
     <div
       class="tg-reply-row"
-      *ngFor="let row of $currentMenu(); trackBy: trackByRowId"
+      *ngFor="let row of $currentMenu(); let rowIdx = index; trackBy: trackByRowId"
+      cdkDropList
+      [id]="rowListId(rowIdx)"
+      [cdkDropListData]="row.buttons"
+      cdkDropListOrientation="horizontal"
+      (cdkDropListDropped)="onDropToRow($event, rowIdx)"
     >
-      <button
+      <div
         *ngFor="let btn of row.buttons; trackBy: trackByButtonId"
-        type="button"
         class="tg-reply-button"
+        [class.is-selected]="$selectedId() === btn.id"
         [title]="getButtonTooltip(btn)"
+        cdkDrag
+        [cdkDragData]="btn"
+        (click)="selectButton(btn.id, $event)"
+        (dblclick)="enterButtonSubmenu(btn)"
       >
-        {{ btn.text || '(未命名)' }}
-      </button>
+        <span class="tg-reply-button-text">{{ btn.text || '(未命名)' }}</span>
+        <button
+          type="button"
+          class="tg-button-remove"
+          nz-button
+          nzType="text"
+          nzSize="small"
+          nz-popconfirm
+          nzPopconfirmTitle="确定删除该按钮？"
+          nzOkText="删除"
+          nzCancelText="取消"
+          (nzOnConfirm)="removeButton(btn.id)"
+          (click)="$event.stopPropagation()"
+          aria-label="删除按钮"
+        >
+          <span nz-icon nzType="close" nzTheme="outline"></span>
+        </button>
+      </div>
     </div>
-  </div>
 
-  <!-- 底部面包屑提示 -->
-  <div class="tg-breadcrumb-hint">
-    当前预览层级：<span class="tg-breadcrumb-text">{{ $breadcrumbText() }}</span>
+    <!-- 根层空态落点 -->
+    <div
+      class="tg-empty-row"
+      *ngIf="$currentMenu().length === 0"
+      cdkDropList
+      [id]="newRowListId"
+      [cdkDropListData]="emptyButtons"
+      (cdkDropListDropped)="onDropToNewRow($event)"
+    >
+      <span class="tg-empty-hint">拖入组件开始设计...</span>
+    </div>
+
+    <!-- 新行落点 -->
+    <div
+      *ngIf="$canAddRow() && $currentMenu().length > 0"
+      class="tg-new-row-slot"
+      cdkDropList
+      [id]="newRowListId"
+      [cdkDropListData]="emptyButtons"
+      (cdkDropListDropped)="onDropToNewRow($event)"
+    >
+      <span class="tg-new-row-hint">
+        <span nz-icon nzType="plus" nzTheme="outline"></span>
+        拖到此处新建一行
+      </span>
+    </div>
   </div>
 </div>

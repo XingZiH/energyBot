@@ -226,6 +226,154 @@ describe('MenuTreeService', () => {
     expect(MAX_MENU_DEPTH).toBe(3);
   });
 
+  // ---------- welcomeText ----------
+  it('$welcomeText 初始为空字符串', () => {
+    expect(service.$welcomeText()).toBe('');
+  });
+
+  it('setWelcomeText 直接写入、不进历史栈', () => {
+    service.setWelcomeText('你好');
+    expect(service.$welcomeText()).toBe('你好');
+    // 不应 push 到 history：此刻 undo 不能把它还原
+    service.undo();
+    expect(service.$welcomeText()).toBe('你好');
+  });
+
+  it('setRootMenu 不清空 welcomeText（独立字段）', () => {
+    service.setWelcomeText('问候');
+    service.setRootMenu([{ id: 'r', buttons: [] }]);
+    expect(service.$welcomeText()).toBe('问候');
+  });
+
+  it('setWelcomeTextWithHistory 进历史栈、可 undo', () => {
+    service.setWelcomeText('初始');
+    service.setWelcomeTextWithHistory('修改后');
+    expect(service.$welcomeText()).toBe('修改后');
+    service.undo();
+    expect(service.$welcomeText()).toBe('初始');
+    service.redo();
+    expect(service.$welcomeText()).toBe('修改后');
+  });
+
+  // ---------- 拖拽：moveButton / reorderButtonInRow / moveButtonToNewRow ----------
+  function seed3Rows(): void {
+    service.addRow();
+    service.addButton(0, { id: 'a1', text: 'A1', action: ButtonAction.TEXT, message: 'x' });
+    service.addButton(0, { id: 'a2', text: 'A2', action: ButtonAction.TEXT, message: 'x' });
+    service.addRow();
+    service.addButton(1, { id: 'b1', text: 'B1', action: ButtonAction.TEXT, message: 'x' });
+  }
+
+  it('reorderButtonInRow 行内交换位置', () => {
+    seed3Rows();
+    service.reorderButtonInRow(0, 0, 1);
+    expect(service.$rootMenu()[0].buttons.map((b) => b.id)).toEqual(['a2', 'a1']);
+  });
+
+  it('reorderButtonInRow fromIdx === toIdx 是 no-op', () => {
+    seed3Rows();
+    const before = JSON.stringify(service.$rootMenu());
+    service.reorderButtonInRow(0, 1, 1);
+    expect(JSON.stringify(service.$rootMenu())).toBe(before);
+  });
+
+  it('moveButton 跨行移动', () => {
+    seed3Rows();
+    // 把 a1 移到 row 1 的开头
+    service.moveButton(0, 0, 1, 0);
+    expect(service.$rootMenu()[0].buttons.map((b) => b.id)).toEqual(['a2']);
+    expect(service.$rootMenu()[1].buttons.map((b) => b.id)).toEqual(['a1', 'b1']);
+  });
+
+  it('moveButton 目标行超过上限 4 时拒绝（返回 false）', () => {
+    service.addRow();
+    for (let i = 0; i < 4; i++) {
+      service.addButton(0, {
+        id: `x${i}`,
+        text: `X${i}`,
+        action: ButtonAction.TEXT,
+        message: 'x',
+      });
+    }
+    service.addRow();
+    service.addButton(1, { id: 'y', text: 'Y', action: ButtonAction.TEXT, message: 'x' });
+
+    const ok = service.moveButton(1, 0, 0, 0);
+    expect(ok).toBe(false);
+    // row 0 仍然 4 个，row 1 仍然 1 个
+    expect(service.$rootMenu()[0].buttons).toHaveSize(4);
+    expect(service.$rootMenu()[1].buttons).toHaveSize(1);
+  });
+
+  it('moveButton 源行被清空时自动删除行', () => {
+    service.addRow();
+    service.addButton(0, { id: 'only', text: 'O', action: ButtonAction.TEXT, message: 'x' });
+    service.addRow();
+    service.addButton(1, { id: 'other', text: 'B', action: ButtonAction.TEXT, message: 'x' });
+
+    service.moveButton(0, 0, 1, 0);
+
+    // row 0 被清空后应自动移除
+    expect(service.$rootMenu()).toHaveSize(1);
+    expect(service.$rootMenu()[0].buttons.map((b) => b.id)).toEqual(['only', 'other']);
+  });
+
+  it('moveButtonToNewRow 末尾新建一行、源行空则删除', () => {
+    seed3Rows();
+    // 把 b1 拆到新行
+    service.moveButtonToNewRow(1, 0);
+    // 原 row 1 空了被删，新行追加到末尾
+    expect(service.$rootMenu()).toHaveSize(2);
+    expect(service.$rootMenu()[0].buttons.map((b) => b.id)).toEqual(['a1', 'a2']);
+    expect(service.$rootMenu()[1].buttons.map((b) => b.id)).toEqual(['b1']);
+  });
+
+  it('moveButtonToNewRow 已达最大行数时：源行只剩一个按钮可放行（总数不变）', () => {
+    for (let r = 0; r < 8; r++) {
+      service.addRow();
+      service.addButton(r, {
+        id: `r${r}`,
+        text: `R${r}`,
+        action: ButtonAction.TEXT,
+        message: 'x',
+      });
+    }
+    // 源行只有 1 个按钮，拆出后源行被删、末尾新建——总数维持 8
+    const ok = service.moveButtonToNewRow(0, 0);
+    expect(ok).toBe(true);
+    expect(service.$rootMenu()).toHaveSize(8);
+    // 原 r0 被挪到末尾
+    expect(service.$rootMenu()[7].buttons.map((b) => b.id)).toEqual(['r0']);
+  });
+
+  it('moveButtonToNewRow 已达最大行数且源行非单按钮时返回 false', () => {
+    for (let r = 0; r < 8; r++) {
+      service.addRow();
+      service.addButton(r, {
+        id: `r${r}a`,
+        text: `R${r}a`,
+        action: ButtonAction.TEXT,
+        message: 'x',
+      });
+    }
+    // 给第 0 行补一个按钮：拆出一个后源行还剩 1 个，真的要新开一行 → 9 超限
+    service.addButton(0, { id: 'extra', text: 'E', action: ButtonAction.TEXT, message: 'x' });
+    expect(service.$rootMenu()[0].buttons).toHaveSize(2);
+
+    const ok = service.moveButtonToNewRow(0, 0);
+    expect(ok).toBe(false);
+    expect(service.$rootMenu()).toHaveSize(8);
+    expect(service.$rootMenu()[0].buttons).toHaveSize(2);
+  });
+
+  it('拖拽操作每次都进历史栈，可 undo', () => {
+    seed3Rows();
+    const before = JSON.stringify(service.$rootMenu());
+    service.moveButton(0, 0, 1, 0);
+    service.undo();
+    expect(JSON.stringify(service.$rootMenu())).toBe(before);
+  });
+
   it('validateDepth 拒绝超过 3 层嵌套（4 层抛错）', () => {
     const depth4: MenuRow = {
       id: 'r',

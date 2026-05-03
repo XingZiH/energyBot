@@ -1,6 +1,13 @@
 import { computed, Injectable, signal } from '@angular/core';
 
-import { ButtonAction, MAX_MENU_DEPTH, MenuButton, MenuRow } from '../types';
+import {
+  ButtonAction,
+  MAX_BUTTONS_PER_ROW,
+  MAX_MENU_DEPTH,
+  MAX_ROWS_PER_MENU,
+  MenuButton,
+  MenuRow,
+} from '../types';
 
 /**
  * breadcrumb 单项：根节点 buttonId = null，其余为承载 submenu 的按钮 id。
@@ -8,6 +15,15 @@ import { ButtonAction, MAX_MENU_DEPTH, MenuButton, MenuRow } from '../types';
 export interface BreadcrumbItem {
   label: string;
   buttonId: string | null;
+}
+
+/**
+ * 历史栈快照：同时包含 rootMenu 与 welcomeText，
+ * undo/redo 需要对二者做原子回滚（例如同一步操作改了菜单又改了文本）。
+ */
+interface HistorySnapshot {
+  rootMenu: MenuRow[];
+  welcomeText: string;
 }
 
 /**
@@ -30,6 +46,15 @@ export class MenuTreeService {
   readonly $breadcrumb = signal<BreadcrumbItem[]>([{ label: '根菜单', buttonId: null }]);
   readonly $selectedButtonId = signal<string | null>(null);
 
+  /**
+   * 聊天气泡正文（designer 顶部文本框）。
+   *
+   * 独立于 $rootMenu：`setWelcomeText` 直接写入不进历史，文本频繁改动，
+   * 避免每次按键都创建快照污染 undo 栈；需要 undo 语义时走 `setWelcomeTextWithHistory`
+   * （例如 blur 时再快照一次）。
+   */
+  readonly $welcomeText = signal<string>('');
+
   readonly $currentMenu = computed<MenuRow[]>(() => {
     const crumbs = this.$breadcrumb();
     let current = this.$rootMenu();
@@ -43,8 +68,8 @@ export class MenuTreeService {
     return current;
   });
 
-  private history: MenuRow[][] = [];
-  private future: MenuRow[][] = [];
+  private history: HistorySnapshot[] = [];
+  private future: HistorySnapshot[] = [];
 
   private static readonly MAX_HISTORY = 50;
 
@@ -110,16 +135,16 @@ export class MenuTreeService {
 
   undo(): void {
     if (this.history.length === 0) return;
-    this.future.push(structuredClone(this.$rootMenu()));
+    this.future.push(this.snapshot());
     const prev = this.history.pop()!;
-    this.$rootMenu.set(prev);
+    this.applySnapshot(prev);
   }
 
   redo(): void {
     if (this.future.length === 0) return;
-    this.history.push(structuredClone(this.$rootMenu()));
+    this.history.push(this.snapshot());
     const next = this.future.pop()!;
-    this.$rootMenu.set(next);
+    this.applySnapshot(next);
   }
 
   /**
@@ -141,6 +166,9 @@ export class MenuTreeService {
 
   /**
    * 初始化/重置菜单，同时清空历史栈、复位 breadcrumb 和选中状态。
+   *
+   * 注意：不清空 $welcomeText。welcomeText 走独立初始化入口（setWelcomeText），
+   * 当父组件只刷新菜单快照时不应把文案重置为空。
    */
   setRootMenu(menu: MenuRow[]): void {
     this.history = [];
@@ -150,12 +178,141 @@ export class MenuTreeService {
     this.$selectedButtonId.set(null);
   }
 
+  /**
+   * 直接写入 welcomeText（不进历史栈）。
+   *
+   * 适用于 IME 打字、父组件初始化等高频/非用户显式编辑完成场景。
+   * 需要 undo 粒度时请用 setWelcomeTextWithHistory。
+   */
+  setWelcomeText(value: string): void {
+    this.$welcomeText.set(value);
+  }
+
+  /**
+   * 把 welcomeText 变更当作一步可撤销操作记入历史。
+   *
+   * 推荐在输入框 blur 或"编辑会话结束"时调用一次，配合 setWelcomeText
+   * 的实时写入形成"实时预览 + 离焦入栈"两阶段语义。
+   */
+  setWelcomeTextWithHistory(value: string): void {
+    if (this.$welcomeText() === value) return;
+    this.pushHistory();
+    this.$welcomeText.set(value);
+  }
+
+  // ---------- 拖拽写操作 ----------
+
+  /**
+   * 行内按钮位置交换（拖拽排序）。
+   *
+   * fromIdx === toIdx 视为 no-op（不推历史、不改状态），避免拖到原位触发
+   * 一次无意义的 history push。
+   */
+  reorderButtonInRow(rowIdx: number, fromIdx: number, toIdx: number): void {
+    if (fromIdx === toIdx) return;
+    this.pushHistory();
+    this.updateCurrentMenu((rows) => {
+      const updated = structuredClone(rows);
+      const row = updated[rowIdx];
+      if (!row) return updated;
+      if (fromIdx < 0 || fromIdx >= row.buttons.length) return updated;
+      if (toIdx < 0 || toIdx >= row.buttons.length) return updated;
+      const [btn] = row.buttons.splice(fromIdx, 1);
+      row.buttons.splice(toIdx, 0, btn);
+      return updated;
+    });
+  }
+
+  /**
+   * 跨行移动按钮。
+   *
+   * 返回 boolean：
+   * - false：目标行已满（MAX_BUTTONS_PER_ROW）或源/目标非法，整个操作不生效且不入栈
+   * - true：移动成功；若源行因此变空会被自动移除（与 removeButton 行为一致）
+   */
+  moveButton(
+    fromRowIdx: number,
+    fromBtnIdx: number,
+    toRowIdx: number,
+    toBtnIdx: number,
+  ): boolean {
+    const rows = this.$currentMenu();
+    const fromRow = rows[fromRowIdx];
+    const toRow = rows[toRowIdx];
+    if (!fromRow || !toRow) return false;
+    if (fromBtnIdx < 0 || fromBtnIdx >= fromRow.buttons.length) return false;
+    // 同行内退化到 reorder（不触发容量检查：总数不变）
+    if (fromRowIdx === toRowIdx) {
+      const clamped = Math.max(0, Math.min(toBtnIdx, fromRow.buttons.length - 1));
+      this.reorderButtonInRow(fromRowIdx, fromBtnIdx, clamped);
+      return true;
+    }
+    if (toRow.buttons.length >= MAX_BUTTONS_PER_ROW) return false;
+
+    this.pushHistory();
+    this.updateCurrentMenu((rs) => {
+      const updated = structuredClone(rs);
+      const src = updated[fromRowIdx];
+      const dst = updated[toRowIdx];
+      if (!src || !dst) return updated;
+      const [btn] = src.buttons.splice(fromBtnIdx, 1);
+      const insertAt = Math.max(0, Math.min(toBtnIdx, dst.buttons.length));
+      dst.buttons.splice(insertAt, 0, btn);
+      return updated.filter((r) => r.buttons.length > 0);
+    });
+    return true;
+  }
+
+  /**
+   * 把一个按钮拆到末尾新行。
+   *
+   * 返回 false 的情况：
+   * - 当前菜单已达 MAX_ROWS_PER_MENU 且源行会被保留（拆出去仍需新增一行）
+   * - 源定位非法
+   *
+   * 特殊情形：若源行仅此一个按钮，拆出后源行为空会被删除——
+   * 这种情况总行数不变，不触碰行数上限。
+   */
+  moveButtonToNewRow(fromRowIdx: number, fromBtnIdx: number): boolean {
+    const rows = this.$currentMenu();
+    const fromRow = rows[fromRowIdx];
+    if (!fromRow) return false;
+    if (fromBtnIdx < 0 || fromBtnIdx >= fromRow.buttons.length) return false;
+
+    const willEmptySource = fromRow.buttons.length === 1;
+    if (!willEmptySource && rows.length >= MAX_ROWS_PER_MENU) return false;
+
+    this.pushHistory();
+    this.updateCurrentMenu((rs) => {
+      const updated = structuredClone(rs);
+      const src = updated[fromRowIdx];
+      if (!src) return updated;
+      const [btn] = src.buttons.splice(fromBtnIdx, 1);
+      const filtered = updated.filter((r) => r.buttons.length > 0);
+      filtered.push({ id: this.genId('row'), buttons: [btn] });
+      return filtered;
+    });
+    return true;
+  }
+
   // ----- 内部辅助 -----
 
   private pushHistory(): void {
-    this.history.push(structuredClone(this.$rootMenu()));
+    this.history.push(this.snapshot());
     if (this.history.length > MenuTreeService.MAX_HISTORY) this.history.shift();
     this.future = [];
+  }
+
+  private snapshot(): HistorySnapshot {
+    return {
+      rootMenu: structuredClone(this.$rootMenu()),
+      welcomeText: this.$welcomeText(),
+    };
+  }
+
+  private applySnapshot(s: HistorySnapshot): void {
+    this.$rootMenu.set(s.rootMenu);
+    this.$welcomeText.set(s.welcomeText);
   }
 
   /**

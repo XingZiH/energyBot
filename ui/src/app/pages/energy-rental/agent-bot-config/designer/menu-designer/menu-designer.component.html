@@ -54,11 +54,27 @@
     </div>
   </div>
 
-  <!-- 四栏布局 -->
+  <!-- 欢迎语编辑区（气泡正文） -->
+  <div class="designer-welcome">
+    <label class="welcome-label" for="designer-welcome-input">
+      <span nz-icon nzType="message" nzTheme="outline"></span>
+      欢迎语（机器人首条消息正文）
+    </label>
+    <textarea
+      id="designer-welcome-input"
+      nz-input
+      rows="2"
+      placeholder="例如：欢迎使用，请选择下方菜单..."
+      [ngModel]="tree.$welcomeText()"
+      (ngModelChange)="onWelcomeTextInput($event)"
+      (blur)="onWelcomeTextBlur()"
+    ></textarea>
+  </div>
+
+  <!-- 三栏布局 -->
   <div class="designer-body">
     <app-component-palette class="panel-palette"></app-component-palette>
-    <app-menu-canvas class="panel-canvas"></app-menu-canvas>
-    <app-property-panel class="panel-property" [agentId]="agentId()"></app-property-panel>
     <app-telegram-preview class="panel-preview"></app-telegram-preview>
+    <app-property-panel class="panel-property" [agentId]="agentId()"></app-property-panel>
   </div>
 </div>

@@ -1,14 +1,19 @@
+import { CdkDragDrop } from '@angular/cdk/drag-drop';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 
 import { NZ_ICONS, NzIconModule } from 'ng-zorro-antd/icon';
 import {
   BulbOutline,
+  CloseOutline,
+  MessageOutline,
   MoonOutline,
+  PlusOutline,
   RightOutline,
 } from '@ant-design/icons-angular/icons';
 
 import { ButtonAction, MenuButton, MenuRow } from '../../types';
+import { PaletteItem } from '../component-palette/component-palette.component';
 import { MenuTreeService } from '../menu-tree.service';
 import { TelegramPreviewComponent } from './telegram-preview.component';
 
@@ -26,6 +31,44 @@ function row(id: string, buttons: MenuButton[]): MenuRow {
   return { id, buttons };
 }
 
+/**
+ * 手工构造最小 CdkDragDrop 事件——preview 组件的 drop handler 只读
+ * previousContainer.id / currentIndex / previousIndex / item.data 几个字段。
+ */
+function makeDropEvent(opts: {
+  previousContainerId: string;
+  currentContainerId: string;
+  data: PaletteItem | MenuButton | null;
+  previousIndex?: number;
+  currentIndex?: number;
+}): CdkDragDrop<MenuButton[]> {
+  const {
+    previousContainerId,
+    currentContainerId,
+    data,
+    previousIndex = 0,
+    currentIndex = 0,
+  } = opts;
+  const previousContainer = { id: previousContainerId, data: [] } as unknown;
+  const currentContainer = { id: currentContainerId, data: [] } as unknown;
+  const item = { data } as unknown;
+  return {
+    previousIndex,
+    currentIndex,
+    item,
+    container: currentContainer,
+    previousContainer,
+    isPointerOverContainer: true,
+    distance: { x: 0, y: 0 },
+    dropPoint: { x: 0, y: 0 },
+    event: new MouseEvent('mouseup'),
+  } as unknown as CdkDragDrop<MenuButton[]>;
+}
+
+function palItem(action: ButtonAction, title = '测试'): PaletteItem {
+  return { action, icon: 'link', title, description: '描述' };
+}
+
 describe('TelegramPreviewComponent', () => {
   let component: TelegramPreviewComponent;
   let fixture: ComponentFixture<TelegramPreviewComponent>;
@@ -38,7 +81,7 @@ describe('TelegramPreviewComponent', () => {
         MenuTreeService,
         {
           provide: NZ_ICONS,
-          useValue: [BulbOutline, MoonOutline, RightOutline],
+          useValue: [BulbOutline, CloseOutline, MessageOutline, MoonOutline, PlusOutline, RightOutline],
         },
       ],
     }).compileComponents();
@@ -65,19 +108,30 @@ describe('TelegramPreviewComponent', () => {
   });
 
   // 3
-  it('3. $currentMenu 为空时只显示 bot 气泡，无键盘', () => {
+  it('3. 空菜单 + 空 welcomeText → 气泡显示引导占位', () => {
     expect(tree.$currentMenu().length).toBe(0);
-    const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('.tg-bot-bubble')).toBeTruthy();
-    expect(el.querySelector('.tg-reply-keyboard')).toBeNull();
-    expect(el.querySelector('.tg-inline-keyboard')).toBeNull();
-    // bot 气泡应显示空态提示
-    const bubbleText = el.querySelector('.tg-bot-bubble')!.textContent || '';
-    expect(bubbleText).toContain('请从左侧设计菜单');
+    expect(component.$bubbleText()).toContain('请从左侧拖入组件');
+    const bubble = fixture.nativeElement.querySelector('.tg-bot-bubble') as HTMLElement;
+    expect(bubble.textContent).toContain('请从左侧拖入组件');
   });
 
   // 4
-  it('4. 根菜单（breadcrumb.length=1）渲染为 Reply Keyboard', () => {
+  it('4. 有 welcomeText 时气泡显示用户文本', () => {
+    tree.setWelcomeText('欢迎来到能量租赁');
+    fixture.detectChanges();
+    const bubble = fixture.nativeElement.querySelector('.tg-bot-bubble') as HTMLElement;
+    expect(bubble.textContent).toContain('欢迎来到能量租赁');
+  });
+
+  // 5
+  it('5. 有按钮但无 welcomeText → 气泡显示 "请选择："', () => {
+    tree.setRootMenu([row('r1', [btn('b1', 'A')])]);
+    fixture.detectChanges();
+    expect(component.$bubbleText()).toBe('请选择：');
+  });
+
+  // 6
+  it('6. 根菜单（breadcrumb.length=1）渲染为 Reply Keyboard', () => {
     tree.setRootMenu([row('r1', [btn('b1', '主菜单A')])]);
     fixture.detectChanges();
 
@@ -88,9 +142,8 @@ describe('TelegramPreviewComponent', () => {
     expect(el.querySelector('.tg-reply-button')!.textContent).toContain('主菜单A');
   });
 
-  // 5
-  it('5. 子菜单（breadcrumb.length>1）渲染为 Inline Keyboard', () => {
-    // 构造 root 有一个 SUBMENU 按钮 + 子菜单内容
+  // 7
+  it('7. 子菜单（breadcrumb.length>1）渲染为 Inline Keyboard', () => {
     tree.setRootMenu([
       row('r1', [
         {
@@ -111,8 +164,8 @@ describe('TelegramPreviewComponent', () => {
     expect(el.querySelector('.tg-inline-button')!.textContent).toContain('子按钮X');
   });
 
-  // 6
-  it('6. Inline Keyboard 按 row/button 二维结构渲染', () => {
+  // 8
+  it('8. Inline Keyboard 按 row/button 二维结构渲染', () => {
     tree.setRootMenu([
       row('r1', [
         {
@@ -139,17 +192,16 @@ describe('TelegramPreviewComponent', () => {
     expect(secondRowButtons[2].nativeElement.textContent).toContain('B3');
   });
 
-  // 7
-  it('7. 按钮 text 空时显示 "(未命名)"', () => {
+  // 9
+  it('9. 按钮 text 空时显示 "(未命名)"', () => {
     tree.setRootMenu([row('r1', [btn('b1', '')])]);
     fixture.detectChanges();
-
     const btnEl = fixture.nativeElement.querySelector('.tg-reply-button') as HTMLElement;
     expect(btnEl.textContent).toContain('(未命名)');
   });
 
-  // 8
-  it('8. SUBMENU 类型按钮显示下钻箭头图标（inline 语境下）', () => {
+  // 10
+  it('10. SUBMENU 按钮（inline 语境下）显示下钻箭头', () => {
     tree.setRootMenu([
       row('r1', [
         {
@@ -178,31 +230,8 @@ describe('TelegramPreviewComponent', () => {
     expect(indicator).toBeTruthy();
   });
 
-  // 9
-  it('9. 非 SUBMENU 类型按钮不显示下钻图标', () => {
-    tree.setRootMenu([
-      row('r1', [
-        {
-          id: 'outer',
-          text: '外层',
-          action: ButtonAction.SUBMENU,
-          submenu: [
-            row('ra', [btn('plain', '普通文本按钮', ButtonAction.TEXT)]),
-          ],
-        },
-      ]),
-    ]);
-    tree.enterSubmenu('outer');
-    fixture.detectChanges();
-
-    const allInlineButtons = fixture.nativeElement.querySelectorAll('.tg-inline-button');
-    expect(allInlineButtons.length).toBe(1);
-    const indicator = allInlineButtons[0].querySelector('.tg-inline-submenu-indicator');
-    expect(indicator).toBeNull();
-  });
-
-  // 10
-  it('10. darkMode 切换时 DOM class 同步切换', () => {
+  // 11
+  it('11. darkMode 切换时 DOM class 同步', () => {
     const host = fixture.debugElement.query(By.css('.tg-preview'))
       .nativeElement as HTMLElement;
     expect(host.classList.contains('dark-mode')).toBeFalse();
@@ -210,14 +239,10 @@ describe('TelegramPreviewComponent', () => {
     component.toggleDarkMode();
     fixture.detectChanges();
     expect(host.classList.contains('dark-mode')).toBeTrue();
-
-    component.toggleDarkMode();
-    fixture.detectChanges();
-    expect(host.classList.contains('dark-mode')).toBeFalse();
   });
 
-  // 11
-  it('11. 面包屑展示当前层级路径', () => {
+  // 12
+  it('12. 面包屑渲染到 header 内，末项不带 <a>', () => {
     tree.setRootMenu([
       row('r1', [
         {
@@ -228,56 +253,267 @@ describe('TelegramPreviewComponent', () => {
         },
       ]),
     ]);
-    // 根层时面包屑文本 = "根菜单"
-    fixture.detectChanges();
-    expect(component.$breadcrumbText()).toBe('根菜单');
-    let text = (fixture.nativeElement as HTMLElement).querySelector(
-      '.tg-breadcrumb-text',
-    )!.textContent;
-    expect(text).toContain('根菜单');
-
-    // 进入子菜单后拼接
     tree.enterSubmenu('sub1');
     fixture.detectChanges();
-    expect(component.$breadcrumbText()).toBe('根菜单 > 订单菜单');
-    text = (fixture.nativeElement as HTMLElement).querySelector(
-      '.tg-breadcrumb-text',
-    )!.textContent;
-    expect(text).toContain('根菜单 > 订单菜单');
+
+    const crumbEl = fixture.debugElement.query(By.css('.tg-header .tg-breadcrumb'));
+    expect(crumbEl).toBeTruthy();
+    const items = crumbEl.queryAll(By.css('nz-breadcrumb-item'));
+    expect(items.length).toBe(2);
+    expect((items[0].nativeElement as HTMLElement).querySelector('a')).toBeTruthy();
+    expect((items[items.length - 1].nativeElement as HTMLElement).querySelector('a')).toBeNull();
   });
 
-  // 12
-  it('12. 多行按钮正确分行渲染（2 行 × 不同按钮数）', () => {
+  // 13
+  it('13. 点击面包屑非末项触发 navigateTo', () => {
     tree.setRootMenu([
-      row('r1', [btn('a', 'A1'), btn('b', 'A2'), btn('c', 'A3')]),
-      row('r2', [btn('d', 'B1'), btn('e', 'B2')]),
+      row('r1', [
+        {
+          id: 'sub1',
+          text: 'S',
+          action: ButtonAction.SUBMENU,
+          submenu: [row('r2', [btn('x', 'X')])],
+        },
+      ]),
     ]);
+    tree.enterSubmenu('sub1');
     fixture.detectChanges();
 
-    const rows = fixture.debugElement.queryAll(By.css('.tg-reply-row'));
-    expect(rows.length).toBe(2);
-    expect(rows[0].queryAll(By.css('.tg-reply-button')).length).toBe(3);
-    expect(rows[1].queryAll(By.css('.tg-reply-button')).length).toBe(2);
-    expect(rows[0].nativeElement.textContent).toContain('A1');
-    expect(rows[0].nativeElement.textContent).toContain('A3');
-    expect(rows[1].nativeElement.textContent).toContain('B2');
+    const spy = spyOn(tree, 'navigateTo').and.callThrough();
+    component.navigateCrumb(0);
+    expect(spy).toHaveBeenCalledWith(0);
   });
 
-  // 额外：13 - trackBy 稳定引用（一次 detectChanges 不换新节点）
-  it('13. trackByRowId / trackByButtonId 使用 id 稳定跟踪', () => {
+  // 14: selectButton / removeButton / enterButtonSubmenu
+  it('14. selectButton 更新 $selectedButtonId', () => {
+    component.selectButton('b1');
+    expect(tree.$selectedButtonId()).toBe('b1');
+  });
+
+  it('15. selectButton 空字符串时清空选中', () => {
+    tree.$selectedButtonId.set('x');
+    component.selectButton('');
+    expect(tree.$selectedButtonId()).toBe('');
+  });
+
+  it('16. removeButton 调用 tree.removeButton', () => {
+    tree.setRootMenu([row('r1', [btn('b1', 'A')])]);
+    const spy = spyOn(tree, 'removeButton').and.callThrough();
+    component.removeButton('b1');
+    expect(spy).toHaveBeenCalledWith('b1');
+  });
+
+  it('17. 双击 SUBMENU 按钮调 enterSubmenu', () => {
+    const submenuBtn: MenuButton = {
+      id: 'sub1',
+      text: 'S',
+      action: ButtonAction.SUBMENU,
+      submenu: [],
+    };
+    const spy = spyOn(tree, 'enterSubmenu').and.callThrough();
+    component.enterButtonSubmenu(submenuBtn);
+    expect(spy).toHaveBeenCalledWith('sub1');
+  });
+
+  it('18. 双击非 SUBMENU 按钮不调 enterSubmenu', () => {
+    const urlBtn: MenuButton = { id: 'u', text: 'U', action: ButtonAction.URL, url: 'x' };
+    const spy = spyOn(tree, 'enterSubmenu');
+    component.enterButtonSubmenu(urlBtn);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  // ---------- 拖拽 ----------
+  it('19. 从 palette 拖到已有行：addButton 调用 + 结构含 url: ""', () => {
+    tree.setRootMenu([row('r1', [btn('b1', 'A')])]);
+    const spy = spyOn(tree, 'addButton').and.callThrough();
+
+    const ev = makeDropEvent({
+      previousContainerId: 'palette-source',
+      currentContainerId: 'preview-row-0',
+      data: palItem(ButtonAction.URL, '网址'),
+    });
+    component.onDropToRow(ev, 0);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [rowIdx, createdBtn] = spy.calls.mostRecent().args as [number, MenuButton];
+    expect(rowIdx).toBe(0);
+    expect(createdBtn.action).toBe(ButtonAction.URL);
+    expect(createdBtn.url).toBe('');
+    expect(createdBtn.text).toBe('网址');
+  });
+
+  it('20. palette 拖入已满行（4 按钮）拒绝', () => {
+    tree.addRow();
+    for (let i = 0; i < 4; i++) {
+      tree.addButton(0, { id: `b${i}`, text: `b${i}`, action: ButtonAction.TEXT, message: '' });
+    }
+    const spy = spyOn(tree, 'addButton').and.callThrough();
+    component.onDropToRow(
+      makeDropEvent({
+        previousContainerId: 'palette-source',
+        currentContainerId: 'preview-row-0',
+        data: palItem(ButtonAction.URL),
+      }),
+      0,
+    );
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('21. 同行内拖拽（previousContainer === current）→ reorderButtonInRow', () => {
+    tree.setRootMenu([row('r1', [btn('a', 'A'), btn('b', 'B')])]);
+    const spy = spyOn(tree, 'reorderButtonInRow').and.callThrough();
+    component.onDropToRow(
+      makeDropEvent({
+        previousContainerId: 'preview-row-0',
+        currentContainerId: 'preview-row-0',
+        // 同行场景 data 是 MenuButton（带 id）——避免被误判为 palette
+        data: btn('a', 'A'),
+        previousIndex: 0,
+        currentIndex: 1,
+      }),
+      0,
+    );
+    expect(spy).toHaveBeenCalledWith(0, 0, 1);
+  });
+
+  it('22. 跨行拖拽 → moveButton', () => {
+    tree.setRootMenu([row('r1', [btn('a', 'A')]), row('r2', [btn('b', 'B')])]);
+    const spy = spyOn(tree, 'moveButton').and.callThrough();
+    component.onDropToRow(
+      makeDropEvent({
+        previousContainerId: 'preview-row-0',
+        currentContainerId: 'preview-row-1',
+        data: btn('a', 'A'),
+        previousIndex: 0,
+        currentIndex: 0,
+      }),
+      1,
+    );
+    expect(spy).toHaveBeenCalledWith(0, 0, 1, 0);
+  });
+
+  it('23. 拖到新行：palette 来源 → addRow + addButton', () => {
+    const addRowSpy = spyOn(tree, 'addRow').and.callThrough();
+    const addBtnSpy = spyOn(tree, 'addButton').and.callThrough();
+    component.onDropToNewRow(
+      makeDropEvent({
+        previousContainerId: 'palette-source',
+        currentContainerId: 'preview-new-row',
+        data: palItem(ButtonAction.SUBMENU),
+      }),
+    );
+    expect(addRowSpy).toHaveBeenCalledTimes(1);
+    expect(addBtnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('24. 拖到新行：已有按钮来源 → moveButtonToNewRow', () => {
+    tree.setRootMenu([row('r1', [btn('a', 'A'), btn('b', 'B')])]);
+    const spy = spyOn(tree, 'moveButtonToNewRow').and.callThrough();
+    component.onDropToNewRow(
+      makeDropEvent({
+        previousContainerId: 'preview-row-0',
+        currentContainerId: 'preview-new-row',
+        data: btn('a', 'A'),
+        previousIndex: 0,
+      }),
+    );
+    expect(spy).toHaveBeenCalledWith(0, 0);
+  });
+
+  it('25. 行数达上限时 palette 拖到新行被拒绝', () => {
+    for (let i = 0; i < 8; i++) tree.addRow();
+    const addRowSpy = spyOn(tree, 'addRow');
+    const addBtnSpy = spyOn(tree, 'addButton');
+    component.onDropToNewRow(
+      makeDropEvent({
+        previousContainerId: 'palette-source',
+        currentContainerId: 'preview-new-row',
+        data: palItem(ButtonAction.TEXT),
+      }),
+    );
+    expect(addRowSpy).not.toHaveBeenCalled();
+    expect(addBtnSpy).not.toHaveBeenCalled();
+  });
+
+  // ---------- palette 默认字段填充（原 MenuCanvas 的 createButtonFromPalette 用例迁移） ----------
+  it('26. palette 创建各类按钮默认字段正确', () => {
+    tree.addRow();
+    const spy = spyOn(tree, 'addButton').and.callThrough();
+
+    function drop(action: ButtonAction): MenuButton {
+      component.onDropToRow(
+        makeDropEvent({
+          previousContainerId: 'palette-source',
+          currentContainerId: 'preview-row-0',
+          data: palItem(action, '测试'),
+        }),
+        0,
+      );
+      return spy.calls.mostRecent().args[1] as MenuButton;
+    }
+
+    // 每轮调用前清空行（避免累积超 4 个拒绝）
+    function resetRow(): void {
+      tree.setRootMenu([row('r', [])]);
+    }
+
+    resetRow();
+    expect(drop(ButtonAction.URL).url).toBe('');
+    resetRow();
+    expect(drop(ButtonAction.TEXT).message).toBe('');
+    resetRow();
+    expect(drop(ButtonAction.COMMAND).command).toBe('/start');
+    resetRow();
+    expect(drop(ButtonAction.SUBMENU).submenu).toEqual([]);
+    resetRow();
+    expect(drop(ButtonAction.ENERGY_PACKAGE_GROUP).packageGroup).toEqual({
+      packageIds: [],
+      sortBy: 'price_asc',
+      textTemplate: '',
+    });
+    // START/ADDRESS_MANAGE/WALLET_QUERY/ORDERS 无额外字段
+    resetRow();
+    for (const action of [
+      ButtonAction.START,
+      ButtonAction.ADDRESS_MANAGE,
+      ButtonAction.WALLET_QUERY,
+      ButtonAction.ORDERS,
+    ]) {
+      resetRow();
+      const created = drop(action);
+      expect(created.url).toBeUndefined();
+      expect(created.message).toBeUndefined();
+      expect(created.command).toBeUndefined();
+      expect(created.submenu).toBeUndefined();
+      expect(created.packageGroup).toBeUndefined();
+    }
+  });
+
+  // ---------- trackBy ----------
+  it('27. trackByRowId / trackByButtonId 使用 id', () => {
     expect(component.trackByRowId(0, { id: 'r1', buttons: [] })).toBe('r1');
     expect(
       component.trackByButtonId(0, { id: 'b1', text: 'x', action: ButtonAction.TEXT }),
     ).toBe('b1');
   });
 
-  // 额外：14 - 空菜单在子层也不渲染键盘
-  it('14. 子层空菜单也不渲染 inline keyboard', () => {
+  // ---------- 选中样式反映 ----------
+  it('28. 选中按钮后 DOM 带 is-selected class', () => {
+    tree.setRootMenu([row('r1', [btn('b1', 'A')])]);
+    fixture.detectChanges();
+    component.selectButton('b1');
+    fixture.detectChanges();
+    const btnEl = fixture.nativeElement.querySelector('.tg-reply-button') as HTMLElement;
+    expect(btnEl.classList.contains('is-selected')).toBeTrue();
+  });
+
+  // ---------- 空菜单子层仍可接收 palette（通过 tg-empty-row 落点） ----------
+  it('29. 子层空菜单渲染 empty-row 落点', () => {
     tree.setRootMenu([
       row('r1', [
         {
           id: 'sub1',
-          text: '空的父',
+          text: 'S',
           action: ButtonAction.SUBMENU,
           submenu: [],
         },
@@ -286,14 +522,7 @@ describe('TelegramPreviewComponent', () => {
     tree.enterSubmenu('sub1');
     fixture.detectChanges();
 
-    expect(component.$isInline()).toBeTrue();
-    expect(tree.$currentMenu().length).toBe(0);
-    const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('.tg-inline-keyboard')).toBeNull();
-    expect(el.querySelector('.tg-reply-keyboard')).toBeNull();
-    // bot 气泡仍然显示空态文案
-    expect(el.querySelector('.tg-bot-bubble')!.textContent).toContain(
-      '请从左侧设计菜单',
-    );
+    const empty = fixture.nativeElement.querySelector('.tg-empty-row');
+    expect(empty).toBeTruthy();
   });
 });

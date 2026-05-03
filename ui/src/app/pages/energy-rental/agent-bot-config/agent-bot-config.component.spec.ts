@@ -202,46 +202,48 @@ describe('EnergyRentalAgentBotConfigComponent', () => {
     expect(uiConfigService.getUiConfig).toHaveBeenCalledTimes(1);
   });
 
-  it('onMenuChange 调用 saveUiConfig，body 包含 messageConfig/welcomeText/menu，并带 If-Unmodified-Since', () => {
+  it('onDesignerChange 调用 saveUiConfig，body 包含 menu + welcomeText + 现有 messageConfig，并带 If-Unmodified-Since', () => {
     component.ngOnInit();
     const newMenu: MenuRow[] = [{ id: 'new-row', buttons: [] }];
-    component.onMenuChange(newMenu);
+    component.onDesignerChange({ welcomeText: '新欢迎语', menuConfig: newMenu });
 
     expect(uiConfigService.saveUiConfig).toHaveBeenCalledTimes(1);
     const [payload, ifUnmodifiedSince] = uiConfigService.saveUiConfig.calls.mostRecent().args;
     expect(payload).toEqual({
-      welcomeText: mockUiConfig.welcomeText,
+      welcomeText: '新欢迎语',
       menuConfig: newMenu,
       messageConfig: mockUiConfig.messageConfig
     });
     expect(ifUnmodifiedSince).toBe(mockUiConfig.updatedAt);
   });
 
-  it('onMenuChange 保存成功后更新 uiConfig.updatedAt 与 initialMenu，避免下次保存 409', () => {
+  it('onDesignerChange 保存成功后同步更新 uiConfig / initialMenu / initialWelcomeText，避免下次 409', () => {
     component.ngOnInit();
     const newMenu: MenuRow[] = [{ id: 'new-row', buttons: [] }];
-    component.onMenuChange(newMenu);
+    component.onDesignerChange({ welcomeText: 'WT1', menuConfig: newMenu });
 
     const ui = component.uiConfig();
     expect(ui?.updatedAt).toBe('2026-05-02T11:00:00.000Z');
     expect(ui?.menuConfig).toEqual(newMenu);
+    expect(ui?.welcomeText).toBe('WT1');
     expect(component.initialMenu()).toEqual(newMenu);
+    expect(component.initialWelcomeText()).toBe('WT1');
 
     // 再次保存使用新 updatedAt 作为乐观锁
     const secondMenu: MenuRow[] = [{ id: 'second', buttons: [] }];
-    component.onMenuChange(secondMenu);
+    component.onDesignerChange({ welcomeText: 'WT2', menuConfig: secondMenu });
     const secondCallIfUnmodified = uiConfigService.saveUiConfig.calls.mostRecent().args[1];
     expect(secondCallIfUnmodified).toBe('2026-05-02T11:00:00.000Z');
   });
 
-  it('uiConfig 为 null 时 onMenuChange 直接返回不调 saveUiConfig', () => {
+  it('uiConfig 为 null 时 onDesignerChange 直接返回不调 saveUiConfig', () => {
     uiConfigService.getUiConfig.and.returnValue(
       throwError(() => new HttpErrorResponse({ status: 500 }))
     );
     component.ngOnInit();
     expect(component.uiConfig()).toBeNull();
 
-    component.onMenuChange([{ id: 'x', buttons: [] }]);
+    component.onDesignerChange({ welcomeText: '', menuConfig: [{ id: 'x', buttons: [] }] });
     expect(uiConfigService.saveUiConfig).not.toHaveBeenCalled();
   });
 

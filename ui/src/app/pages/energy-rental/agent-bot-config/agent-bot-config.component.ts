@@ -11,7 +11,7 @@ import { PageHeaderComponent, PageHeaderType } from '@shared/components/page-hea
 import { fnCheckForm } from '@utils/tools';
 
 import type { MenuRow, MessageTemplates } from './designer/types';
-import { MenuDesignerComponent } from './designer/menu-designer/menu-designer.component';
+import { DesignerChange, MenuDesignerComponent } from './designer/menu-designer/menu-designer.component';
 import { MessageTemplateEditorComponent } from './designer/message-template-editor/message-template-editor.component';
 
 import { NzAlertModule } from 'ng-zorro-antd/alert';
@@ -93,6 +93,8 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
   readonly uiConfig = signal<UiConfig | null>(null);
   /** 传入 MenuDesignerComponent 的初始菜单；显式分离是为了让 effect 重跑时能拿到稳定引用 */
   readonly initialMenu = signal<MenuRow[]>([]);
+  /** 传入 MenuDesignerComponent 的初始 welcomeText（同样独立 signal，便于父组件 patch 后同步） */
+  readonly initialWelcomeText = signal<string>('');
   /** getUiConfig 是否加载失败，用于菜单设计 tab 的降级 UI */
   readonly uiConfigLoadError = signal(false);
 
@@ -212,6 +214,7 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
         this.runtime.set(runtime);
         this.uiConfig.set(ui);
         this.initialMenu.set(ui?.menuConfig ?? []);
+        this.initialWelcomeText.set(ui?.welcomeText ?? '');
         this.form.patchValue({
           botStatus: config.botStatus || 'disabled',
           telegramBotToken: '',
@@ -301,17 +304,24 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
         if (patch.menuConfig) {
           this.initialMenu.set(patch.menuConfig);
         }
+        if (patch.welcomeText !== undefined) {
+          this.initialWelcomeText.set(patch.welcomeText);
+        }
       });
   }
 
   /**
-   * MenuDesignerComponent 保存菜单时触发。
+   * MenuDesignerComponent 保存时触发（v2）。
    *
-   * 走通用 saveUiConfigPatch，messageConfig / welcomeText 由 helper 自动从当前快照回填，
-   * 保证同一 PUT 请求契约完整（后端字段可选，但显式回传更清晰）。
+   * v2 把 welcomeText 和 menuConfig 合并到同一次 emit：
+   * - 用户"保存菜单"按钮一次写入两个字段
+   * - 共享乐观锁版本：一次 If-Unmodified-Since 不会出现半提交
    */
-  onMenuChange(menu: MenuRow[]): void {
-    this.saveUiConfigPatch({ menuConfig: menu });
+  onDesignerChange(change: DesignerChange): void {
+    this.saveUiConfigPatch({
+      welcomeText: change.welcomeText,
+      menuConfig: change.menuConfig,
+    });
   }
 
   /**

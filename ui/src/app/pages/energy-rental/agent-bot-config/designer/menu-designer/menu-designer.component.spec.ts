@@ -34,7 +34,7 @@ import {
 } from '@ant-design/icons-angular/icons';
 
 import { ButtonAction, MenuButton, MenuRow } from '../types';
-import { MenuDesignerComponent } from './menu-designer.component';
+import { DesignerChange, MenuDesignerComponent } from './menu-designer.component';
 import { MenuTreeService } from './menu-tree.service';
 
 /** 构造最小按钮 */
@@ -51,27 +51,29 @@ function row(id: string, buttons: MenuButton[]): MenuRow {
   return { id, buttons };
 }
 
-/** Host 组件：通过模板绑定 initialMenu / agentId，方便测试 input 变化与 output */
+/** Host 组件：通过模板绑定 initialMenu / initialWelcomeText / agentId，方便测试 input 变化与 output */
 @Component({
   standalone: true,
   imports: [MenuDesignerComponent],
   template: `
     <app-menu-designer
       [initialMenu]="initialMenu"
+      [initialWelcomeText]="initialWelcomeText"
       [agentId]="agentId"
-      (menuChange)="onMenuChange($event)"
+      (designerChange)="onDesignerChange($event)"
     ></app-menu-designer>
   `,
 })
 class HostComponent {
   initialMenu: MenuRow[] = [];
+  initialWelcomeText = '';
   agentId: number | null = null;
-  emittedMenu: MenuRow[] | null = null;
+  emitted: DesignerChange | null = null;
 
   @ViewChild(MenuDesignerComponent) designer!: MenuDesignerComponent;
 
-  onMenuChange(menu: MenuRow[]): void {
-    this.emittedMenu = menu;
+  onDesignerChange(change: DesignerChange): void {
+    this.emitted = change;
   }
 }
 
@@ -165,19 +167,22 @@ describe('MenuDesignerComponent', () => {
   });
 
   // 4
-  it('4. save 成功：emit menuChange、更新 snapshot、$isDirty 回 false', () => {
+  it('4. save 成功：emit designerChange（含 welcomeText + menuConfig）、更新 snapshot、$isDirty 回 false', () => {
     host.initialMenu = [row('r1', [btn('b1', 'A')])];
+    host.initialWelcomeText = '你好';
     fixture.detectChanges();
 
     host.designer.tree.addButton(0, btn('b2', 'B'));
+    host.designer.tree.setWelcomeText('新问候');
     fixture.detectChanges();
     expect(host.designer.$isDirty()).toBeTrue();
 
     host.designer.save();
     fixture.detectChanges();
 
-    expect(host.emittedMenu).not.toBeNull();
-    expect(host.emittedMenu![0].buttons.length).toBe(2);
+    expect(host.emitted).not.toBeNull();
+    expect(host.emitted!.menuConfig[0].buttons.length).toBe(2);
+    expect(host.emitted!.welcomeText).toBe('新问候');
     expect(host.designer.$validationError()).toBeNull();
     expect(host.designer.$isDirty()).toBeFalse();
   });
@@ -220,11 +225,11 @@ describe('MenuDesignerComponent', () => {
     host.designer.tree.$rootMenu.set(deep);
     fixture.detectChanges();
 
-    host.emittedMenu = null;
+    host.emitted = null;
     host.designer.save();
     fixture.detectChanges();
 
-    expect(host.emittedMenu).toBeNull();
+    expect(host.emitted).toBeNull();
     expect(host.designer.$validationError()).toMatch(/深度/);
   });
 
@@ -289,15 +294,15 @@ describe('MenuDesignerComponent', () => {
   });
 
   // 10
-  it('10. 4 个子组件全部渲染（selector 存在于 DOM）', () => {
+  it('10. 3 个子组件全部渲染（三栏：palette / preview / property；MenuCanvas 已移除）', () => {
     host.initialMenu = [];
     fixture.detectChanges();
 
     const root = fixture.debugElement;
     expect(root.query(By.css('app-component-palette'))).toBeTruthy();
-    expect(root.query(By.css('app-menu-canvas'))).toBeTruthy();
-    expect(root.query(By.css('app-property-panel'))).toBeTruthy();
     expect(root.query(By.css('app-telegram-preview'))).toBeTruthy();
+    expect(root.query(By.css('app-property-panel'))).toBeTruthy();
+    expect(root.query(By.css('app-menu-canvas'))).toBeNull();
   });
 
   // 11
@@ -350,8 +355,47 @@ describe('MenuDesignerComponent', () => {
     fixture.detectChanges();
 
     const designerTree = host.designer.tree;
-    const canvasDe = fixture.debugElement.query(By.css('app-menu-canvas'));
-    const canvasInst = canvasDe.componentInstance as { tree: MenuTreeService };
-    expect(canvasInst.tree).toBe(designerTree);
+    const previewDe = fixture.debugElement.query(By.css('app-telegram-preview'));
+    const previewInst = previewDe.componentInstance as { tree: MenuTreeService };
+    expect(previewInst.tree).toBe(designerTree);
+  });
+
+  // 15
+  it('15. initialWelcomeText 透传到 tree.$welcomeText', () => {
+    host.initialMenu = [];
+    host.initialWelcomeText = '欢迎';
+    fixture.detectChanges();
+    expect(host.designer.tree.$welcomeText()).toBe('欢迎');
+  });
+
+  // 16
+  it('16. 修改 welcomeText 后 $isDirty 变 true', () => {
+    host.initialMenu = [];
+    host.initialWelcomeText = '初始';
+    fixture.detectChanges();
+    expect(host.designer.$isDirty()).toBeFalse();
+
+    host.designer.tree.setWelcomeText('新');
+    fixture.detectChanges();
+    expect(host.designer.$isDirty()).toBeTrue();
+  });
+
+  // 17
+  it('17. reset 同时恢复菜单与 welcomeText', () => {
+    host.initialMenu = [row('r1', [btn('b1', 'A')])];
+    host.initialWelcomeText = '原';
+    fixture.detectChanges();
+
+    host.designer.tree.addRow();
+    host.designer.tree.setWelcomeText('脏');
+    fixture.detectChanges();
+    expect(host.designer.$isDirty()).toBeTrue();
+
+    host.designer.reset();
+    fixture.detectChanges();
+
+    expect(host.designer.tree.$rootMenu().length).toBe(1);
+    expect(host.designer.tree.$welcomeText()).toBe('原');
+    expect(host.designer.$isDirty()).toBeFalse();
   });
 });
