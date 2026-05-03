@@ -1,9 +1,17 @@
-<div class="palette-container" cdkDropListGroup>
+<div class="palette-container">
   <div class="palette-header">
     <span nz-icon nzType="appstore" nzTheme="outline"></span>
     <span>组件库</span>
   </div>
-  <div class="palette-list" role="list">
+  <div
+    class="palette-list"
+    role="list"
+    cdkDropList
+    id="palette-source"
+    [cdkDropListData]="paletteItems"
+    [cdkDropListSortingDisabled]="true"
+    cdkDropListConnectedTo="[]"
+  >
     <div
       *ngFor="let item of paletteItems; trackBy: trackByAction"
       class="palette-card"
@@ -17,6 +25,7 @@
       [nzTooltipTitle]="item.description"
       nzTooltipPlacement="right"
     >
+      <ng-container *cdkDragPlaceholder></ng-container>
       <span nz-icon [nzType]="item.icon" nzTheme="outline" class="palette-icon" aria-hidden="true"></span>
       <div class="palette-text">
         <div class="palette-title">{{ item.title }}</div>
