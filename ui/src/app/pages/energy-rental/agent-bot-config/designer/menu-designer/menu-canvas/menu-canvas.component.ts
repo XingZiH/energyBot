@@ -60,6 +60,9 @@ export class MenuCanvasComponent {
   readonly maxRows = MAX_ROWS_PER_MENU;
   readonly maxButtonsPerRow = MAX_BUTTONS_PER_ROW;
 
+  /** 新行占位 dropList 的空数据（显式类型避免模板推断成 never[]）。 */
+  readonly emptyButtonList: MenuButton[] = [];
+
   readonly $canAddRow = computed(() => this.$currentMenu().length < this.maxRows);
 
   readonly actionIconMap = ACTION_ICON_MAP;
@@ -115,7 +118,7 @@ export class MenuCanvasComponent {
    * - palette 来源：创建新按钮（带行内上限校验）。
    * - 同画布来源：排序/跨行移动暂未实现（TODO：后续任务）。
    */
-  onDropToRow(event: CdkDragDrop<unknown>, rowIdx: number): void {
+  onDropToRow(event: CdkDragDrop<MenuButton[]>, rowIdx: number): void {
     const paletteItem = this.extractPaletteItem(event);
     if (!paletteItem) {
       // TODO 任务 17+：同画布内 move/reorder
@@ -131,7 +134,7 @@ export class MenuCanvasComponent {
   }
 
   /** 拖到"新行"落点。超行数上限拒绝；否则先 addRow 再 addButton 到新末行。 */
-  onDropToNewRow(event: CdkDragDrop<unknown>): void {
+  onDropToNewRow(event: CdkDragDrop<MenuButton[]>): void {
     const paletteItem = this.extractPaletteItem(event);
     if (!paletteItem) return;
     if (!this.$canAddRow()) return;
@@ -152,7 +155,7 @@ export class MenuCanvasComponent {
    * 注意：Angular CDK 在同一 dropListGroup 里不同 list 间拖拽时 previousContainer
    *       才不等于 container。
    */
-  private extractPaletteItem(event: CdkDragDrop<unknown>): PaletteItem | null {
+  private extractPaletteItem(event: CdkDragDrop<MenuButton[]>): PaletteItem | null {
     if (event.previousContainer === event.container) return null;
     const data = event.item?.data as PaletteItem | null | undefined;
     if (!data || typeof data !== 'object') return null;

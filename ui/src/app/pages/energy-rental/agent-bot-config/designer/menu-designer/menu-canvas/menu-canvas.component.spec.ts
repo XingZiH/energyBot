@@ -37,7 +37,7 @@ function makeDropEvent(opts: {
   paletteItem?: PaletteItem;
   previousIndex?: number;
   currentIndex?: number;
-}): CdkDragDrop<unknown> {
+}): CdkDragDrop<MenuButton[]> {
   const { fromPalette, paletteItem, previousIndex = 0, currentIndex = 0 } = opts;
 
   // previousContainer !== container ⇒ 跨 list；反之同 list
@@ -58,7 +58,7 @@ function makeDropEvent(opts: {
     distance: { x: 0, y: 0 },
     dropPoint: { x: 0, y: 0 },
     event: new MouseEvent('mouseup'),
-  } as unknown as CdkDragDrop<unknown>;
+  } as unknown as CdkDragDrop<MenuButton[]>;
 }
 
 function palItem(action: ButtonAction, title = '测试'): PaletteItem {

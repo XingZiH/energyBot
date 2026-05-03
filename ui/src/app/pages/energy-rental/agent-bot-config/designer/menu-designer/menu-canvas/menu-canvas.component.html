@@ -14,7 +14,7 @@
         class="canvas-empty"
         [nzNotFoundContent]="emptyTpl"
         cdkDropList
-        [cdkDropListData]="null"
+        [cdkDropListData]="emptyButtonList"
         [id]="newRowListId"
         (cdkDropListDropped)="onDropToNewRow($event)"
       ></nz-empty>
@@ -91,7 +91,7 @@
           [class.is-disabled]="!$canAddRow()"
           cdkDropList
           [id]="newRowListId"
-          [cdkDropListData]="null"
+          [cdkDropListData]="emptyButtonList"
           (cdkDropListDropped)="onDropToNewRow($event)"
         >
           <button
