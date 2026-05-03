@@ -52,8 +52,9 @@ testem.log
 .DS_Store
 Thumbs.db
 
-scripts
+scripts/*
 !/ui/scripts/
+!/scripts/deploy.sh
 
 # 视觉伴侣原型（brainstorming skill）
 .superpowers/
