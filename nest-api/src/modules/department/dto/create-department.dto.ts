@@ -1,4 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateDepartmentDto {
   @ApiProperty({
@@ -6,11 +14,23 @@ export class CreateDepartmentDto {
     required: true,
     example: '超级管理员',
   })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
   departmentName: string;
+
   @ApiProperty({ description: '父级id，第一级为0', example: '0' })
-  fatherId: number;
+  @IsOptional()
+  @IsInt()
+  fatherId?: number;
+
   @ApiProperty({ description: '排序', example: '0' })
-  orderNum: number;
+  @IsOptional()
+  @IsInt()
+  orderNum?: number;
+
   @ApiProperty({ description: '状态(是否启用)', example: 'true' })
-  state: boolean;
+  @IsOptional()
+  @IsBoolean()
+  state?: boolean;
 }
