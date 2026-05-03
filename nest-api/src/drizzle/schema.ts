@@ -144,7 +144,17 @@ export const agentBotConfigsTable = pgTable('agent_bot_configs', {
   messageConfig: text('message_config'),
   menuConfig: text('menu_config'),
   remark: text(),
-  ...timestamps,
+  createdAt: timestamp('created_at')
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+  deletedAt: timestamp('deleted_at'),
+  // updatedAt 必须 timestamp(3)（毫秒精度），与 JavaScript Date 对齐。
+  // 否则 PG 存微秒 (.493975)，JS 读出只有毫秒 (.493)，回传时
+  // `WHERE updated_at = expected` 永远无法匹配 → 乐观锁形同失效，
+  // 前端必然报 "配置已被他人修改"。
+  // 对应迁移：sql/20260503-updated-at-precision.sql
+  updatedAt: timestamp('updated_at', { precision: 3 }).defaultNow().notNull(),
 });
 
 export const botRuntimeStatusTable = pgTable('bot_runtime_status', {
