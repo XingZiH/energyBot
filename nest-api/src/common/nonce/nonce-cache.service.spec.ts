@@ -4,7 +4,8 @@ describe('NonceCacheService', () => {
   let svc: NonceCacheService;
 
   beforeEach(() => {
-    svc = new NonceCacheService(5); // 小容量便于测 LRU
+    svc = new NonceCacheService();
+    svc.setMaxEntriesForTesting(5); // 小容量便于测 LRU
   });
 
   it('首次存储返回 true', () => {

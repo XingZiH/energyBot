@@ -12,10 +12,11 @@ import { Injectable } from '@nestjs/common';
 @Injectable()
 export class NonceCacheService {
   private readonly cache = new Map<string, number>();
-  private readonly maxEntries: number;
+  private readonly maxEntries = 100_000;
 
-  constructor(maxEntries = 100_000) {
-    this.maxEntries = maxEntries;
+  /** 单元测试用：覆盖默认容量。生产走默认值，不走 DI 注入整数。 */
+  setMaxEntriesForTesting(n: number): void {
+    (this as unknown as { maxEntries: number }).maxEntries = n;
   }
 
   /**

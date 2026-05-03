@@ -93,7 +93,7 @@ describe('LicenseService', () => {
         return undefined;
       }),
     };
-    const nonce = Object.assign(new NonceCacheService(100), opts?.nonce ?? {});
+    const nonce = Object.assign(new NonceCacheService(), opts?.nonce ?? {});
     const svc = new LicenseService(conn, config, nonce as any);
     return { svc, conn, config, nonce };
   }
