@@ -39,7 +39,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       SECRET: ${JWT_SECRET}
       NODE_ENV: production
-      PORT: 3000
+      PORT: 3001
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,7 +73,7 @@ services:
       CATFEE_NILE_API_KEY: ${CATFEE_NILE_API_KEY:-}
       CATFEE_NILE_API_SECRET: ${CATFEE_NILE_API_SECRET:-}
       # 内部服务发现（docker DNS）
-      NEST_API_URL: http://nest-api:3000
+      NEST_API_URL: http://nest-api:3001
     depends_on:
       postgres:
         condition: service_healthy
