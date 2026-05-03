@@ -369,3 +369,36 @@ export const sysUserRoleTable = pgTable('sys_user_role', {
   userId: integer('user_id').notNull(), // 用户 ID
   ...timestamps,
 });
+
+// ============================================================================
+// 子系统 A：License 颁发与客户管理
+// ----------------------------------------------------------------------------
+// 用于 Bot-as-a-Service 自托管模式：内部销售在后台创建客户后，系统生成
+// license key + secret，客户用一键脚本去自己的 VPS 拉起 energybot 服务，
+// 服务端据此追踪每个客户的 license 状态（是否吊销、是否停用客户）。
+// ============================================================================
+
+// 客户表
+export const customersTable = pgTable('customers', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  name: varchar({ length: 120 }).notNull(), // 客户名称（必填，2-120 字符）
+  contact: varchar({ length: 255 }), // 联系方式：Telegram / 邮箱 / 电话等自由文本
+  remark: text(), // 备注（合同号、销售负责人等）
+  status: varchar({ length: 32 }).notNull().default('active'), // active | suspended
+  createdBy: integer('created_by').notNull(), // 创建操作员 user.id
+  ...timestamps,
+});
+
+// License 表（一个客户可有多个历史 license，只有 revokedAt 为空的才生效）
+export const licensesTable = pgTable('licenses', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  customerId: integer('customer_id').notNull(), // 外键→customers.id
+  licenseKey: varchar('license_key', { length: 64 }).notNull().unique(), // ebt_<base58> 明文
+  secretCipher: varchar('secret_cipher', { length: 200 }).notNull(), // AES-256-GCM(iv||ct||tag) 的 base64
+  issuedAt: timestamp('issued_at').defaultNow().notNull(), // 发放时刻
+  revokedAt: timestamp('revoked_at'), // 吊销时刻；NULL=有效
+  revokedReason: varchar('revoked_reason', { length: 255 }), // 吊销原因
+  issuedBy: integer('issued_by').notNull(), // 发放操作员 user.id
+  lastSeenAt: timestamp('last_seen_at'), // 客户端最近一次 precheck 成功时刻
+  ...timestamps,
+});

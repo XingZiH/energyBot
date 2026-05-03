@@ -1,4 +1,5 @@
 export enum ConfigEnum {
   SECRET = 'SECRET',
   AUTH_CODE = 'AUTHCODE',
+  LICENSE_SECRET_ENC_KEY = 'LICENSE_SECRET_ENC_KEY',
 }
