@@ -127,6 +127,7 @@
     "default:system:role-manager": "Quản lý vai trò",
     "default:system:menu": "Quản lý menu",
     "default:system:dept": "Quản lý phòng ban",
+    "default:system:customers": "Khách hàng & License",
     "default:energy-rental": "机器人控制",
     "default:energy-rental:dashboard": "控制台",
     "default:energy-rental:bot-config": "机器人配置",

@@ -127,6 +127,7 @@
     "default:system:role-manager": "Role Manager",
     "default:system:menu": "Menu Manager",
     "default:system:dept": "Department",
+    "default:system:customers": "Customers & Licenses",
     "default:energy-rental": "机器人控制",
     "default:energy-rental:dashboard": "控制台",
     "default:energy-rental:bot-config": "机器人配置",

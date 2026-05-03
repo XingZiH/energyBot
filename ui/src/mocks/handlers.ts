@@ -4,6 +4,7 @@ import { department } from './business/department';
 import { role } from './business/role';
 import { menu } from './business/menu';
 import { permission } from './business/permission';
+import { customer } from './business/customer';
 
 export const handlers = [
   login,
@@ -13,4 +14,5 @@ export const handlers = [
   ...role,
   ...menu,
   ...permission,
+  ...customer,
 ];

@@ -34,5 +34,11 @@ export const ActionCode = {
   EnergyRentalPackageEdit: 'default:energy-rental:packages:edit',
   EnergyRentalPackageDel: 'default:energy-rental:packages:del',
   EnergyRentalOrderEdit: 'default:energy-rental:orders:edit',
-  EnergyRentalReturnTaskRetry: 'default:energy-rental:return-tasks:retry'
+  EnergyRentalReturnTaskRetry: 'default:energy-rental:return-tasks:retry',
+
+  /*客户与 License 管理*/
+  CustomerAdd: 'default:system:customers:add', // 新增客户并签发初始 license
+  CustomerEdit: 'default:system:customers:edit', // 编辑客户资料
+  CustomerRevoke: 'default:system:customers:revoke', // 吊销 / 重新颁发 license
+  CustomerReveal: 'default:system:customers:reveal' // 查看 license 安装命令（含明文 secret）
 };

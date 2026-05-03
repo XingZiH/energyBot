@@ -1618,6 +1618,76 @@ let menus: Menu[] = [
     status: true,
     newLinkFlag: false,
     visible: true
+  },
+  {
+    id: 132,
+    fatherId: 6,
+    menuName: '客户与License',
+    menuType: 'C',
+    alIcon: '',
+    icon: 'safety-certificate',
+    path: '/default/system/customers',
+    code: 'default:system:customers',
+    orderNum: 5,
+    status: true,
+    newLinkFlag: false,
+    visible: true
+  },
+  {
+    id: 133,
+    fatherId: 132,
+    menuName: '新增客户',
+    menuType: 'F',
+    alIcon: '',
+    icon: '',
+    path: '',
+    code: 'default:system:customers:add',
+    orderNum: 1,
+    status: true,
+    newLinkFlag: false,
+    visible: false
+  },
+  {
+    id: 134,
+    fatherId: 132,
+    menuName: '编辑客户',
+    menuType: 'F',
+    alIcon: '',
+    icon: '',
+    path: '',
+    code: 'default:system:customers:edit',
+    orderNum: 2,
+    status: true,
+    newLinkFlag: false,
+    visible: false
+  },
+  {
+    id: 135,
+    fatherId: 132,
+    menuName: '吊销/重发License',
+    menuType: 'F',
+    alIcon: '',
+    icon: '',
+    path: '',
+    code: 'default:system:customers:revoke',
+    orderNum: 3,
+    status: true,
+    newLinkFlag: false,
+    visible: false
+  },
+  {
+    id: 136,
+    fatherId: 132,
+    menuName: '查看安装命令',
+    menuType: 'F',
+    alIcon: '',
+    icon: '',
+    path: '',
+    code: 'default:system:customers:reveal',
+    orderNum: 4,
+    status: true,
+    newLinkFlag: false,
+    visible: false
   }
 ];
 

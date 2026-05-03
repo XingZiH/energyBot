@@ -168,6 +168,11 @@
           "options": {
             "tsConfig": "tsconfig.spec.json",
             "inlineStyleLanguage": "less",
+            "stylePreprocessorOptions": {
+              "includePaths": [
+                "src/styles/themes"
+              ]
+            },
             "assets": [
               {
                 "glob": "**/*",
