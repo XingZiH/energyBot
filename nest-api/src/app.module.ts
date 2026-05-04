@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -11,6 +12,7 @@ import { ConfigModule } from './common/config/config.module';
 @Module({
   imports: [
     ConfigModule,
+    ScheduleModule.forRoot(),
     // 临时数据可以存放，不能存放敏感数据
     CacheModule.register({ isGlobal: true }),
     DrizzleModule,
