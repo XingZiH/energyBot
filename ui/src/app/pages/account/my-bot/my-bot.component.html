@@ -1,0 +1,185 @@
+<app-page-header [pageHeaderInfo]="pageHeaderInfo"></app-page-header>
+
+<nz-card nzBordered="false" [nzLoading]="loading()">
+  @if (errorMessage() && agents().length === 0) {
+    <nz-alert
+      nzType="info"
+      nzShowIcon
+      nzMessage="当前账号暂无 Bot"
+      [nzDescription]="errorMessage()!"
+    ></nz-alert>
+  } @else if (agents().length === 0) {
+    <nz-empty nzNotFoundImage="simple" nzNotFoundContent="暂未部署 agent">
+      <div nz-empty-footer>
+        前往「我的 License」查看安装命令并在主机上执行。
+      </div>
+    </nz-empty>
+  } @else if (agents().length === 1) {
+    @let a = agents()[0];
+    <div class="host-header">
+      <span class="host-name">{{ a.hostName || '未知主机' }}</span>
+      <nz-tag [nzColor]="statusColor(a.status)" class="ml-8">
+        {{ statusLabel(a.status) }}
+      </nz-tag>
+    </div>
+
+    <nz-divider></nz-divider>
+
+    <nz-descriptions nzBordered [nzColumn]="2" nzSize="middle">
+      <nz-descriptions-item nzTitle="License ID">{{ a.licenseId }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="公网 IP">{{ a.publicIp || '—' }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="Agent 版本">{{ a.agentVersion || '—' }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="内核">{{ a.kernel || '—' }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="启动时间">
+        @if (a.bootTime) {
+          {{ a.bootTime | date: 'yyyy-MM-dd HH:mm:ss' }}
+        } @else {
+          —
+        }
+      </nz-descriptions-item>
+      <nz-descriptions-item nzTitle="运行时长">{{ formatUptime(a.uptimeSeconds) }}</nz-descriptions-item>
+      <nz-descriptions-item nzTitle="首次上线">
+        @if (a.connectedAt) {
+          {{ a.connectedAt | date: 'yyyy-MM-dd HH:mm:ss' }}
+        } @else {
+          —
+        }
+      </nz-descriptions-item>
+      <nz-descriptions-item nzTitle="最近心跳">
+        @if (a.lastHeartbeatAt) {
+          {{ a.lastHeartbeatAt | date: 'yyyy-MM-dd HH:mm:ss' }}
+        } @else {
+          <nz-tag nzColor="default">从未上线</nz-tag>
+        }
+      </nz-descriptions-item>
+      <nz-descriptions-item nzTitle="负载 (1m)">{{ a.loadavg1 || '—' }}</nz-descriptions-item>
+    </nz-descriptions>
+
+    <nz-divider nzOrientation="left" nzText="运行指标"></nz-divider>
+
+    <div class="metrics-row">
+      <div class="metric-box">
+        <div class="metric-label">CPU 使用率</div>
+        @if (a.cpuPercent != null) {
+          <nz-progress
+            [nzPercent]="cpuPercentNumber(a.cpuPercent)"
+            nzType="dashboard"
+            [nzWidth]="120"
+          ></nz-progress>
+          <div class="metric-sub">{{ a.cpuPercent }}%</div>
+        } @else {
+          <div class="metric-empty">—</div>
+        }
+      </div>
+
+      <div class="metric-box">
+        <div class="metric-label">内存使用率</div>
+        @if (a.memUsedBytes != null && a.memTotalBytes != null) {
+          <nz-progress
+            [nzPercent]="memPercent(a.memUsedBytes, a.memTotalBytes)"
+            nzType="dashboard"
+            [nzWidth]="120"
+          ></nz-progress>
+          <div class="metric-sub">
+            {{ bytesToGb(a.memUsedBytes) }} / {{ bytesToGb(a.memTotalBytes) }} GB
+          </div>
+        } @else {
+          <div class="metric-empty">—</div>
+        }
+      </div>
+    </div>
+  } @else {
+    <p class="table-hint">
+      共 {{ agents().length }} 台主机。点击左侧 <nz-icon nzType="plus-square"></nz-icon> 展开查看详情。
+    </p>
+    <nz-table
+      #agentTable
+      [nzData]="agents()"
+      [nzShowPagination]="false"
+      nzSize="middle"
+    >
+      <thead>
+        <tr>
+          <th nzWidth="50px"></th>
+          <th>主机名</th>
+          <th>状态</th>
+          <th>公网 IP</th>
+          <th>最近心跳</th>
+          <th>CPU</th>
+          <th>内存</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (a of agentTable.data; track a.id) {
+          <tr>
+            <td
+              [nzExpand]="isExpanded(a.id)"
+              (nzExpandChange)="toggleExpand(a.id, $event)"
+            ></td>
+            <td>{{ a.hostName || '—' }}</td>
+            <td>
+              <nz-tag [nzColor]="statusColor(a.status)">
+                {{ statusLabel(a.status) }}
+              </nz-tag>
+            </td>
+            <td>{{ a.publicIp || '—' }}</td>
+            <td>
+              @if (a.lastHeartbeatAt) {
+                {{ a.lastHeartbeatAt | date: 'yyyy-MM-dd HH:mm:ss' }}
+              } @else {
+                —
+              }
+            </td>
+            <td>
+              @if (a.cpuPercent != null) {
+                {{ a.cpuPercent }}%
+              } @else {
+                —
+              }
+            </td>
+            <td>
+              @if (a.memUsedBytes != null && a.memTotalBytes != null) {
+                {{ memPercent(a.memUsedBytes, a.memTotalBytes) }}%
+                <span class="metric-label ml-8">
+                  ({{ bytesToGb(a.memUsedBytes) }} / {{ bytesToGb(a.memTotalBytes) }} GB)
+                </span>
+              } @else {
+                —
+              }
+            </td>
+          </tr>
+          <tr [nzExpand]="isExpanded(a.id)">
+            <nz-descriptions nzBordered [nzColumn]="2" nzSize="small">
+              <nz-descriptions-item nzTitle="License ID">{{ a.licenseId }}</nz-descriptions-item>
+              <nz-descriptions-item nzTitle="Agent 版本">{{ a.agentVersion || '—' }}</nz-descriptions-item>
+              <nz-descriptions-item nzTitle="内核">{{ a.kernel || '—' }}</nz-descriptions-item>
+              <nz-descriptions-item nzTitle="启动时间">
+                @if (a.bootTime) {
+                  {{ a.bootTime | date: 'yyyy-MM-dd HH:mm:ss' }}
+                } @else {
+                  —
+                }
+              </nz-descriptions-item>
+              <nz-descriptions-item nzTitle="运行时长">{{ formatUptime(a.uptimeSeconds) }}</nz-descriptions-item>
+              <nz-descriptions-item nzTitle="首次上线">
+                @if (a.connectedAt) {
+                  {{ a.connectedAt | date: 'yyyy-MM-dd HH:mm:ss' }}
+                } @else {
+                  —
+                }
+              </nz-descriptions-item>
+              <nz-descriptions-item nzTitle="负载 (1m)">{{ a.loadavg1 || '—' }}</nz-descriptions-item>
+              <nz-descriptions-item nzTitle="内存 (bytes)">
+                @if (a.memUsedBytes != null && a.memTotalBytes != null) {
+                  {{ a.memUsedBytes | number }} / {{ a.memTotalBytes | number }}
+                } @else {
+                  —
+                }
+              </nz-descriptions-item>
+            </nz-descriptions>
+          </tr>
+        }
+      </tbody>
+    </nz-table>
+  }
+</nz-card>

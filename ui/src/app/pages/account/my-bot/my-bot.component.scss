@@ -1,0 +1,56 @@
+:host {
+  display: block;
+}
+
+.host-header {
+  display: flex;
+  align-items: center;
+}
+
+.host-name {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.metric-label {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+.metric-sub {
+  margin-top: 8px;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 13px;
+}
+
+.metric-empty {
+  color: rgba(0, 0, 0, 0.25);
+  font-size: 20px;
+  line-height: 120px;
+  text-align: center;
+}
+
+.metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+.metric-box {
+  min-width: 160px;
+  text-align: center;
+}
+
+.table-hint {
+  color: rgba(0, 0, 0, 0.65);
+  margin-bottom: 12px;
+}
+
+.ml-8 {
+  margin-left: 8px;
+}
+
+.mt-16 {
+  margin-top: 16px;
+}

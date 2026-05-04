@@ -13,4 +13,11 @@ export default [
     loadComponent: () =>
       import('./my-license/my-license.component').then(m => m.MyLicenseComponent),
   },
+  {
+    path: 'my-bot',
+    title: 'menu.default:account:my-bot',
+    data: { key: 'my-bot' },
+    loadComponent: () =>
+      import('./my-bot/my-bot.component').then(m => m.MyBotComponent),
+  },
 ] satisfies Route[];
