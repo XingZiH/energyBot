@@ -1,5 +1,8 @@
 # docker-compose.prod.yml
-# 生产编排：ui (nginx) + nest-api + go-bot + postgres
+# 生产编排：ui (nginx) + nest-api + postgres （+ agent 反向通道走 nest-api /agent）
+#
+# B1 阶段服务清单：postgres + nest-api + ui。
+# go-bot 服务在 B3 上线前保持注释，见 L67 注释块。
 #
 # 用法:
 #   cp .env.example .env  # 然后填值
@@ -9,12 +12,16 @@
 #   - 双网络: backend（内部通信）+ frontend（ui 对外）
 #   - ui 与 nest-api 都绑 127.0.0.1 回环接口，由宿主机 cardshop-app nginx 反代
 #     对外通过 https://www.feiyijt.com/ 暴露；老地址 http://47.82.151.0:18080 不再可用
-#   - go-bot / postgres 不暴露到宿主机
+#   - postgres 不暴露到宿主机
 #   - UI_PORT / API_PORT 可在 .env 覆盖；默认 18080 / 13001 与 cardshop nginx 配置一致
+#   - postgres 卷走 external: true 复用 A 版已有 maer-energy-postgres-data
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # 固定 postgres:17-bookworm 与生产 maer-energy-postgres-data 卷版本一致
+    # 生产卷由 docker-compose.yml (A 版) 初次创建时即为 v17；切不可改为更低版本
+    image: postgres:17-bookworm
+    container_name: maer-energy-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -32,6 +39,7 @@ services:
 
   nest-api:
     image: energybot-api:${IMAGE_TAG:-latest}
+    container_name: maer-energy-api
     build:
       context: ./nest-api
       dockerfile: Dockerfile
@@ -60,40 +68,48 @@ services:
     # 暂不配 healthcheck；ui 反代时若 nest-api 未就绪会返回 502，
     # 待后续新增 /health 后再补。参考: src/enum/config.enum.ts
 
-  go-bot:
-    image: energybot-bot:${IMAGE_TAG:-latest}
-    build:
-      context: ./go-bot
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    environment:
-      # 必填
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TRON_API_BASE_URL: ${TRON_API_BASE_URL}
-      TRON_API_KEY: ${TRON_API_KEY}
-      PLATFORM_RECEIVE_ADDRESS: ${PLATFORM_RECEIVE_ADDRESS}
-      # 能量供应商分支
-      ENERGY_PROVIDER: ${ENERGY_PROVIDER:-justlend}
-      JUSTLEND_CONTRACT_ADDRESS: ${JUSTLEND_CONTRACT_ADDRESS:-}
-      JUSTLEND_PAYER_PRIVATE_KEY: ${JUSTLEND_PAYER_PRIVATE_KEY:-}
-      CATFEE_ENVIRONMENT: ${CATFEE_ENVIRONMENT:-nile}
-      CATFEE_PROD_API_KEY: ${CATFEE_PROD_API_KEY:-}
-      CATFEE_PROD_API_SECRET: ${CATFEE_PROD_API_SECRET:-}
-      CATFEE_NILE_API_KEY: ${CATFEE_NILE_API_KEY:-}
-      CATFEE_NILE_API_SECRET: ${CATFEE_NILE_API_SECRET:-}
-      # 内部服务发现（docker DNS）
-      NEST_API_URL: http://nest-api:3001
-    depends_on:
-      postgres:
-        condition: service_healthy
-      nest-api:
-        condition: service_started
-    networks:
-      - backend
+  # ===== go-bot（Telegram 业务机器人）=====
+  # ⚠ B1 上线阶段暂不启动 go-bot：
+  #   - B1 只需 api + ui + postgres + agent 反向通道
+  #   - 老 A 版 bot 容器已废弃（硬编码配置 + 连已废弃的 ng-antd-admin-db）
+  #   - go-bot 的 env 与平台配置迁移属 B3 范围，当前不回归上线
+  # 当 B3 完成 go-bot 配置来源打通后，取消下面注释即可复用新 release。
+  # go-bot:
+  #   image: energybot-bot:${IMAGE_TAG:-latest}
+  #   container_name: maer-energy-bot
+  #   build:
+  #     context: ./go-bot
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #   environment:
+  #     # 必填
+  #     DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+  #     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+  #     TRON_API_BASE_URL: ${TRON_API_BASE_URL}
+  #     TRON_API_KEY: ${TRON_API_KEY}
+  #     PLATFORM_RECEIVE_ADDRESS: ${PLATFORM_RECEIVE_ADDRESS}
+  #     # 能量供应商分支
+  #     ENERGY_PROVIDER: ${ENERGY_PROVIDER:-justlend}
+  #     JUSTLEND_CONTRACT_ADDRESS: ${JUSTLEND_CONTRACT_ADDRESS:-}
+  #     JUSTLEND_PAYER_PRIVATE_KEY: ${JUSTLEND_PAYER_PRIVATE_KEY:-}
+  #     CATFEE_ENVIRONMENT: ${CATFEE_ENVIRONMENT:-nile}
+  #     CATFEE_PROD_API_KEY: ${CATFEE_PROD_API_KEY:-}
+  #     CATFEE_PROD_API_SECRET: ${CATFEE_PROD_API_SECRET:-}
+  #     CATFEE_NILE_API_KEY: ${CATFEE_NILE_API_KEY:-}
+  #     CATFEE_NILE_API_SECRET: ${CATFEE_NILE_API_SECRET:-}
+  #     # 内部服务发现（docker DNS）
+  #     NEST_API_URL: http://nest-api:3001
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     nest-api:
+  #       condition: service_started
+  #   networks:
+  #     - backend
 
   ui:
     image: energybot-ui:${IMAGE_TAG:-latest}
+    container_name: maer-energy-ui
     build:
       context: ./ui
       dockerfile: Dockerfile
@@ -107,7 +123,14 @@ services:
       - frontend
 
 volumes:
+  # 复用 A 版已有卷 maer-energy-postgres-data（external: true 防止 Compose 新建空卷）
+  # 首次部署 B1 前，必须先确认该卷存在：
+  #   docker volume inspect maer-energy-postgres-data
+  # 如不存在（全新机器），先创建：
+  #   docker volume create maer-energy-postgres-data
   postgres-data:
+    name: maer-energy-postgres-data
+    external: true
 
 networks:
   backend:

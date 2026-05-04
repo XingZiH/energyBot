@@ -7,6 +7,14 @@
 - 分发：nginx 加 `/agent`（WSS upgrade）、`/bin/`、`/systemd/` 三条 location
 - install.sh：从"只验 license"升级为"验 license + 装 agent"
 
+> ⚠ **本次上线同时切换整个部署架构**（A 版→B1）。背景见 [b1-production-blockers.md](./b1-production-blockers.md)：
+> - 生产切到 `docker-compose.prod.yml`（A 版是 `docker-compose.yml`，将被清理）
+> - 生产 db 切到 `energybot`（A 版是 `ng-antd-admin-db`，将保留 30 天作备份后 drop）
+> - 老 `maer-energy-bot` 容器**停用并删除**（硬编码配置，不可移植；Telegram 业务 B3 复活）
+> - 老 `/opt/maer-energy/shared/*.env` 归档到 `backups/legacy-shared-env-*`
+> - **Telegram 机器人服务临时中断**到 B3 go-bot 上线（已知代价，已确认）
+> - `scripts/deploy.sh` 已加 `--skip-stop-legacy` 以外的默认清理行为，详见脚本头注释
+
 **前置**：
 - 子系统 A 已在生产跑通（`https://www.feiyijt.com/` 已是正式入口，Origin Cert、`LICENSE_SECRET_ENC_KEY`、cardshop-app nginx、客户管理菜单全部就绪）
 - 本次 HEAD `94194799` 及其前 19 个 commit 已全部合入 `main`，待生产 `scripts/deploy.sh` 克隆新 release 拉取
@@ -102,17 +110,39 @@ ls -lt /opt/maer-energy/releases/
 
 ### 2.3 执行 deploy.sh 部署 B1
 
-`scripts/deploy.sh`（168 行，仓库根目录）一键做完下面 7 步（参考源码行号以便核对）：
+**⚠ 首次上线 B1 前的一次性前置（后续升级不需要）**：
 
-| 步骤 | 对应源码 | 做什么 |
-|---|---|---|
-| Step 1 | L66-78 | `pg_dump` 备份当前 DB 到 `/opt/maer-energy/backups/designer-<ts>.sql`（首次部署跳过） |
-| Step 2 | L80-85 | `git clone --depth 1 --branch main` 到 `/opt/maer-energy/releases/<ts>/` |
-| Step 3 | L87-89 | 从 `/opt/maer-energy/.env`（shared env）复制到新 release 目录 |
-| Step 4 | L91-93 | `docker compose -f docker-compose.prod.yml build` |
-| Step 5 | L95-132 | 起 postgres → 等 healthy → 跑 `20260502-agent-bot-configs-unique.sql` → **跑 `20260504-agents-table.sql`（本次 B1 migration，L120-123）** → 可选 reset v1 |
-| Step 6 | L134-140 | `docker compose -f docker-compose.prod.yml up -d` 全量拉起 |
-| Step 7 | L142-155 | `ln -sfn <新 release> /opt/maer-energy/current`，保留最近 3 个 release、清掉更老的 |
+```sh
+# (a) 写 /opt/maer-energy/.env（A 版用 shared/*.env，B1 切到单文件）
+#     参考 .env.example，值可从 /opt/maer-energy/shared/{db,api,bot}.env 搬
+#     关键：POSTGRES_DB=energybot（不是老的 ng-antd-admin-db）
+#     具体值映射见 b1-production-blockers.md 的 P0-3
+
+# (b) 确认 postgres 卷存在（新 compose 用 external: true 复用）
+docker volume inspect maer-energy-postgres-data >/dev/null
+# 期望退出 0；失败说明卷名不对，停止部署
+
+# (c) 确认当前 postgres 运行的是 17.x（不是 16 或其他）
+#     新 compose 固定 postgres:17-bookworm，卷和镜像版本必须一致
+docker exec maer-energy-postgres psql -U admin -d postgres -tAc "SHOW server_version_num;" | head -1 | cut -c1-2
+# 期望输出 17
+```
+
+`scripts/deploy.sh`（约 240 行，仓库根目录）一键做完下面 11 步：
+
+| 步骤 | 做什么 |
+|---|---|
+| Step 1 | 前置检查：docker / .env / postgres 卷存在 / postgres 主版本匹配 |
+| Step 2 | **清理老 A 版资源**：停 `maer-energy-bot` 容器、`down` 老 `docker-compose.yml`、归档 `shared/*.env` 到 `backups/legacy-shared-env-*`（`--skip-stop-legacy` 跳过，不建议） |
+| Step 3 | `pg_dump` 当前 db（`.env` 里 `POSTGRES_DB`）到 `/opt/maer-energy/backups/<db>-<ts>.sql` |
+| Step 4 | `git clone --depth 1 --branch main` 到 `/opt/maer-energy/releases/<ts>/` |
+| Step 5 | 从 `/opt/maer-energy/.env` 复制到新 release 目录 |
+| Step 6 | `docker compose -p maer-energy -f docker-compose.prod.yml build` |
+| Step 7 | 起 postgres + 等 healthy（最多 60s） |
+| Step 8 | 幂等跑 SQL migration：`20260502-agent-bot-configs-unique.sql`、**`20260504-agents-table.sql`（B1）**、可选 `20260503-reset-designer-config.sql` |
+| Step 9 | `docker compose up -d` 全量拉起（B1 阶段 = postgres + nest-api + ui；go-bot 在 compose 中已注释） |
+| Step 10 | `ln -sfn <新 release> /opt/maer-energy/current`（`--no-push-symlink` 跳过） |
+| Step 11 | 清理旧 release，保留最近 3 个 |
 
 执行：
 
