@@ -1204,30 +1204,106 @@ git commit -m "feat(b1): AgentService DB 层
 
 此任务是 B1 的核心，拆四子任务。
 
+### 计划增订（2026-05-04 brainstorm 补充）
+
+实施前明确 6 个决策点，子代理必须严格遵守：
+
+**D1 — bootTime wire 格式：unix ms number**
+- Go agent 在 `agent.hello` params 里以 **number (毫秒)** 上报 `bootTime`
+- NestJS 端验证：`typeof === 'number'` 且 `now-30d < bootTime <= now+60_000`
+- 越界 → JSON-RPC error `-40001 bad_request`（下方 D5），close 1008
+
+**D2 — JSON-RPC id 策略：hello 与 heartbeat 都带 id 并回包**
+- 两个方法都由 agent 端分配 id，server 用 `jsonRpcResult(id, { ok: true })` 回包
+- 不采用 notification 模式；简化 agent 端实现（同一发送→等待→匹配循环）
+- `parseJsonRpc` 用计划 L1145 之决议 `if (msg.id != null)` 判回包（无 id 不回包作为防御）
+
+**D3 — HMAC 负载：WSS HTTP Upgrade Headers**
+- agent WebSocket Upgrade 请求 HTTP headers 带：`X-License-Key / X-Timestamp / X-Nonce / X-Agent-Version / X-Signature`
+- `handleConnection(ws, req: IncomingMessage)` 从 `req.headers` 取；`req.method = 'GET'` 的 Upgrade，`signCanonicalRequest` 签 `METHOD='CONNECT', PATH='/agent', BODY=''`（与 license precheck 对齐）
+- **不**采用 agent.hello params 带签名负载方案
+
+**D4 — ws close handler 位置：handleConnection 内绑定 + ws 身份比对**
+- `ws.on('close')` 在 `handleConnection` 中 `registry.register` 后立即绑定
+- **关键 guard**：handler fire 时必须对比 `ws === registry.get(licenseId)?.ws`；旧 ws（被 replaced）的 close 不动任何状态
+- 不使用 @nestjs/websockets 的 `handleDisconnect` lifecycle（replaced 场景语义错位）
+
+**D5 — PrecheckErrorCode → close code + JSON-RPC code 映射表**
+
+| PrecheckErrorCode | JSON-RPC err | WS Close | reason |
+|---|---|---|---|
+| `bad_request` | -40001 | 1008 | bad request |
+| `clock_skew` | -40001 | 1008 | clock skew |
+| `key_not_found` | -40003 | 4003 | license not found |
+| `license_revoked` | -40003 | 4003 | license revoked |
+| `customer_suspended` | -40003 | 4003 | customer suspended |
+| `signature_invalid` | -40001 | 1008 | signature invalid |
+| `nonce_replayed` | -40001 | 1008 | nonce replayed |
+
+用 `const PRECHECK_TO_WS: Record<PrecheckErrorCode, {rpc: AgentRpcErrorCode; close: 1008|4003; reason: string}>` 强制 TS exhaustiveness。
+
+**D6 — 错误处理策略：方法内 try+catch + 显式映射**
+- 不依赖 NestJS 全局 ExceptionFilter（WebSocket 路径 filter 行为不透明且会吞 close code）
+- `handleConnection` / `handleMessage` 内部 `try { ... } catch (e) { handleError(ws, e, id?) }`
+- `handleError` 职责：`if (id != null) ws.send(jsonRpcError(id, ...))` → `ws.close(code, reason)`
+
+**D7 — 心跳路径复查 license.isActive：每次心跳都调 findActiveByKey**
+- 不引入独立 LicenseRevocationCache（后续可优化）
+- 100 online bot 场景 ~3.3 QPS 无压力
+- 吊销后心跳复查 → `-40003 license_revoked` + close 4003
+
+**D8 — Gateway 级连接状态机**
+- `connected` → 刚 upgrade + 验签过（未收到 hello，DB 未 upsert）
+- `hello_received` → 已 upsertOnline，可接受 heartbeat
+- `closed` → ws.readyState !== OPEN
+- `agent.hello` 只能在 `connected` 时处理；重发 → `-40029 already_hello`
+- `agent.heartbeat` 只能在 `hello_received` 时处理；未 hello → `-40029 not_ready`
+- state 存 `ws['_agent']: { licenseId, customerId, state, licenseKey }`（挂载 ws 对象；Gateway 无 per-connection 实例）
+
+**D9 — 测试策略：纯 unit mock**
+- 不搭真实 WS server / 客户端
+- 全 mock：`LicenseService` / `AgentRegistry` / `AgentService` / hmac util / jsonrpc util（util 尽量真调，副作用无）
+- ws mock：`{ send: jest.fn(), close: jest.fn(), on: jest.fn(), readyState: 1 }`；`IncomingMessage` mock：`{ headers: {...}, socket: { remoteAddress: ... } }`
+
+**D10 — 单文件 agent.gateway.ts**
+- 不拆 HandshakeHandler / MessageDispatcher 子类
+- 预计 280 行（接近 300 行上限但可控），若超出再评估拆分
+
 ### 7a：handleConnection（握手）
-- [ ] 写 spec：模拟带 X-License-Key/X-Timestamp/X-Nonce/X-Signature/X-Agent-Version headers 的升级请求，断言 registry.register 被调、DB upsertOnline 被调、发 `agent.hello` result
-- [ ] 写 spec：签名错误应 close(4003) 且 service 不被调
-- [ ] 写 spec：license 吊销应 close(4003) + code 映射 -40001
-- [ ] 写 spec：同 bootTime 300ms 内第二次握手应 close(4013)
+- [ ] 写 spec：模拟带 X-License-Key/X-Timestamp/X-Nonce/X-Signature/X-Agent-Version headers 的升级请求，断言 registry.register 被调、ws.on('close') 被绑定（**不**立即 upsertOnline，等 agent.hello 才调）
+- [ ] 写 spec：签名错误（signature_invalid）应 close(1008) + jsonRpcError -40001（按 D5 映射）
+- [ ] 写 spec：license 吊销应 close(4003) + -40003（按 D5 映射）
+- [ ] 写 spec：缺少必需 header 应 close(1008) + -40001 bad_request
+- [ ] 写 spec：registry.register 返 replaced:true 场景（旧 ws 的清理由 registry.terminate 处理，新 ws 正常进入 state='connected'）
 - [ ] 实现 handleConnection
 - [ ] 验证通过
 
 ### 7b：handleMessage（dispatch）
-- [ ] 写 spec：收到 `agent.heartbeat` 应调 service.updateHeartbeat + registry.touchHeartbeat
-- [ ] 写 spec：未知 method 回 -32601
-- [ ] 写 spec：非法 JSON 回 -32700
+- [ ] 写 spec：`agent.hello` 成功（state: connected→hello_received），断言 upsertOnline 被调、ws.send jsonRpcResult(id,{ok:true})
+- [ ] 写 spec：`agent.hello` 在 state='hello_received' 重发，回 -40029 already_hello（不改状态、不重复 upsert）
+- [ ] 写 spec：`agent.hello` bootTime 非 number → -40001 bad_request；超范围（>now+1min 或 <now-30d）同上
+- [ ] 写 spec：`agent.heartbeat` 未 hello（state='connected'）→ -40029 not_ready
+- [ ] 写 spec：`agent.heartbeat` 正常 → updateHeartbeat 被调 + ws.send jsonRpcResult
+- [ ] 写 spec：`agent.heartbeat` 路径复查 findActiveByKey 返 null/revoked → -40003 + close 4003（D7）
+- [ ] 写 spec：未知 method 回 -40001 method_not_found（对齐 AgentRpcErrorCode 命名空间）
+- [ ] 写 spec：非法 JSON parse 失败 → -32700（JsonRpcErrorCode.ParseError），不 close（容忍瞬时）
 - [ ] 实现
 - [ ] 验证通过
 
-### 7c：handleDisconnect（清理）
-- [ ] 写 spec：close 事件触发 registry.unregister + 不立即 markOffline（等 scheduler）
-- [ ] 实现
+### 7c：ws.on('close') cleanup（合并进 handleConnection）
+- [ ] 写 spec：close 事件触发且 `ws === registry.get(licenseId)?.ws` 时调 registry.unregister + markOfflineByLicense
+- [ ] 写 spec：**身份比对 guard**：被 replaced 的旧 ws 触发 close 时（registry 里已换成新 ws），不调用任何状态清理函数（不打成 offline）
+- [ ] 实现：close handler 在 handleConnection 内定义闭包、`ws.on('close', closeHandler)`
 - [ ] 验证通过
+
+注：**不**用 @nestjs/websockets 的 handleDisconnect lifecycle（D4 决策）。
 
 ### 7d：吊销实时下线（心跳路径复查）
-- [ ] 写 spec：已连 agent 的 license 被吊销后，下一次 heartbeat 到达应触发 close(4003) + markOffline
-- [ ] 实现：在 handleHeartbeat 里每 30s 调一次 `licenseService.isActive(licenseId)`（需先加此方法，见规格 §5.5）
+- [ ] 见 7b 的 "agent.heartbeat 路径复查 findActiveByKey" 用例（已并入 7b）
+- [ ] 实现：在 `handleAgentHeartbeat` 开头调 `licenseService.findActiveByKey(licenseKey)`，返 null 或 `row.licenseRevokedAt != null` → 发 -40003 + close 4003
 - [ ] 验证通过
+
+**注**：`findActiveByKey` 已在任务 2 实现；不需额外 `licenseService.isActive(licenseId)` 封装（原计划 L1229 表述作废）。
 
 完整实现代码参考规格 `§5.4 agent.gateway.ts 伪代码`。Gateway 骨架：
 
