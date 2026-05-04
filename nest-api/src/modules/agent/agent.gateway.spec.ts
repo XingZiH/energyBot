@@ -333,7 +333,7 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
     expect(reply.error.code).toBe(AgentRpcErrorCode.BAD_REQUEST); // -40001
   });
 
-  it('hello bootTime 超范围（now-31d）→ -40001', async () => {
+  it('hello bootTime 超范围（now-11y）→ -40001', async () => {
     const { onMessage, ws, agents } = await handshakeAndGetMsgHandler();
 
     await onMessage(
@@ -341,7 +341,7 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
         agent_version: '1.0.0',
         host_name: 'h',
         os_info: 'Linux',
-        boot_time: Date.now() - 31 * 86_400_000,
+        boot_time: Date.now() - 11 * 365 * 86_400_000,
       }, 11),
     );
 

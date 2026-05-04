@@ -59,8 +59,17 @@ interface WsAgentSlot {
   state: AgentState;
 }
 
-/** bootTime 合法窗口：now - 30d ~ now + 60s。 */
-const BOOT_TIME_MIN_OFFSET_MS = 30 * 86_400_000;
+/**
+ * bootTime 合法窗口：now - 10y ~ now + 60s。
+ *
+ * 下限选 10 年而非 30d 的原因：bootTime 字段的真实用途是**识别是否重启过**
+ * （gateway 侧靠 bootTime 相等判定抗抖动；DB 侧靠 bootTime 变化判定重启事件），
+ * 本身无需约束绝对值。30d 下限会错判正常长 uptime 服务器（见线上 36d uptime
+ * 首次上线时被拒的事故）。保留 ±10y 只是做 sanity check 拦截明显错误数据
+ * （如 UnixMilli 写成 0、或客户端时钟飞到 2000 年）。
+ * 上限 60s 防服务端时钟比客户端慢的边界情况，配合 agent 侧应尽量 NTP 对齐。
+ */
+const BOOT_TIME_MIN_OFFSET_MS = 10 * 365 * 86_400_000;
 const BOOT_TIME_MAX_FUTURE_MS = 60_000;
 
 /** 内部控制流错误，被 handleError 捕获映射成 -40001 bad_request。 */
