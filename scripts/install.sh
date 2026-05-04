@@ -64,16 +64,20 @@ err()   { printf '%b[ERR ]%b %s\n'  "$C_RED"    "$C_RESET" "$*" >&2; }
 title() { printf '\n%b==> %s%b\n'   "$C_BOLD"   "$*" "$C_RESET"; }
 
 # ---------- 错误处理 ----------
+# 注意：$LINENO 在 POSIX sh（dash）的 trap 上下文里不会展开，用固定占位符兜底避免
+# `parameter not set` 噪声日志；真 bash 环境下仍会展开为真实行号。
 on_error() {
   rc=$?
+  line="${1:-?}"
   if [ "$LOG_FILE" = "/dev/null" ]; then
-    err "脚本在第 $1 行以退出码 $rc 终止。"
+    err "脚本在第 $line 行以退出码 $rc 终止。"
   else
-    err "脚本在第 $1 行以退出码 $rc 终止；完整日志见 $LOG_FILE"
+    err "脚本在第 $line 行以退出码 $rc 终止；完整日志见 $LOG_FILE"
   fi
   exit "$rc"
 }
-trap 'on_error $LINENO' EXIT INT TERM
+# ${LINENO:-?} 保证即使 LINENO 未定义也不会触发 `parameter not set`
+trap 'on_error ${LINENO:-?}' EXIT INT TERM
 
 success_exit() {
   trap - EXIT INT TERM
