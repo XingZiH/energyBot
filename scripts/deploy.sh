@@ -116,6 +116,12 @@ cat nest-api/sql/20260502-agent-bot-configs-unique.sql | \
   docker compose -f docker-compose.prod.yml exec -T postgres \
     psql -U admin -d energybot -v ON_ERROR_STOP=1
 
+# B1 agents 表 + 菜单 + 授权（幂等，用 IF NOT EXISTS / INSERT ... WHERE NOT EXISTS）
+log "执行 SQL 迁移：20260504-agents-table（B1，幂等）"
+cat nest-api/sql/20260504-agents-table.sql | \
+  docker compose -f docker-compose.prod.yml exec -T postgres \
+    psql -U admin -d energybot -v ON_ERROR_STOP=1
+
 if [[ $SKIP_RESET_V1 -eq 0 && -n "$OLD_RELEASE" ]]; then
   warn "执行 v1 数据清空：20260503-reset-designer-config"
   cat nest-api/sql/20260503-reset-designer-config.sql | \
