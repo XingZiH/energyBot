@@ -30,8 +30,11 @@ FROM nginx:1-alpine AS runtime
 RUN apk add --no-cache tzdata \
     && rm -rf /var/cache/apk/*
 
-# 自定义 nginx 配置
-COPY nginx.conf /etc/nginx/nginx.conf
+# 自定义 nginx 配置（片段，挂到 conf.d/default.conf 被主 nginx.conf 的 include 拉入）
+# nginx:1-alpine 默认 /etc/nginx/nginx.conf 已含 events {} + http {} 包裹，
+# 在 http {} 末尾 include /etc/nginx/conf.d/*.conf，因此 ui/nginx.conf 只需 server {} 块。
+# 直接覆盖到 conf.d/default.conf 会替换掉镜像默认那份 server，避免端口冲突。
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # 复制 Angular 构建产物
 COPY --from=builder /app/dist /usr/share/nginx/html
