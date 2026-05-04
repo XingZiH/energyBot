@@ -385,4 +385,166 @@ describe('LicenseService', () => {
       expect(cmd).toBeNull();
     });
   });
+
+  describe('verifyPrecheckForHandshake', () => {
+    const HANDSHAKE_CUSTOMER_NAME = '握手测试客户';
+    const HANDSHAKE_LICENSE_KEY = 'ebt_' + 'H'.repeat(32);
+    const HANDSHAKE_LICENSE_ID = 777;
+    const HANDSHAKE_CUSTOMER_ID = 88;
+
+    function buildHandshakeReq(
+      overrides: Partial<{
+        secret: string;
+        timestamp: string;
+        nonce: string;
+        licenseKey: string;
+      }> = {},
+    ) {
+      const secret = overrides.secret ?? 'handshake-secret';
+      const timestamp = overrides.timestamp ?? String(Date.now());
+      const nonce = overrides.nonce ?? randomBytes(16).toString('hex');
+      const licenseKey = overrides.licenseKey ?? HANDSHAKE_LICENSE_KEY;
+      const signature = signCanonicalRequest({
+        secret,
+        method: 'CONNECT',
+        path: '/agent',
+        timestamp,
+        nonce,
+        body: '',
+      });
+      return { licenseKey, timestamp, nonce, signature, secret };
+    }
+
+    function activeRow(secret: string) {
+      return {
+        licenseId: HANDSHAKE_LICENSE_ID,
+        customerId: HANDSHAKE_CUSTOMER_ID,
+        customerName: HANDSHAKE_CUSTOMER_NAME,
+        customerStatus: 'active',
+        licenseRevokedAt: null,
+        secretCipher: aesGcmEncryptToBase64(secret, ENC_KEY),
+      };
+    }
+
+    it('签名正确应返回 { ok: true, licenseId, customerId, customerName }', async () => {
+      const { svc, conn } = createService();
+      const req = buildHandshakeReq();
+      conn._state.selectResponses.push([activeRow(req.secret)]);
+      const result = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: req.signature,
+      });
+      expect(result).toEqual({
+        ok: true,
+        licenseId: HANDSHAKE_LICENSE_ID,
+        customerId: HANDSHAKE_CUSTOMER_ID,
+        customerName: HANDSHAKE_CUSTOMER_NAME,
+      });
+    });
+
+    it('license 吊销应返回 { ok: false, code: "LICENSE_REVOKED" }', async () => {
+      const { svc, conn } = createService();
+      const req = buildHandshakeReq();
+      conn._state.selectResponses.push([
+        { ...activeRow(req.secret), licenseRevokedAt: new Date() },
+      ]);
+      const result = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: req.signature,
+      });
+      expect(result).toEqual({ ok: false, code: 'LICENSE_REVOKED' });
+    });
+
+    it('时钟偏移 > 5min 返回 CLOCK_SKEW', async () => {
+      const { svc } = createService();
+      const req = buildHandshakeReq({
+        timestamp: String(Date.now() - 6 * 60 * 1000),
+      });
+      const result = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: req.signature,
+      });
+      expect(result).toEqual({ ok: false, code: 'CLOCK_SKEW' });
+    });
+
+    it('nonce 重放返回 NONCE_REPLAYED', async () => {
+      const { svc, conn } = createService();
+      const req = buildHandshakeReq();
+      conn._state.selectResponses.push([activeRow(req.secret)]);
+      conn._state.selectResponses.push([activeRow(req.secret)]);
+      const first = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: req.signature,
+      });
+      expect(first.ok).toBe(true);
+      const second = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: req.signature,
+      });
+      expect(second).toEqual({ ok: false, code: 'NONCE_REPLAYED' });
+    });
+
+    it('签名无效返回 SIGNATURE_INVALID', async () => {
+      const { svc, conn } = createService();
+      const req = buildHandshakeReq();
+      conn._state.selectResponses.push([activeRow(req.secret)]);
+      const result = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: '0'.repeat(64),
+      });
+      expect(result).toEqual({ ok: false, code: 'SIGNATURE_INVALID' });
+    });
+
+    it('licenseKey 格式非法返回 BAD_REQUEST', async () => {
+      const { svc } = createService();
+      const req = buildHandshakeReq({ licenseKey: 'not-a-valid-key' });
+      const result = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: req.signature,
+      });
+      expect(result).toEqual({ ok: false, code: 'BAD_REQUEST' });
+    });
+
+    it('license 不存在返回 KEY_NOT_FOUND', async () => {
+      const { svc, conn } = createService();
+      const req = buildHandshakeReq();
+      conn._state.selectResponses.push([]);
+      const result = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: req.signature,
+      });
+      expect(result).toEqual({ ok: false, code: 'KEY_NOT_FOUND' });
+    });
+
+    it('customer 状态 suspended 返回 CUSTOMER_SUSPENDED', async () => {
+      const { svc, conn } = createService();
+      const req = buildHandshakeReq();
+      conn._state.selectResponses.push([
+        { ...activeRow(req.secret), customerStatus: 'suspended' },
+      ]);
+      const result = await svc.verifyPrecheckForHandshake({
+        licenseKey: req.licenseKey,
+        timestamp: req.timestamp,
+        nonce: req.nonce,
+        signature: req.signature,
+      });
+      expect(result).toEqual({ ok: false, code: 'CUSTOMER_SUSPENDED' });
+    });
+  });
 });

@@ -298,6 +298,57 @@ export class LicenseService {
   }
 
   /**
+   * 供 AgentGateway 握手复用的校验变体。
+   * 不抛 HTTP 异常（WebSocket 握手阶段无法返回 HTTP body），以 result 对象回传。
+   * 成功时返回 licenseId + customerId + customerName 供 AgentService 直接 upsert。
+   */
+  async verifyPrecheckForHandshake(params: {
+    licenseKey: string;
+    timestamp: string;
+    nonce: string;
+    signature: string;
+  }): Promise<
+    | { ok: true; licenseId: number; customerId: number; customerName: string }
+    | { ok: false; code: 'BAD_REQUEST' | 'CLOCK_SKEW' | 'KEY_NOT_FOUND' | 'LICENSE_REVOKED' | 'CUSTOMER_SUSPENDED' | 'SIGNATURE_INVALID' | 'NONCE_REPLAYED' }
+  > {
+    const { licenseKey, timestamp, nonce, signature } = params;
+
+    if (!licenseKey || !isValidLicenseKeyFormat(licenseKey)) return { ok: false, code: 'BAD_REQUEST' };
+    if (!/^\d{10,16}$/.test(timestamp)) return { ok: false, code: 'BAD_REQUEST' };
+    if (!/^[0-9a-f]{32}$/i.test(nonce)) return { ok: false, code: 'BAD_REQUEST' };
+    if (!/^[0-9a-f]{64}$/i.test(signature)) return { ok: false, code: 'BAD_REQUEST' };
+
+    const ts = Number(timestamp);
+    if (Math.abs(Date.now() - ts) > LicenseService.CLOCK_SKEW_MS) return { ok: false, code: 'CLOCK_SKEW' };
+
+    const row = await this.findActiveByKey(licenseKey);
+    if (!row) return { ok: false, code: 'KEY_NOT_FOUND' };
+    if (row.licenseRevokedAt) return { ok: false, code: 'LICENSE_REVOKED' };
+    if (row.customerStatus !== 'active') return { ok: false, code: 'CUSTOMER_SUSPENDED' };
+
+    let secret: string;
+    try {
+      secret = aesGcmDecryptFromBase64(row.secretCipher, this.encKey);
+    } catch (err) {
+      this.logger.error(`license ${row.licenseId} 密文解密失败: ${(err as Error).message}`);
+      return { ok: false, code: 'SIGNATURE_INVALID' };
+    }
+
+    const ok = verifyCanonicalRequest({
+      secret, signature, method: 'CONNECT', path: '/agent', timestamp, nonce, body: '',
+    });
+    if (!ok) return { ok: false, code: 'SIGNATURE_INVALID' };
+
+    // nonce 已校验过格式，这里复用 NonceCacheService
+    const nonceKey = `${licenseKey}:${nonce}`;
+    if (!this.nonceCache.checkAndStore(nonceKey, LicenseService.NONCE_TTL_MS)) {
+      return { ok: false, code: 'NONCE_REPLAYED' };
+    }
+
+    return { ok: true, licenseId: row.licenseId, customerId: row.customerId, customerName: row.customerName };
+  }
+
+  /**
    * 为已有客户的现役 license 回显 install 命令（secret 需 reveal 权限，从 DB 解密）。
    * 若客户无现役 license 返回 null。
    */
