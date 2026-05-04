@@ -9,8 +9,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- 生产部署 B1：按 `docs/deployment/b1-launch.md` 阶段 0–12 在 `www.feiyijt.com` 执行。
-- 子系统 A 历史客户升级：通知存量客户按 `docs/deployment/b1-customer-notice.md` 重跑 `install.sh`。
+- 子系统 A 历史客户升级：通知存量客户按 `docs/deployment/b1-customer-notice.md` 重跑 `install.sh` 获得 B1 agent。
+- 累积 26 项技术债待排期清理，详见 `docs/deployment/b1-production-summary.md` §技术债清单。
+
+## [1.1.1-b1] - 2026-05-05
+
+子系统 B1 —— **生产上线**。在 `www.feiyijt.com` 完成 A 版 → B1 架构切换，端到端验证通过，agent 上线/离线/重连三场景全绿。首个生产 tag。
+
+**背景：**`1.1.0-b1` 是开发完成 merge main 的里程碑；`1.1.1-b1` 是"从 main 到生产运行"过程中修复的阻塞问题 + 2 个实战发现的运行期 bug + 完整上线验证记录。发布全程 9 个 commit，全部落 main。
+
+### Added
+
+**部署基础设施（`scripts/` + `docker-compose.prod.yml` + `deploy/` + `docs/deployment/`）**
+
+- `docker-compose.prod.yml`（`d844eb58`）：project name `maer-energy`，三服务 `nest-api`/`ui`/`postgres`（container_name `maer-energy-{api,ui,postgres}`）；postgres:17-bookworm；external volume `maer-energy-postgres-data`；nest-api 依赖 `postgres` healthcheck；ui 挂 nginx conf.d。
+- `scripts/deploy.sh`（`ee0ed48d` + `d844eb58`）：11 步幂等部署流程（fetch → build → rsync → symlink current → docker-compose up → migration → smoke test → rollback 点记录），对齐 `/opt/maer-energy/current → releases/{timestamp}` 模式（非 git 仓库）；Step 5 跑 B1 agents 表迁移。
+- `docs/deployment/b1-production-blockers.md`（`b57dfd12`）：10 处对齐清单（DB 迁移副本状态、network project prefix、cardshop-app 网络切换、老 bot 清理、shared env 废弃等）+ 回滚预案（release symlink 回切、pg_restore 回滚、old network 重连）。
+
+### Fixed
+
+**部署阶段阻塞修复（4 个 commit，生产上线前必须合入）**
+
+- `nest-api/package-lock.json` 补齐 B1 新增依赖（`6452d39d`）：`@nestjs/platform-ws` / `ws` / `@nestjs/schedule` 三个运行时依赖的 lock 条目；否则 `npm ci --only=production` 在生产构建失败。
+- `ui/nginx.conf` 挂到 `conf.d/default.conf` + 补 `/healthz`（`82b60fff`）：上一版把 nginx 主配置整体替换导致丢失默认 upstream；改为只写 server 块到 conf.d 且显式挂 404 → /healthz 200。
+- `ui/Dockerfile` chown `/var/cache/nginx` + `/var/run/nginx.pid`（`6f134bf6`）：nginx:alpine 以 `nginx` 用户起进程需写缓存目录，缺少 `chown nginx:nginx /var/cache/nginx /var/run/nginx.pid` 导致 `emerg: mkdir() "/var/cache/nginx/..." failed (13: Permission denied)`。
+- `ui` base-href 与 nginx location 恢复 `/ng-antd-admin/` 一致（`705a207f`）：Angular build `--base-href=/ng-antd-admin/` 与 nginx `location /ng-antd-admin/` 对齐；cardshop-app 反代在外层剥前缀 `/site/` 后原路透传到 ui 容器。
+
+**生产运行期实战修复（2 个 commit，agent 实际跑起来才发现）**
+
+- `nest-api/src/modules/agent/agent.gateway.ts` L62-74 `bootTime` 下限 30d → 10y（`a469ef3c`）：agent 握手携带系统 uptime，`bootTime` 校验窗口原为 `now - 30d ~ now + 5min`。**实战发现**测试机 uptime 36 天（bootTime = `now - 36d`）落窗口外直接被 `-40001` 拒绝握手。改为 `±10y` 合理窗口（仍做 sanity check 防止时钟完全错乱）。
+- `go-agent/internal/client/client.go` L427 `buildHeartbeatRequest` 改为带 `id` 的 request（`b8340704`）：**实战发现** agent 心跳发送正常但服务端 DB 心跳字段永不更新。追查到 `nest-api/src/modules/agent/agent.gateway.ts` L167 `handleMessage` 对 `id == null` 的 JSON-RPC notification 直接 `return` 丢弃；而 B1 spec L217 本意要求 heartbeat 带 id（request 而非 notification）。Go agent 实现偏离 spec，修正后服务端按 request 响应且能正确更新 DB 心跳时戳。`go-agent/internal/client/heartbeat.go` tick 成功路径也加了 INFO 日志便于生产排查。
+
+### Changed
+
+**生产架构切换（随 `d844eb58` 一并落地，runbook 分阶段执行）**
+
+- **废弃 A 版老 bot 容器 `maer-energy-bot`**：A 版每客户启一个 Node bot 进程由控制台管理，B1 改为 agent 自报 + 客户自启 bot；生产侧直接 `docker stop+rm maer-energy-bot` 下线旧容器，B3 重写 bot runtime 再行启用。
+- **废弃 shared env 文件**：A 版用 `/opt/maer-energy/shared/*.env` 作跨容器配置源，B1 改为单一 `.env` + docker-compose 注入；生产侧 `shared/*.env` 全部迁到 `backups/legacy-shared-env-20260504-143120/` 归档。
+- **数据库迁移 `ng-antd-admin-db` → `energybot`**：生产 postgres 的业务库名从 A 版历史延续名改为产品名；`pg_dump ng-antd-admin-db` 备份到 `backups/b1-migration-20260504-140808/` + `CREATE DATABASE energybot` + `pg_restore` 恢复 18 表 / 3 customers / 3 licenses / 44 menus；旧库保留 30 天作回滚安全垫。
+- **cardshop-app 网络切到新 compose network**：cardshop-app 反代容器原接在老 `maer-energy-net`（手工创建），B1 新 compose project prefix 后网络实际名为 `maer-energy_frontend`；`docker network disconnect ... maer-energy-net && connect maer-energy_frontend cardshop-app` + `/opt/cardshop/docker-compose.yml` 两处 sed（备份 `docker-compose.yml.bak-b1-20260504-145519`）让重启后自动连对网络。
+
+### Verified in Production
+
+端到端验证 `www.feiyijt.com`（release `20260504-143421`）：
+
+- **agent 握手 + 上线**：测试机 `43.119.5.98`（Ubuntu + 36d uptime）跑 `install.sh` 一把过；DB `agents` 表含 `license_id=4` / `status=online` / `host_name=s906971` / `uptime_seconds=3132849` / metrics 字段实时刷新。
+- **离线回归 3 场景全绿**：
+  - `systemctl stop energybot-agent` → ≤5s 置 offline（WS close event 快路径）
+  - `iptables -I OUTPUT -d 47.82.151.0 -j DROP` → ~103s 置 offline（`AgentOfflineScheduler` 兜底 90s 阈值 + 30s cron 扫描间隔）
+  - 恢复网络 → ≤60s 自动重连 online（agent 内置指数回退重连）
+- **控制台业务 API**：`auth/signin` + `user/auth-code/:id`（触发权限 cache 填充）+ `menu/*` CRUD 五步（create/list/GET/update/del）全绿；新建测试用户 `b1test` 挂超管角色（`sys_user_role` id=11 role_id=1）完成权限链路验证。
+- **反代链路**：cardshop-app nginx `/site/api/*` 剥前缀 → nest-api；`/agent` WSS 3600s read_timeout（CF idle ~100s 但应用层 30s 心跳保活）；`/bin/*`、`/systemd/*` 静态分发 + sha256 校验。
+
+### Known Issues
+
+本次上线新增 / 未解决项（共 26 项累积技术债，详见 `docs/deployment/b1-production-summary.md` §技术债清单）：
+
+- **`api` 容器 healthcheck 显示 unhealthy** 但实际功能正常：Dockerfile healthcheck 用 `wget` 误判，待下轮改为 curl 或 node 健康探针。
+- **`agents.public_ip` 记录的是 cardshop-app 反代内网地址**（如 `::ffff:172.24.0.4`），非客户真实 IP：需在 `agent.gateway.ts` 处理 `X-Forwarded-For` 取真实 IP。
+- **`scripts/install.sh` 文件头注释仍写「子系统 A：License 颁发阶段」**：实际已是 B1 完整 `install_agent()` 流程，注释误导待更新。
+- **B2/B3 未上线导致客户配 bot token 点启动 `/start` 无响应**：老 `maer-energy-bot` 已停，go-bot runtime 未实现；已知限制，待 B3 交付。
+- **`deploy.sh` 有 2 处 shellcheck 警告**（SC2012 `ls | awk` 排序、SC2086 未引用变量）：非阻塞。
 
 ## [1.1.0-b1] - 2026-05-04
 
