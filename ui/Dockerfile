@@ -17,10 +17,10 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 
 # 构建生产包。
-# 注意：package.json 的 build 脚本带 --base-href=/ng-antd-admin/（给 GitHub Pages 用）
-# 生产部署根路径需要覆盖为 /，用 npx ng 直接调用，绕过 npm script。
-# outputPath 在 angular.json 是 { base: "dist", browser: "" }，所以产物在 dist/ 根下。
-RUN npx ng build --configuration=production --base-href=/ \
+# - --base-href=/ng-antd-admin/ 让 index.html 里资源引用都带 /ng-antd-admin/ 前缀
+# - 这与内部 nginx.conf / 外部 cardshop-app nginx 的 /ng-antd-admin/ 路由一致
+# - outputPath 在 angular.json 是 { base: "dist", browser: "" }，产物在 dist/ 根下
+RUN npx ng build --configuration=production --base-href=/ng-antd-admin/ \
     && rm -rf node_modules
 
 # ========== Stage 2: runtime ==========
@@ -36,8 +36,10 @@ RUN apk add --no-cache tzdata \
 # 直接覆盖到 conf.d/default.conf 会替换掉镜像默认那份 server，避免端口冲突。
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# 复制 Angular 构建产物
-COPY --from=builder /app/dist /usr/share/nginx/html
+# 复制 Angular 构建产物到 /ng-antd-admin/ 子目录
+# nginx.conf 的 location /ng-antd-admin/ try_files 需要磁盘真实目录匹配
+# base-href=/ng-antd-admin/ 让 index.html 引用 /ng-antd-admin/main.js 等，也需要子目录提供
+COPY --from=builder /app/dist /usr/share/nginx/html/ng-antd-admin
 
 # 以非 root 运行：nginx alpine 镜像已内置 nginx 用户（uid 101）
 # 调整目录权限让 nginx 用户可读写
