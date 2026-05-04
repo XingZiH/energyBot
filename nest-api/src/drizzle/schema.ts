@@ -405,3 +405,33 @@ export const licensesTable = pgTable('licenses', {
   lastSeenAt: timestamp('last_seen_at'), // 客户端最近一次 precheck 成功时刻
   ...timestamps,
 });
+
+// ============================================================================
+// 子系统 B1：WSS agent 反向通道
+// ----------------------------------------------------------------------------
+// 客户端 agent 通过 WSS 连回服务端，握手时 upsert agents 行，
+// 心跳（20s 间隔，服务端去抖写）刷新 last_heartbeat_at + 主机 metrics，
+// OfflineScheduler 每 30s 扫 90s 未心跳的行置 offline。
+// UNIQUE(license_id) 保证一 license 至多一个 agent 行。
+// ============================================================================
+
+// Agent 表
+export const agentsTable = pgTable('agents', {
+  id: integer().primaryKey().generatedAlwaysAsIdentity(),
+  licenseId: integer('license_id').notNull().unique(), // 外键→licenses.id，一 license 一 agent
+  customerId: integer('customer_id').notNull(), // 冗余，按客户筛选用
+  status: varchar({ length: 16 }).notNull().default('never_seen'), // online | offline | never_seen
+  agentVersion: varchar('agent_version', { length: 32 }), // semver，握手时填
+  publicIp: varchar('public_ip', { length: 64 }), // 由 X-Forwarded-For / remoteAddress 取
+  hostName: varchar('host_name', { length: 120 }),
+  kernel: varchar({ length: 120 }),
+  bootTime: timestamp('boot_time'), // agent 进程启动时刻（识别断线重连 vs 重启）
+  connectedAt: timestamp('connected_at'), // 本次 WS 握手建立时刻
+  lastHeartbeatAt: timestamp('last_heartbeat_at'), // 最近心跳到达时刻（去抖后）
+  uptimeSeconds: bigint('uptime_seconds', { mode: 'number' }), // 主机 uptime
+  cpuPercent: numeric('cpu_percent', { precision: 5, scale: 2 }), // 0-100
+  memUsedBytes: bigint('mem_used_bytes', { mode: 'number' }),
+  memTotalBytes: bigint('mem_total_bytes', { mode: 'number' }),
+  loadavg1: numeric('loadavg_1', { precision: 6, scale: 2 }),
+  ...timestamps,
+});
