@@ -1,0 +1,92 @@
+[
+  {
+    "secret": "test-secret-000",
+    "method": "CONNECT",
+    "path": "/agent",
+    "body": "",
+    "timestamp": "1714800000000",
+    "nonce": "00000000000000000000000000000000",
+    "signature": "58c3142788f3e9c75563967eaa06093f84da11389667e07d1d2200b92cc478a3"
+  },
+  {
+    "secret": "test-secret-001",
+    "method": "GET",
+    "path": "/agent/my-bot",
+    "body": "",
+    "timestamp": "1714800001000",
+    "nonce": "00000000000000000000000000000001",
+    "signature": "3c180e5d8759408241e9cc0173d54deafda65b6a4b5d8167d50895a4c0c66106"
+  },
+  {
+    "secret": "aBc_XYZ-with.special~chars",
+    "method": "POST",
+    "path": "/agent",
+    "body": "{\"hello\":\"world\"}",
+    "timestamp": "1714800002000",
+    "nonce": "00000000000000000000000000000002",
+    "signature": "ed6567742de9c1931078c4773460800e8eff055f97ba66943f8891ad6ab1aff1"
+  },
+  {
+    "secret": "secret-with-unicode-❤",
+    "method": "CONNECT",
+    "path": "/agent",
+    "body": "",
+    "timestamp": "1714800003000",
+    "nonce": "00000000000000000000000000000003",
+    "signature": "33537c930135c87e455284c262e7df4363a4367a597a2558160764173538501d"
+  },
+  {
+    "secret": "0",
+    "method": "CONNECT",
+    "path": "/agent",
+    "body": "",
+    "timestamp": "1714800004000",
+    "nonce": "00000000000000000000000000000004",
+    "signature": "41ffc8074e02195efa249bd39f95fab77c5e815b22877ad0b3f7f53d265a7d71"
+  },
+  {
+    "secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "method": "POST",
+    "path": "/agent/heartbeat",
+    "body": "{\"uptime\":12345,\"cpuPercent\":12.34}",
+    "timestamp": "1714800005000",
+    "nonce": "00000000000000000000000000000005",
+    "signature": "aa634d632553939c569c67e067e4d0e7684266dd1f923de0e036d794319634f7"
+  },
+  {
+    "secret": "ascii-only",
+    "method": "CONNECT",
+    "path": "/agent",
+    "body": "",
+    "timestamp": "1714800006000",
+    "nonce": "00000000000000000000000000000006",
+    "signature": "039021be21f82e1d7fc19bf3ca914fafb6b7843883e57f875632e7a2b1dad752"
+  },
+  {
+    "secret": "test",
+    "method": "GET",
+    "path": "/agent?foo=bar",
+    "body": "",
+    "timestamp": "1714800007000",
+    "nonce": "00000000000000000000000000000007",
+    "signature": "157ad340a2e00f197ca9b7053f5ac828ae7edcc26aa05dfe9ee47b287daddf68"
+  },
+  {
+    "secret": "test",
+    "method": "POST",
+    "path": "/agent",
+    "body": "a",
+    "timestamp": "1714800008000",
+    "nonce": "00000000000000000000000000000008",
+    "signature": "9614f530cb7a0f710f9c1ce9ffe9bd4509a0f7c2613d9b273cbc266f2887c198"
+  },
+  {
+    "secret": "test",
+    "method": "CONNECT",
+    "path": "/agent",
+    "body": "",
+    "timestamp": "1714800009000",
+    "nonce": "00000000000000000000000000000009",
+    "signature": "e53f59e2c6259b9a5fb1277b96aed8a28a942fad3b14f0f1865448335769eadd"
+  }
+]

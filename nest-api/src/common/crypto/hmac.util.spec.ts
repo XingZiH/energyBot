@@ -108,3 +108,18 @@ describe('HMAC 规范串签名', () => {
     }
   });
 });
+
+describe('hmac-pairs fixture 自洽性', () => {
+  it('每条 fixture 自签自验应通过', () => {
+    const fixtures = require('../../../test/fixtures/hmac-pairs.json');
+    expect(fixtures.length).toBe(10);
+    for (const f of fixtures) {
+      const ok = verifyCanonicalRequest({
+        secret: f.secret, signature: f.signature,
+        method: f.method, path: f.path,
+        timestamp: f.timestamp, nonce: f.nonce, body: f.body,
+      });
+      expect(ok).toBe(true);
+    }
+  });
+});
