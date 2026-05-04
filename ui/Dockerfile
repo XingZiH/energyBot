@@ -40,13 +40,18 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # 以非 root 运行：nginx alpine 镜像已内置 nginx 用户（uid 101）
-# 调整目录权限让 nginx 用户可读
+# 调整目录权限让 nginx 用户可读写
+# 之前 ui/nginx.conf 整体覆盖 /etc/nginx/nginx.conf 绕过了 /var/cache/nginx 的使用，
+# 现在改为 conf.d/ 片段后主配置里的 client_body_temp_path 等被激活，需要 chown
 RUN chown -R nginx:nginx /usr/share/nginx/html \
     && chmod -R g+r /usr/share/nginx/html \
+    && chown -R nginx:nginx /var/cache/nginx \
     && mkdir -p /tmp/client_temp /tmp/proxy_temp /tmp/fastcgi_temp /tmp/uwsgi_temp /tmp/scgi_temp \
     && chown -R nginx:nginx /tmp/client_temp /tmp/proxy_temp /tmp/fastcgi_temp /tmp/uwsgi_temp /tmp/scgi_temp \
     && touch /tmp/nginx.pid \
-    && chown nginx:nginx /tmp/nginx.pid
+    && chown nginx:nginx /tmp/nginx.pid \
+    && touch /var/run/nginx.pid \
+    && chown nginx:nginx /var/run/nginx.pid
 
 USER nginx
 
