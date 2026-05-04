@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -7,6 +8,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 // https://github.com/nestjs/awesome-nestjs#open-source
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // 接入 ws 原生适配器（AgentGateway 走 path=/agent 的 ws.WebSocket）
+  app.useWebSocketAdapter(new WsAdapter(app));
   app.useStaticAssets('public'); // 配置静态资源
 
   // 全局 ValidationPipe

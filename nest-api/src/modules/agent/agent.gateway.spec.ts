@@ -155,10 +155,11 @@ describe('AgentGateway.handleConnection', () => {
     await gw.handleConnection(ws as any, req as any);
 
     // 挂 state
-    expect((ws as any)._agent).toBeDefined();
-    expect((ws as any)._agent.state).toBe('connected');
-    expect((ws as any)._agent.licenseId).toBe(101);
-    expect((ws as any)._agent.customerId).toBe(7);
+    const slot = gw.agentSlots.get(ws as any);
+    expect(slot).toBeDefined();
+    expect(slot!.state).toBe('connected');
+    expect(slot!.licenseId).toBe(101);
+    expect(slot!.customerId).toBe(7);
 
     // 绑定了 close / message
     const eventNames = ws.on.mock.calls.map((c: any[]) => c[0]);
@@ -241,7 +242,7 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
   }
 
   it('合法 hello → upsertOnline 被调；state=hello_received；回 jsonRpcResult', async () => {
-    const { onMessage, ws, agents, registry } = await handshakeAndGetMsgHandler();
+    const { gw, onMessage, ws, agents, registry } = await handshakeAndGetMsgHandler();
 
     const bootTime = Date.now() - 1000;
     await onMessage(
@@ -265,7 +266,7 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
     expect(upsertArg.bootTime.getTime()).toBe(bootTime);
 
     // state 变更
-    expect((ws as any)._agent.state).toBe('hello_received');
+    expect(gw.agentSlots.get(ws as any)!.state).toBe('hello_received');
 
     // registry.register 在 hello 阶段调（此时才有 bootTime）
     expect(registry.register).toHaveBeenCalledTimes(1);

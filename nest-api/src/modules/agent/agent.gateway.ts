@@ -23,7 +23,7 @@ import {
  *  2. 成功握手后，ws.on('close' / 'message') 手工绑定（不用 @nestjs/websockets 的
  *     handleDisconnect lifecycle —— 因为"后来者赢"替换场景下旧 ws 的 disconnect 会误清新状态，
  *     见计划 D4）
- *  3. 连接状态机 connected → hello_received，挂在 ws._agent（计划 D8）
+ *  3. 连接状态机 connected → hello_received，挂在 agentSlots WeakMap（计划 D8）
  *  4. 每次 heartbeat 复查 findActiveByKey 支持吊销实时下线（计划 D7）
  *
  * 偏离计划的地方：
@@ -75,6 +75,12 @@ class BadRequestError extends Error {
 export class AgentGateway implements OnGatewayConnection {
   private readonly logger = new Logger(AgentGateway.name);
 
+  /**
+   * @internal 暴露给单测的 ws 状态槽映射（生产代码不要跨模块访问）。
+   * 使用 WeakMap：ws 被 GC 时 slot 自动释放，消除 `(ws as any)._agent` 的 as any 污染。
+   */
+  public readonly agentSlots = new WeakMap<WebSocket, WsAgentSlot>();
+
   constructor(
     private readonly licenseService: LicenseService,
     private readonly registry: AgentRegistry,
@@ -102,14 +108,13 @@ export class AgentGateway implements OnGatewayConnection {
       }
 
       // 挂 state；bootTime/register 延迟到 agent.hello
-      // TODO(任务 10): 改用 WeakMap<WebSocket, WsAgentSlot> 消除 as any（ws GC 时 slot 自动释放）
-      (ws as any)._agent = {
+      this.agentSlots.set(ws, {
         licenseId: result.licenseId,
         customerId: result.customerId,
         licenseKey: headers.licenseKey,
         publicIp: (req.socket && (req.socket as any).remoteAddress) || 'unknown',
         state: 'connected',
-      } as WsAgentSlot;
+      });
 
       // 绑 close handler（含 replaced guard）
       const closeHandler = async () => {
@@ -178,7 +183,7 @@ export class AgentGateway implements OnGatewayConnection {
     id: JsonRpcMessage['id'],
     rawParams: unknown,
   ): Promise<void> {
-    const slot = (ws as any)._agent as WsAgentSlot | undefined;
+    const slot = this.agentSlots.get(ws);
     if (!slot) {
       // 理论不可达：未握手的 ws 不会进到这里
       ws.send(jsonRpcError(id, AgentRpcErrorCode.NOT_READY, 'not ready'));
@@ -237,7 +242,7 @@ export class AgentGateway implements OnGatewayConnection {
     id: JsonRpcMessage['id'],
     rawParams: unknown,
   ): Promise<void> {
-    const slot = (ws as any)._agent as WsAgentSlot | undefined;
+    const slot = this.agentSlots.get(ws);
     if (!slot || slot.state !== 'hello_received') {
       ws.send(jsonRpcError(id, AgentRpcErrorCode.NOT_READY, 'not ready'));
       return;
