@@ -456,7 +456,7 @@ describe('LicenseService', () => {
         nonce: req.nonce,
         signature: req.signature,
       });
-      expect(result).toEqual({ ok: false, code: 'LICENSE_REVOKED' });
+      expect(result).toEqual({ ok: false, code: PrecheckErrorCode.LICENSE_REVOKED });
     });
 
     it('时钟偏移 > 5min 返回 CLOCK_SKEW', async () => {
@@ -470,7 +470,7 @@ describe('LicenseService', () => {
         nonce: req.nonce,
         signature: req.signature,
       });
-      expect(result).toEqual({ ok: false, code: 'CLOCK_SKEW' });
+      expect(result).toEqual({ ok: false, code: PrecheckErrorCode.CLOCK_SKEW });
     });
 
     it('nonce 重放返回 NONCE_REPLAYED', async () => {
@@ -491,7 +491,7 @@ describe('LicenseService', () => {
         nonce: req.nonce,
         signature: req.signature,
       });
-      expect(second).toEqual({ ok: false, code: 'NONCE_REPLAYED' });
+      expect(second).toEqual({ ok: false, code: PrecheckErrorCode.NONCE_REPLAYED });
     });
 
     it('签名无效返回 SIGNATURE_INVALID', async () => {
@@ -504,7 +504,7 @@ describe('LicenseService', () => {
         nonce: req.nonce,
         signature: '0'.repeat(64),
       });
-      expect(result).toEqual({ ok: false, code: 'SIGNATURE_INVALID' });
+      expect(result).toEqual({ ok: false, code: PrecheckErrorCode.SIGNATURE_INVALID });
     });
 
     it('licenseKey 格式非法返回 BAD_REQUEST', async () => {
@@ -516,7 +516,7 @@ describe('LicenseService', () => {
         nonce: req.nonce,
         signature: req.signature,
       });
-      expect(result).toEqual({ ok: false, code: 'BAD_REQUEST' });
+      expect(result).toEqual({ ok: false, code: PrecheckErrorCode.BAD_REQUEST });
     });
 
     it('license 不存在返回 KEY_NOT_FOUND', async () => {
@@ -529,7 +529,7 @@ describe('LicenseService', () => {
         nonce: req.nonce,
         signature: req.signature,
       });
-      expect(result).toEqual({ ok: false, code: 'KEY_NOT_FOUND' });
+      expect(result).toEqual({ ok: false, code: PrecheckErrorCode.KEY_NOT_FOUND });
     });
 
     it('customer 状态 suspended 返回 CUSTOMER_SUSPENDED', async () => {
@@ -544,7 +544,7 @@ describe('LicenseService', () => {
         nonce: req.nonce,
         signature: req.signature,
       });
-      expect(result).toEqual({ ok: false, code: 'CUSTOMER_SUSPENDED' });
+      expect(result).toEqual({ ok: false, code: PrecheckErrorCode.CUSTOMER_SUSPENDED });
     });
   });
 });

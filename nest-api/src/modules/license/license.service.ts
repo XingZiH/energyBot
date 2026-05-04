@@ -29,6 +29,35 @@ import { NonceCacheService } from '../../common/nonce/nonce-cache.service';
 import { PrecheckErrorCode } from './dto/license.dto';
 
 /**
+ * precheck 公共核心的统一返回类型：
+ * - ok:true 携带成功路径所需的三字段
+ * - ok:false 携带 PrecheckErrorCode（wire format 小写）
+ *
+ * 导出供 AgentGateway（任务 6/7）直接消费 verifyPrecheckForHandshake 做 narrow。
+ */
+export type PrecheckResult =
+  | { ok: true; licenseId: number; customerId: number; customerName: string }
+  | { ok: false; code: PrecheckErrorCode };
+
+/**
+ * HTTP 异常分派映射表（verifyPrecheck 用）。
+ * 用 Record<PrecheckErrorCode, ...> 让枚举和异常类型在 TS 层面绑死——
+ * 未来若给 PrecheckErrorCode 新增成员而忘了补这里，会直接编译失败。
+ */
+const PRECHECK_CODE_TO_EXCEPTION: Record<
+  PrecheckErrorCode,
+  new (msg: string) => Error
+> = {
+  [PrecheckErrorCode.BAD_REQUEST]: BadRequestException,
+  [PrecheckErrorCode.LICENSE_REVOKED]: ForbiddenException,
+  [PrecheckErrorCode.CUSTOMER_SUSPENDED]: ForbiddenException,
+  [PrecheckErrorCode.CLOCK_SKEW]: UnauthorizedException,
+  [PrecheckErrorCode.KEY_NOT_FOUND]: UnauthorizedException,
+  [PrecheckErrorCode.SIGNATURE_INVALID]: UnauthorizedException,
+  [PrecheckErrorCode.NONCE_REPLAYED]: UnauthorizedException,
+};
+
+/**
  * License 颁发与校验服务。
  *
  * 职责：
@@ -203,10 +232,96 @@ export class LicenseService {
   }
 
   /**
-   * 客户端 precheck 总入口。任一失败抛 HTTP 异常（UnauthorizedException / ForbiddenException /
-   * BadRequestException），异常消息里带标准错误码（PrecheckErrorCode）供 install.sh 做差异化提示。
+   * precheck 公共核心：前 7 步校验（格式 / 时钟 / DB 查 / revoked / suspended / HMAC / nonce）。
+   * 供 verifyPrecheck（HTTP 变种）与 verifyPrecheckForHandshake（WSS 变种）复用。
    *
-   * 成功则返回 { customerName, serverTime } 并更新 last_seen_at。
+   * 命名用 run 而非 assert——assert* 在 Node/TS 惯例隐含"失败抛异常"，
+   * 而本方法失败是返回 { ok:false, code }，用 run 语义更贴合。
+   */
+  private async runPrecheckCore(params: {
+    licenseKey: string;
+    timestamp: string;
+    nonce: string;
+    signature: string;
+    method: string;
+    path: string;
+    body: string;
+  }): Promise<PrecheckResult> {
+    const { licenseKey, timestamp, nonce, signature, method, path, body } =
+      params;
+
+    // 1) 基本格式
+    if (!licenseKey || !isValidLicenseKeyFormat(licenseKey)) {
+      return { ok: false, code: PrecheckErrorCode.BAD_REQUEST };
+    }
+    if (!/^\d{10,16}$/.test(timestamp)) {
+      return { ok: false, code: PrecheckErrorCode.BAD_REQUEST };
+    }
+    if (!/^[0-9a-f]{32}$/i.test(nonce)) {
+      return { ok: false, code: PrecheckErrorCode.BAD_REQUEST };
+    }
+    if (!/^[0-9a-f]{64}$/i.test(signature)) {
+      return { ok: false, code: PrecheckErrorCode.BAD_REQUEST };
+    }
+
+    // 2) 时钟偏移
+    const ts = Number(timestamp);
+    if (Math.abs(Date.now() - ts) > LicenseService.CLOCK_SKEW_MS) {
+      return { ok: false, code: PrecheckErrorCode.CLOCK_SKEW };
+    }
+
+    // 3) 查 license + 4) revoked + 5) suspended
+    const row = await this.findActiveByKey(licenseKey);
+    if (!row) return { ok: false, code: PrecheckErrorCode.KEY_NOT_FOUND };
+    if (row.licenseRevokedAt) {
+      return { ok: false, code: PrecheckErrorCode.LICENSE_REVOKED };
+    }
+    if (row.customerStatus !== 'active') {
+      return { ok: false, code: PrecheckErrorCode.CUSTOMER_SUSPENDED };
+    }
+
+    // 6) 解密 secret + 验签
+    let secret: string;
+    try {
+      secret = aesGcmDecryptFromBase64(row.secretCipher, this.encKey);
+    } catch (err) {
+      // 密文损坏或密钥不对——属于服务端配置问题
+      this.logger.error(
+        `license ${row.licenseId} 密文解密失败: ${(err as Error).message}`,
+      );
+      return { ok: false, code: PrecheckErrorCode.SIGNATURE_INVALID };
+    }
+
+    const sigOk = verifyCanonicalRequest({
+      secret,
+      signature,
+      method,
+      path,
+      timestamp,
+      nonce,
+      body,
+    });
+    if (!sigOk) return { ok: false, code: PrecheckErrorCode.SIGNATURE_INVALID };
+
+    // 7) nonce 防重放
+    const nonceKey = `${licenseKey}:${nonce}`;
+    if (!this.nonceCache.checkAndStore(nonceKey, LicenseService.NONCE_TTL_MS)) {
+      return { ok: false, code: PrecheckErrorCode.NONCE_REPLAYED };
+    }
+
+    return {
+      ok: true,
+      licenseId: row.licenseId,
+      customerId: row.customerId,
+      customerName: row.customerName,
+    };
+  }
+
+  /**
+   * 客户端 precheck 总入口（HTTP 变种）。任一失败抛 HTTP 异常，异常消息里带标准错误码
+   * （PrecheckErrorCode 值字符串）供 install.sh 做差异化提示。
+   *
+   * 成功则返回 { customerName, serverTime } 并异步更新 last_seen_at（失败不中断响应）。
    */
   async verifyPrecheck(params: {
     licenseKey: string;
@@ -217,88 +332,35 @@ export class LicenseService {
     path: string;
     body: string;
   }) {
-    const { licenseKey, timestamp, nonce, signature, method, path, body } = params;
-
-    // 基本格式
-    if (!licenseKey || !isValidLicenseKeyFormat(licenseKey)) {
-      throw new BadRequestException(PrecheckErrorCode.BAD_REQUEST);
-    }
-    if (!/^\d{10,16}$/.test(timestamp)) {
-      throw new BadRequestException(PrecheckErrorCode.BAD_REQUEST);
-    }
-    if (!/^[0-9a-f]{32}$/i.test(nonce)) {
-      throw new BadRequestException(PrecheckErrorCode.BAD_REQUEST);
-    }
-    if (!/^[0-9a-f]{64}$/i.test(signature)) {
-      throw new BadRequestException(PrecheckErrorCode.BAD_REQUEST);
+    const res = await this.runPrecheckCore(params);
+    // 用 === false 而非 !res.ok：仓库 tsconfig strictNullChecks:false 下
+    // `!res.ok` 无法把 res 窄化到 { ok:false, code }（undefined/null 也 truthy 反面）。
+    if (res.ok === false) {
+      const ExceptionClass = PRECHECK_CODE_TO_EXCEPTION[res.code];
+      throw new ExceptionClass(res.code);
     }
 
-    // 时钟偏移
-    const ts = Number(timestamp);
-    const now = Date.now();
-    if (Math.abs(now - ts) > LicenseService.CLOCK_SKEW_MS) {
-      throw new UnauthorizedException(PrecheckErrorCode.CLOCK_SKEW);
-    }
-
-    // 查 license
-    const row = await this.findActiveByKey(licenseKey);
-    if (!row) {
-      throw new UnauthorizedException(PrecheckErrorCode.KEY_NOT_FOUND);
-    }
-    if (row.licenseRevokedAt) {
-      throw new ForbiddenException(PrecheckErrorCode.LICENSE_REVOKED);
-    }
-    if (row.customerStatus !== 'active') {
-      throw new ForbiddenException(PrecheckErrorCode.CUSTOMER_SUSPENDED);
-    }
-
-    // 解密 secret，验签
-    let secret: string;
-    try {
-      secret = aesGcmDecryptFromBase64(row.secretCipher, this.encKey);
-    } catch (err) {
-      // 密文损坏或密钥不对——属于服务端配置问题
-      this.logger.error(`license ${row.licenseId} 密文解密失败: ${(err as Error).message}`);
-      throw new UnauthorizedException(PrecheckErrorCode.SIGNATURE_INVALID);
-    }
-
-    const ok = verifyCanonicalRequest({
-      secret,
-      signature,
-      method,
-      path,
-      timestamp,
-      nonce,
-      body,
-    });
-    if (!ok) {
-      throw new UnauthorizedException(PrecheckErrorCode.SIGNATURE_INVALID);
-    }
-
-    // nonce 防重放
-    const cacheKey = `${licenseKey}:${nonce}`;
-    const fresh = this.nonceCache.checkAndStore(cacheKey, LicenseService.NONCE_TTL_MS);
-    if (!fresh) {
-      throw new UnauthorizedException(PrecheckErrorCode.NONCE_REPLAYED);
-    }
-
-    // 成功：更新 last_seen_at（失败不中断响应）
+    // 成功：异步更新 last_seen_at（失败不中断响应）
     this.conn
       .update(licensesTable)
       .set({ lastSeenAt: new Date() })
-      .where(eq(licensesTable.id, row.licenseId))
+      .where(eq(licensesTable.id, res.licenseId))
       .catch((err) => {
-        this.logger.warn(`license ${row.licenseId} last_seen_at 更新失败: ${(err as Error).message}`);
+        this.logger.warn(
+          `license ${res.licenseId} last_seen_at 更新失败: ${(err as Error).message}`,
+        );
       });
 
+    // serverTime 在成功分派后重取（重构前是 skew 校验时的 now，差几 ms）。
+    // install.sh 只做展示用途，差异在噪声范围内。
     return {
-      customerName: row.customerName,
-      serverTime: now,
+      customerName: res.customerName,
+      serverTime: Date.now(),
     };
   }
 
   /**
-   * 供 AgentGateway 握手复用的校验变体。
+   * 供 AgentGateway 握手复用的校验变体（WSS）。
    * 不抛 HTTP 异常（WebSocket 握手阶段无法返回 HTTP body），以 result 对象回传。
    * 成功时返回 licenseId + customerId + customerName 供 AgentService 直接 upsert。
    */
@@ -307,45 +369,13 @@ export class LicenseService {
     timestamp: string;
     nonce: string;
     signature: string;
-  }): Promise<
-    | { ok: true; licenseId: number; customerId: number; customerName: string }
-    | { ok: false; code: 'BAD_REQUEST' | 'CLOCK_SKEW' | 'KEY_NOT_FOUND' | 'LICENSE_REVOKED' | 'CUSTOMER_SUSPENDED' | 'SIGNATURE_INVALID' | 'NONCE_REPLAYED' }
-  > {
-    const { licenseKey, timestamp, nonce, signature } = params;
-
-    if (!licenseKey || !isValidLicenseKeyFormat(licenseKey)) return { ok: false, code: 'BAD_REQUEST' };
-    if (!/^\d{10,16}$/.test(timestamp)) return { ok: false, code: 'BAD_REQUEST' };
-    if (!/^[0-9a-f]{32}$/i.test(nonce)) return { ok: false, code: 'BAD_REQUEST' };
-    if (!/^[0-9a-f]{64}$/i.test(signature)) return { ok: false, code: 'BAD_REQUEST' };
-
-    const ts = Number(timestamp);
-    if (Math.abs(Date.now() - ts) > LicenseService.CLOCK_SKEW_MS) return { ok: false, code: 'CLOCK_SKEW' };
-
-    const row = await this.findActiveByKey(licenseKey);
-    if (!row) return { ok: false, code: 'KEY_NOT_FOUND' };
-    if (row.licenseRevokedAt) return { ok: false, code: 'LICENSE_REVOKED' };
-    if (row.customerStatus !== 'active') return { ok: false, code: 'CUSTOMER_SUSPENDED' };
-
-    let secret: string;
-    try {
-      secret = aesGcmDecryptFromBase64(row.secretCipher, this.encKey);
-    } catch (err) {
-      this.logger.error(`license ${row.licenseId} 密文解密失败: ${(err as Error).message}`);
-      return { ok: false, code: 'SIGNATURE_INVALID' };
-    }
-
-    const ok = verifyCanonicalRequest({
-      secret, signature, method: 'CONNECT', path: '/agent', timestamp, nonce, body: '',
+  }): Promise<PrecheckResult> {
+    return this.runPrecheckCore({
+      ...params,
+      method: 'CONNECT',
+      path: '/agent',
+      body: '',
     });
-    if (!ok) return { ok: false, code: 'SIGNATURE_INVALID' };
-
-    // nonce 已校验过格式，这里复用 NonceCacheService
-    const nonceKey = `${licenseKey}:${nonce}`;
-    if (!this.nonceCache.checkAndStore(nonceKey, LicenseService.NONCE_TTL_MS)) {
-      return { ok: false, code: 'NONCE_REPLAYED' };
-    }
-
-    return { ok: true, licenseId: row.licenseId, customerId: row.customerId, customerName: row.customerName };
   }
 
   /**
