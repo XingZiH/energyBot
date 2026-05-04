@@ -115,5 +115,9 @@ func (h *Heartbeat) tick() {
 		}
 		// 其他未预期错误（当前实现下应不出现）：log 但不中断。
 		h.logger.Printf("heartbeat: send failed: %v", err)
+		return
 	}
+	// 成功路径：打一条 INFO 便于生产排查（journald 可过滤；频率 30s 不会噪）
+	h.logger.Printf("heartbeat: sent cpu=%.1f%% mem=%d/%d uptime=%ds",
+		metrics.CPUPercent, metrics.MemUsedBytes, metrics.MemTotalBytes, metrics.UptimeSeconds)
 }

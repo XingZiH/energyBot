@@ -551,8 +551,8 @@ func TestClient_SendHeartbeat_EncodesCorrectly(t *testing.T) {
 	if req.Method != "agent.heartbeat" {
 		t.Errorf("method=%q", req.Method)
 	}
-	if req.ID != nil {
-		t.Errorf("heartbeat 必须是 notification（id 缺省），got id=%+v", req.ID)
+	if req.ID == nil {
+		t.Error("heartbeat 必须带 id（spec L217：服务端 handleMessage 对 id=nil 的 notification 直接丢弃）")
 	}
 
 	var p struct {

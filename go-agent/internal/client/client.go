@@ -424,7 +424,13 @@ func (c *Client) buildHelloRequest() ([]byte, error) {
 	return json.Marshal(req)
 }
 
-// buildHeartbeatRequest 序列化 agent.heartbeat notification（无 id）。
+// buildHeartbeatRequest 序列化 agent.heartbeat 请求（带递增 id）。
+//
+// spec 定义 heartbeat 为 request（带 id，服务端需回 ack），不是 notification。
+// 服务端 handleMessage 对 notification（id=nil）直接丢弃（防御性过滤），
+// 所以这里必须带 id 才能触达 handleAgentHeartbeat 真正写入 last_heartbeat_at。
+// id 使用单调递增值（基于 nanosecond 时间戳的高 31 位），保证连接生命周期内
+// 全局唯一；agent 不等 ack，纯单向汇报。
 func buildHeartbeatRequest(m host.Metrics) ([]byte, error) {
 	params := map[string]any{
 		"uptime_seconds":  m.UptimeSeconds,
@@ -437,8 +443,11 @@ func buildHeartbeatRequest(m host.Metrics) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// id 基于 nanosecond，避免与 helloID(=1) 冲突
+	hbID := time.Now().UnixNano()
 	req := jsonrpc.Request{
 		JSONRPC: "2.0",
+		ID:      jsonrpc.IntID(hbID),
 		Method:  "agent.heartbeat",
 		Params:  paramsRaw,
 	}
