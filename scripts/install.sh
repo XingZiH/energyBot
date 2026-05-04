@@ -428,9 +428,121 @@ write_license_file() {
   ok "License 已写入 $LICENSE_FILE（权限 600）"
 }
 
+# ---------- Agent 二进制安装 ----------
+#
+# 下载与本机架构匹配的 agent 二进制 → /opt/energybot-agent/bin/
+# 拉 systemd unit 文件 → /etc/systemd/system/
+# 写 /etc/energybot-agent/agent.env 配置（从 $LICENSE_KEY / $LICENSE_SECRET / $SERVER_URL 构造）
+# 启动 energybot-agent.service
+#
+# 幂等：若已有 bin/unit/env 则覆盖；若已在 systemctl 中则先 stop 再 replace 再 start。
+install_agent() {
+  if [ "$VERIFY_ONLY" = "1" ]; then
+    log "VERIFY_ONLY=1：跳过 agent 安装。"
+    return 0
+  fi
+
+  title "安装 energybot-agent"
+
+  # 架构映射 x86_64→amd64, aarch64→arm64
+  case "$ARCH" in
+    x86_64) bin_arch="amd64" ;;
+    aarch64) bin_arch="arm64" ;;
+    *)
+      err "不支持的架构 $ARCH（agent 仅支持 amd64 / arm64）。"
+      return 12
+      ;;
+  esac
+
+  # 1. 目录 + 用户
+  mkdir -p /opt/energybot-agent/bin /etc/energybot-agent /var/lib/energybot-agent /var/log/energybot-agent
+  # useradd 幂等（已有则 true）
+  if ! id energybot-agent >/dev/null 2>&1; then
+    if ! useradd --system --no-create-home --shell /usr/sbin/nologin energybot-agent 2>>"$LOG_FILE"; then
+      err "创建用户 energybot-agent 失败，详见 $LOG_FILE"
+      return 12
+    fi
+  fi
+  chown -R energybot-agent:energybot-agent /var/lib/energybot-agent /var/log/energybot-agent
+
+  # 2. 下载二进制（带 sha256 校验可后续补；当前先只下载）
+  bin_url="${SERVER_URL}/bin/energybot-agent-linux-${bin_arch}"
+  bin_path="/opt/energybot-agent/bin/energybot-agent"
+  log "下载 agent 二进制：$bin_url"
+  if ! curl -fsSL --max-time 60 "$bin_url" -o "${bin_path}.new" 2>>"$LOG_FILE"; then
+    err "下载 agent 二进制失败：$bin_url（详见 $LOG_FILE）"
+    return 13
+  fi
+  chmod 755 "${bin_path}.new"
+  mv "${bin_path}.new" "$bin_path"
+  ok "agent 二进制已就位：$bin_path"
+
+  # 3. agent.env（与 LicenseFile 分开；agent 服务账号不应能读 /etc/energybot/license.conf）
+  # API URL 从 SERVER_URL 推导：https://host → wss://host/agent
+  api_url="$(printf '%s' "$SERVER_URL" | sed -E 's#^https?://#wss://#')/agent"
+  env_path="/etc/energybot-agent/agent.env"
+  env_tmp="${env_path}.tmp.$$"
+  {
+    printf '# energybot-agent 运行时配置\n'
+    printf '# 由 install.sh v%s 写入，请勿手工修改（如需改动请重新运行 install.sh --reinstall）\n' "$SCRIPT_VERSION"
+    printf 'EBT_LICENSE_KEY=%s\n' "$LICENSE_KEY"
+    printf 'EBT_LICENSE_SECRET=%s\n' "$LICENSE_SECRET"
+    printf 'EBT_API_URL=%s\n' "$api_url"
+    printf 'EBT_LOG_LEVEL=info\n'
+  } > "$env_tmp"
+  chmod 640 "$env_tmp"
+  chown root:energybot-agent "$env_tmp"
+  mv "$env_tmp" "$env_path"
+  ok "agent.env 已写入 $env_path（权限 640 root:energybot-agent）"
+
+  # 4. systemd unit
+  unit_url="${SERVER_URL}/systemd/energybot-agent.service"
+  unit_path="/etc/systemd/system/energybot-agent.service"
+  log "下载 systemd unit：$unit_url"
+  if ! curl -fsSL --max-time 30 "$unit_url" -o "${unit_path}.new" 2>>"$LOG_FILE"; then
+    err "下载 systemd unit 失败：$unit_url（详见 $LOG_FILE）"
+    return 14
+  fi
+  chmod 644 "${unit_path}.new"
+  mv "${unit_path}.new" "$unit_path"
+
+  # 5. 启动
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >>"$LOG_FILE" 2>&1
+    # 若已运行，先 stop 以便替换后重启；失败（没启动过）忽略
+    systemctl stop energybot-agent 2>/dev/null || true
+    if ! systemctl enable --now energybot-agent >>"$LOG_FILE" 2>&1; then
+      err "energybot-agent 启动失败，详见：journalctl -u energybot-agent"
+      return 15
+    fi
+    ok "energybot-agent 服务已启动"
+    log "查看状态：systemctl status energybot-agent"
+    log "查看日志：journalctl -u energybot-agent -f"
+  else
+    warn "未检测到 systemd；请自行启动 $bin_path 并注入 $env_path 环境变量。"
+  fi
+}
+
 # ---------- 卸载 ----------
 do_uninstall() {
-  title "卸载 EnergyBot agent 配置（当前阶段仅清 license 文件）"
+  title "卸载 EnergyBot agent"
+  # 1. 停止 + disable systemd 服务
+  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files energybot-agent.service >/dev/null 2>&1; then
+    systemctl disable --now energybot-agent >>"$LOG_FILE" 2>&1 || true
+    ok "已停止并 disable energybot-agent.service"
+  fi
+  # 2. 清文件（保留 /var/log/energybot-agent 用于排障）
+  for f in /etc/systemd/system/energybot-agent.service /etc/energybot-agent/agent.env /opt/energybot-agent/bin/energybot-agent; do
+    if [ -e "$f" ]; then
+      rm -f "$f"
+      ok "已删除 $f"
+    fi
+  done
+  rmdir /opt/energybot-agent/bin /opt/energybot-agent /etc/energybot-agent 2>/dev/null || true
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload >>"$LOG_FILE" 2>&1 || true
+  fi
+  # 3. license 文件（保留原逻辑）
   if [ -f "$LICENSE_FILE" ]; then
     rm -f "$LICENSE_FILE"
     ok "已删除 $LICENSE_FILE"
@@ -438,10 +550,9 @@ do_uninstall() {
     log "$LICENSE_FILE 不存在，跳过。"
   fi
   if [ -d "$LICENSE_DIR" ]; then
-    # 只清 energybot 目录下的文件，不动其他；目录本身若空也删
     rmdir "$LICENSE_DIR" 2>/dev/null || true
   fi
-  ok "卸载完成。Docker 与日志文件未动；如需彻底清理请手动处理。"
+  ok "卸载完成。/var/log/energybot-agent 保留用于排障；用户 energybot-agent 保留（如需删除请手工 userdel）。"
   success_exit
 }
 
@@ -450,20 +561,22 @@ print_banner() {
   customer_name="$1"
   printf '\n'
   printf '%b╔══════════════════════════════════════════════════════════════╗%b\n' "$C_GREEN" "$C_RESET"
-  printf '%b║  EnergyBot 自托管 agent 基础配置完成                          ║%b\n' "$C_GREEN" "$C_RESET"
+  printf '%b║  EnergyBot 自托管 agent 部署完成                              ║%b\n' "$C_GREEN" "$C_RESET"
   printf '%b╚══════════════════════════════════════════════════════════════╝%b\n' "$C_GREEN" "$C_RESET"
-  printf '  客户      ：%s\n' "$customer_name"
+  printf '  客户        ：%s\n' "$customer_name"
   if [ "$VERIFY_ONLY" = "1" ]; then
-    printf '  模式      ：%bVERIFY_ONLY（未落盘、未装 Docker）%b\n' "$C_YELLOW" "$C_RESET"
+    printf '  模式        ：%bVERIFY_ONLY（未落盘、未装 Docker、未装 agent）%b\n' "$C_YELLOW" "$C_RESET"
   else
-    printf '  License   ：%s\n' "$LICENSE_FILE"
-    printf '  Docker    ：%s\n' "$(command -v docker >/dev/null 2>&1 && docker --version || printf '未安装')"
+    printf '  License     ：%s\n' "$LICENSE_FILE"
+    printf '  Docker      ：%s\n' "$(command -v docker >/dev/null 2>&1 && docker --version || printf '未安装')"
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active energybot-agent >/dev/null 2>&1; then
+      printf '  Agent       ：%b已运行%b（systemctl status energybot-agent）\n' "$C_GREEN" "$C_RESET"
+    else
+      printf '  Agent       ：%b未运行%b（请检查 journalctl -u energybot-agent）\n' "$C_YELLOW" "$C_RESET"
+    fi
   fi
   printf '\n'
-  printf '  %b下一步%b：在控制台 %s 配置机器人 Token\n' "$C_BOLD" "$C_RESET" "$SERVER_URL"
-  printf '\n'
-  printf '  %bAgent 远程控制功能开发中（子系统 B，预计 2 周上线）%b\n' "$C_YELLOW" "$C_RESET"
-  printf '  %b届时本服务器将自动接入控制台，无需重装。%b\n' "$C_YELLOW" "$C_RESET"
+  printf '  %b下一步%b：在控制台 %s 的「我的 Bot」页查看 agent 状态\n' "$C_BOLD" "$C_RESET" "$SERVER_URL"
   printf '\n'
 }
 
@@ -497,6 +610,7 @@ main() {
 
   install_docker
   write_license_file "$name"
+  install_agent
 
   print_banner "$name"
   success_exit

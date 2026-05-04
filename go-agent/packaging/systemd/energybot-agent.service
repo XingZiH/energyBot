@@ -1,17 +1,21 @@
 [Unit]
 Description=EnergyBot Agent
-Documentation=https://www.feiyijt.com/docs/agent
+Documentation=https://www.feiyijt.com
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=energybot
-Group=energybot
-EnvironmentFile=/etc/energybot/agent.env
-ExecStart=/usr/local/bin/energybot-agent
-Restart=on-failure
+User=energybot-agent
+Group=energybot-agent
+EnvironmentFile=/etc/energybot-agent/agent.env
+ExecStart=/opt/energybot-agent/bin/energybot-agent
+WorkingDirectory=/var/lib/energybot-agent
+
+# 退出策略：除 42（license 被吊销或被替换连接）外一律重启
+Restart=always
 RestartSec=5s
+RestartPreventExitStatus=42
 
 # 安全加固
 NoNewPrivileges=true
@@ -21,6 +25,7 @@ PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
+ReadWritePaths=/var/lib/energybot-agent /var/log/energybot-agent
 
 # 日志统一走 journald
 StandardOutput=journal
