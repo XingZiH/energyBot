@@ -1,0 +1,30 @@
+[Unit]
+Description=EnergyBot Agent
+Documentation=https://www.feiyijt.com/docs/agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=energybot
+Group=energybot
+EnvironmentFile=/etc/energybot/agent.env
+ExecStart=/usr/local/bin/energybot-agent
+Restart=on-failure
+RestartSec=5s
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# 日志统一走 journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+# Build artifacts
+dist/
+*.exe
+
+# Local dev
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/

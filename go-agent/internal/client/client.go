@@ -33,6 +33,10 @@ const helloID int64 = 1
 //
 // sendCh 生命周期：每轮 runOnce 在 hello OK 后创建、断连后置 nil 并 close。
 // SendHeartbeat 通过 sendChMu 保护对 sendCh 的读写引用。
+//
+// ready channel 生命周期：New 里构造，首次 hello OK + sendCh 就绪时 close 一次
+// 且永不 reset——语义为"agent 至少成功连过一次"。后续重连断连过程中 ready 保持
+// closed 状态，heartbeat 无需感知重连细节。
 type Client struct {
 	cfg       Config
 	parsedURL *url.URL
@@ -40,6 +44,10 @@ type Client struct {
 	// sendChMu 保护对 sendCh 指针的读写，确保 SendHeartbeat 与 runOnce 间无 race。
 	sendChMu sync.RWMutex
 	sendCh   chan []byte
+
+	// ready 在首次 hello OK 后被 close；readyOnce 保证多轮重连时不重复 close。
+	ready     chan struct{}
+	readyOnce sync.Once
 }
 
 // New 构造 Client。返错场景：Config 必填字段缺失，或 APIURL 无法解析 / scheme 非 ws|wss / host 为空。
@@ -58,7 +66,15 @@ func New(cfg Config) (*Client, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("client: invalid APIURL %q: empty host", cfg.APIURL)
 	}
-	return &Client{cfg: cfg, parsedURL: u}, nil
+	return &Client{cfg: cfg, parsedURL: u, ready: make(chan struct{})}, nil
+}
+
+// Ready 返一个 channel，在 client 首次进入 ready 状态（hello OK + sendCh 就绪）
+// 时被 close。close 后永远保持 closed，不随断连 reset——语义为"agent 至少成功
+// 连过一次"。调用方可 `<-cli.Ready()` 阻塞等待首次 ready，适合给 heartbeat 做
+// 冷启动同步。
+func (c *Client) Ready() <-chan struct{} {
+	return c.ready
 }
 
 // Run 阻塞执行主循环直到 ctx 取消或 terminal close。
@@ -223,6 +239,12 @@ func (c *Client) runOnce(ctx context.Context) (closeCode int, helloOK bool, err 
 	c.sendChMu.Unlock()
 
 	c.cfg.Logger.Printf("client: ready, send_buffer=%d", c.cfg.SendBuffer)
+
+	// 首次 ready 时 close(c.ready)，通知外部等待者（如 heartbeat）。
+	// readyOnce 保证多轮重连场景下不会重复 close 造成 panic。
+	c.readyOnce.Do(func() {
+		close(c.ready)
+	})
 
 	// 退出清理：先切断 sendCh 外部引用（让后续 SendHeartbeat 返 ErrSendBufferFull），
 	// 然后 close(stopCh) 让 writeLoop 退出；此时不 close(sendCh) 避免 race。

@@ -50,10 +50,29 @@ func (s *stubCollector) callCount() int {
 
 // stubSender 是 heartbeat 单元测试专用 Sender；记录每次入参，
 // 可注入 sendFn 控制返错路径。
+//
+// ready 字段用于模拟 Client.Ready() 语义：默认构造用 newStubSender(true) 返
+// 已 closed channel，让 heartbeat 测试跟旧行为等价；改 closed=false 构造开着
+// 的 channel，用于验证 heartbeat 在 ready 前不 tick。
 type stubSender struct {
 	mu     sync.Mutex
 	calls  []host.Metrics
 	sendFn func(call int, m host.Metrics) error
+	ready  chan struct{}
+}
+
+// newStubSender 构造 stubSender。readyClosed=true 表示"已进入 ready 状态"，
+// 这是绝大多数 heartbeat 测试的默认前提。
+func newStubSender(readyClosed bool) *stubSender {
+	ch := make(chan struct{})
+	if readyClosed {
+		close(ch)
+	}
+	return &stubSender{ready: ch}
+}
+
+func (s *stubSender) Ready() <-chan struct{} {
+	return s.ready
 }
 
 func (s *stubSender) SendHeartbeat(m host.Metrics) error {
@@ -98,7 +117,7 @@ func TestHeartbeat_New_RequiresSender(t *testing.T) {
 
 func TestHeartbeat_New_RequiresCollector(t *testing.T) {
 	_, err := NewHeartbeat(HeartbeatConfig{
-		Sender: &stubSender{},
+		Sender: newStubSender(true),
 	})
 	if err == nil {
 		t.Fatal("期望 err non-nil，缺 Collector 应报错")
@@ -112,7 +131,7 @@ func TestHeartbeat_New_RequiresCollector(t *testing.T) {
 
 func TestHeartbeat_New_DefaultsInterval30s(t *testing.T) {
 	hb, err := NewHeartbeat(HeartbeatConfig{
-		Sender:    &stubSender{},
+		Sender:    newStubSender(true),
 		Collector: &stubCollector{},
 	})
 	if err != nil {
@@ -138,7 +157,7 @@ func TestHeartbeat_Run_TickCallsSender(t *testing.T) {
 			return want, nil
 		},
 	}
-	sender := &stubSender{}
+	sender := newStubSender(true)
 
 	hb, err := NewHeartbeat(HeartbeatConfig{
 		Sender:    sender,
@@ -189,7 +208,7 @@ func TestHeartbeat_Run_SkipsOnCollectorError(t *testing.T) {
 			return okMetrics, nil
 		},
 	}
-	sender := &stubSender{}
+	sender := newStubSender(true)
 
 	hb, err := NewHeartbeat(HeartbeatConfig{
 		Sender:    sender,
@@ -244,10 +263,9 @@ func TestHeartbeat_Run_ContinuesOnBufferFull(t *testing.T) {
 			return host.Metrics{UptimeSeconds: 1}, nil
 		},
 	}
-	sender := &stubSender{
-		sendFn: func(_ int, _ host.Metrics) error {
-			return ErrSendBufferFull
-		},
+	sender := newStubSender(true)
+	sender.sendFn = func(_ int, _ host.Metrics) error {
+		return ErrSendBufferFull
 	}
 
 	hb, err := NewHeartbeat(HeartbeatConfig{
@@ -283,7 +301,7 @@ func TestHeartbeat_Run_ContinuesOnBufferFull(t *testing.T) {
 
 func TestHeartbeat_Run_CtxCancelReturnsNil(t *testing.T) {
 	hb, err := NewHeartbeat(HeartbeatConfig{
-		Sender:    &stubSender{},
+		Sender:    newStubSender(true),
 		Collector: &stubCollector{},
 		Interval:  1 * time.Hour, // ticker 不会触发
 		Logger:    quietLogger(),
@@ -313,7 +331,7 @@ func TestHeartbeat_Run_CtxCancelReturnsNil(t *testing.T) {
 // --- Case 8: 首次 tick 非立即 ---
 
 func TestHeartbeat_FirstTickNotImmediate(t *testing.T) {
-	sender := &stubSender{}
+	sender := newStubSender(true)
 	hb, err := NewHeartbeat(HeartbeatConfig{
 		Sender:    sender,
 		Collector: &stubCollector{},
@@ -336,6 +354,58 @@ func TestHeartbeat_FirstTickNotImmediate(t *testing.T) {
 
 	if got != 0 {
 		t.Fatalf("首次 tick 不应立即发，50ms 时 sender 应 0 次，实际 %d", got)
+	}
+}
+
+// --- Case 8b: Run 会等待 Sender.Ready() 后才开始 tick ---
+//
+// 语义：heartbeat 依赖 Client 的 ready 信号（首次 hello OK），ready 前即便
+// ticker 到期也不应发心跳（会撞 ErrSendBufferFull）。
+func TestHeartbeat_Run_WaitsForReady(t *testing.T) {
+	sender := newStubSender(false) // ready 未 close
+	col := &stubCollector{
+		sampleFn: func(_ int) (host.Metrics, error) {
+			return host.Metrics{UptimeSeconds: 1}, nil
+		},
+	}
+	hb, err := NewHeartbeat(HeartbeatConfig{
+		Sender:    sender,
+		Collector: col,
+		Interval:  20 * time.Millisecond,
+		Logger:    quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewHeartbeat: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- hb.Run(ctx) }()
+
+	// interval=20ms 跑 100ms 足够多次；若 heartbeat 不等 ready，此时应有 >0 次调用。
+	time.Sleep(100 * time.Millisecond)
+	if n := sender.callCount(); n != 0 {
+		t.Fatalf("ready 前 heartbeat 不应发送，实际调用 %d 次", n)
+	}
+	// Collector 也不应被调用（合理推论：tick 本身没有跑过）。
+	if n := col.callCount(); n != 0 {
+		t.Fatalf("ready 前 collector 不应被调用，实际 %d 次", n)
+	}
+
+	// 开闸：close ready，heartbeat 应在下一个 interval 后开始 tick。
+	close(sender.ready)
+	waitFor(t, 500*time.Millisecond, func() bool {
+		return sender.callCount() >= 1
+	}, "ready 后应开始 tick")
+
+	cancel()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("Run 应返 nil，实际: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run 未在 ctx cancel 后退出")
 	}
 }
 

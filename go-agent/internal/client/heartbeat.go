@@ -24,9 +24,13 @@ type Heartbeat struct {
 }
 
 // heartbeatSender 仅为测试时注入 fake 留的最小接口，生产即 *Client。
-// （按决策 D5 实际集成测试走真 Client，但保留此 interface 方便单元测试隔离失败分支。）
+//
+// Ready() 返 client 的 ready 信号（首次 hello OK 后被 close）。heartbeat
+// 启动后先阻塞等待 ready，避免在 client 尚未进入 ready 时发心跳造成
+// ErrSendBufferFull 日志噪声。
 type heartbeatSender interface {
 	SendHeartbeat(host.Metrics) error
+	Ready() <-chan struct{}
 }
 
 // HeartbeatConfig 是 Heartbeat 构造参数。
@@ -67,12 +71,25 @@ func NewHeartbeat(cfg HeartbeatConfig) (*Heartbeat, error) {
 }
 
 // Run 按 interval 周期采集并发送 heartbeat。ctx 取消时返 nil。
-// 首次 tick 等一个完整 interval 后触发（time.NewTicker 语义）。
+//
+// 进入 tick loop 前先等 sender.Ready()：这是 Client 首次 hello OK 的信号。
+// 如此 heartbeat 的"首发"时刻 = max(interval, hello 完成时刻)，避免在 client
+// 未就绪时发送、触发 ErrSendBufferFull 日志污染。若 ctx 先于 ready 取消，
+// Run 直接返 nil。
+//
+// 首次 tick 在等完 Ready 后再等一个完整 interval 才触发（time.NewTicker 语义）。
 func (h *Heartbeat) Run(ctx context.Context) error {
+	// 等 client 首次进入 ready 状态。
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-h.sender.Ready():
+	}
+	h.logger.Printf("heartbeat: client ready, interval=%v", h.interval)
+
 	ticker := time.NewTicker(h.interval)
 	defer ticker.Stop()
 
-	h.logger.Printf("heartbeat: started, interval=%v", h.interval)
 	for {
 		select {
 		case <-ctx.Done():

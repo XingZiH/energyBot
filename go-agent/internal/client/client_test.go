@@ -674,3 +674,89 @@ func TestClient_New_UnsupportedScheme_ReturnsError(t *testing.T) {
 		t.Errorf("err message 未含 scheme，got: %v", err)
 	}
 }
+
+// Case 13: hello OK 后 Ready() channel 被 close。
+//
+// 验证语义：Client.Ready() 是 heartbeat 等待首次可发心跳的信号。hello 握手
+// 成功后，sendCh 已就绪，Ready 必须立即解除阻塞。
+func TestClient_Ready_ClosedAfterHelloOK(t *testing.T) {
+	ms := newMockServer(t, nil,
+		func(conn *websocket.Conn, data []byte) {
+			replyHelloOK(conn, data)
+			// 保持连接存活，让 cli 维持 ready 状态。
+		},
+	)
+
+	cfg := baseConfig(ms.URL)
+	cli, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- cli.Run(ctx) }()
+
+	select {
+	case <-cli.Ready():
+		// 预期路径。
+	case <-time.After(1 * time.Second):
+		t.Fatal("Ready() 在 1s 内未被 close（hello 已应答）")
+	}
+
+	// 二次读取应立即返回（已 closed channel 永不阻塞）。
+	select {
+	case <-cli.Ready():
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("Ready() 二次读取应立即返回（closed channel）")
+	}
+
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run 未退出")
+	}
+}
+
+// Case 14: hello 前 Ready() channel 不 close（select default 能走到）。
+//
+// server 不应答 hello，client 卡在 helloTimeout；此期间 Ready() 不应已 close，
+// 否则 heartbeat 会在 client 尚未 ready 时发送、撞上 ErrSendBufferFull。
+func TestClient_Ready_BeforeHello_DoesNotClose(t *testing.T) {
+	ms := newMockServer(t, nil, nil) // onMessage=nil：不回 hello
+
+	cfg := baseConfig(ms.URL)
+	cfg.HelloTimeout = 500 * time.Millisecond
+	cli, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- cli.Run(ctx) }()
+
+	// 等确认 server 已收到 upgrade，client 正等 hello 应答。
+	waitFor(t, 500*time.Millisecond, func() bool {
+		return ms.dials() >= 1
+	}, "server 未收到 upgrade")
+
+	// 在 helloTimeout 到期前（留 200ms 安全距离）抽样多次。
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		select {
+		case <-cli.Ready():
+			t.Fatal("hello 未完成，Ready() 不应被 close")
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case <-runDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run 未退出")
+	}
+}
