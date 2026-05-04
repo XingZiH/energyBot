@@ -27,7 +27,7 @@ describe('parseJsonRpc', () => {
 
 describe('jsonRpcError / jsonRpcResult', () => {
   it('jsonRpcError 输出正确结构', () => {
-    const s = jsonRpcError(42, AgentRpcErrorCode.LICENSE_REVOKED, 'bye');
+    const s = jsonRpcError(42, AgentRpcErrorCode.BAD_REQUEST, 'bye');
     expect(JSON.parse(s)).toEqual({
       jsonrpc: '2.0', id: 42,
       error: { code: -40001, message: 'bye' },
@@ -37,6 +37,18 @@ describe('jsonRpcError / jsonRpcResult', () => {
   it('jsonRpcResult 输出正确结构', () => {
     const s = jsonRpcResult(42, { ok: true });
     expect(JSON.parse(s)).toEqual({ jsonrpc: '2.0', id: 42, result: { ok: true } });
+  });
+});
+
+describe('AgentRpcErrorCode 常量', () => {
+  it('业务错误码值对齐计划 D5 语义', () => {
+    expect(AgentRpcErrorCode).toEqual({
+      BAD_REQUEST: -40001,
+      LICENSE_REVOKED: -40003,
+      FLAPPING: -40013,
+      NOT_READY: -40029,
+      REPLACED: -40041,
+    });
   });
 });
 

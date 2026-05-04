@@ -20,12 +20,21 @@ export const JsonRpcErrorCode = {
   InternalError: -32603,
 } as const;
 
-/** B1 自定义业务错误码（-40xxx 段） */
+/**
+ * B1 自定义业务错误码（-40xxx 段）。
+ *
+ * 语义与值对齐 AgentGateway 决策表（计划 D5）：
+ *   BAD_REQUEST        客户端协议/参数/签名/时钟/nonce 等可改正错误（WS close 1008）
+ *   LICENSE_REVOKED    license/customer 状态类错误，客户端应退出不重连（WS close 4003）
+ *   FLAPPING           300ms 抗抖动，新连接被拒（WS close 4013）
+ *   NOT_READY          gateway 级状态机错位（未 hello 发心跳 / 已 hello 重发 hello）
+ *   REPLACED           后来者赢，旧连接被替换（**保留给协议文档；当前实现只用 WS close 4001，不发此 JSON-RPC 码**）
+ */
 export const AgentRpcErrorCode = {
-  LICENSE_REVOKED: -40001,
-  SIGNATURE_INVALID: -40003,
-  CLOCK_SKEW: -40013,
-  NONCE_REPLAYED: -40029,
+  BAD_REQUEST: -40001,
+  LICENSE_REVOKED: -40003,
+  FLAPPING: -40013,
+  NOT_READY: -40029,
   REPLACED: -40041,
 } as const;
 
