@@ -5,6 +5,7 @@ go 1.26.2
 require (
 	github.com/fbsobreira/gotron-sdk v0.26.0
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/mattn/go-sqlite3 v1.14.44
 )
 
 require (
