@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal 
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { finalize } from 'rxjs/operators';
+import { timer } from 'rxjs';
 
 import {
   MyBotAgentView,
@@ -10,18 +11,22 @@ import {
 import { PageHeaderType, PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 import { NzAlertModule } from 'ng-zorro-antd/alert';
+import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzCardModule } from 'ng-zorro-antd/card';
 import { NzDescriptionsModule } from 'ng-zorro-antd/descriptions';
 import { NzDividerModule } from 'ng-zorro-antd/divider';
 import { NzEmptyModule } from 'ng-zorro-antd/empty';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzMessageService } from 'ng-zorro-antd/message';
+import { NzModalService } from 'ng-zorro-antd/modal';
+import { NzPopconfirmModule } from 'ng-zorro-antd/popconfirm';
 import { NzProgressModule } from 'ng-zorro-antd/progress';
 import { NzSpaceModule } from 'ng-zorro-antd/space';
 import { NzSpinModule } from 'ng-zorro-antd/spin';
 import { NzStatisticModule } from 'ng-zorro-antd/statistic';
 import { NzTableModule } from 'ng-zorro-antd/table';
 import { NzTagModule } from 'ng-zorro-antd/tag';
+import { NzTooltipModule } from 'ng-zorro-antd/tooltip';
 import { NzTypographyModule } from 'ng-zorro-antd/typography';
 
 /**
@@ -48,17 +53,20 @@ import { NzTypographyModule } from 'ng-zorro-antd/typography';
     DecimalPipe,
     PageHeaderComponent,
     NzAlertModule,
+    NzButtonModule,
     NzCardModule,
     NzDescriptionsModule,
     NzDividerModule,
     NzEmptyModule,
     NzIconModule,
+    NzPopconfirmModule,
     NzProgressModule,
     NzSpaceModule,
     NzSpinModule,
     NzStatisticModule,
     NzTableModule,
     NzTagModule,
+    NzTooltipModule,
     NzTypographyModule,
   ],
 })
@@ -74,9 +82,16 @@ export class MyBotComponent implements OnInit {
   readonly errorMessage = signal<string | null>(null);
   readonly expandedIds = signal<Set<number>>(new Set());
 
+  /**
+   * 正在下发 action 的 licenseId 集合。用于禁用按钮防重复点击。
+   * 不用 loading 整体标志：同一页多 agent 时要允许并行操作不同 license。
+   */
+  readonly actionInFlight = signal<Set<number>>(new Set());
+
   private destroyRef = inject(DestroyRef);
   private dataService = inject(MyBotService);
   private message = inject(NzMessageService);
+  private modal = inject(NzModalService);
 
   ngOnInit(): void {
     this.loadAgents();
@@ -184,5 +199,135 @@ export class MyBotComponent implements OnInit {
       next.delete(id);
     }
     this.expandedIds.set(next);
+  }
+
+  // ================= B3-T5 bot 生命周期操作 =================
+
+  /**
+   * bot 运行态 → nz-tag 颜色。
+   * 与 agent 的 status 独立展示——agent 可能 online 但 bot stopped（未启动）。
+   */
+  botStatusColor(botStatus: string | null): string {
+    switch (botStatus) {
+      case 'running':
+        return 'green';
+      case 'starting':
+        return 'blue';
+      case 'stopped':
+        return 'default';
+      case 'error':
+        return 'red';
+      case 'unknown':
+      default:
+        return 'default';
+    }
+  }
+
+  botStatusLabel(botStatus: string | null): string {
+    switch (botStatus) {
+      case 'running':
+        return '运行中';
+      case 'starting':
+        return '启动中';
+      case 'stopped':
+        return '已停止';
+      case 'error':
+        return '错误';
+      case 'unknown':
+        return '未知';
+      case null:
+      case undefined:
+      default:
+        return '未启用'; // 旧版 agent 或未挂 supervisor
+    }
+  }
+
+  /**
+   * 启动按钮可点：agent 在线 + bot 为 stopped/error/unknown。
+   * running/starting 时禁用避免重复启动。botStatus===null 也允许点击——
+   * 给客户一个「试一次」的机会，若 agent 不支持后端会 503（dispatcher 未注册）。
+   */
+  canStart(a: MyBotAgentView): boolean {
+    if (a.status !== 'online') return false;
+    if (this.actionInFlight().has(a.licenseId)) return false;
+    return a.botStatus !== 'running' && a.botStatus !== 'starting';
+  }
+
+  /**
+   * 停止按钮可点：agent 在线 + bot 处于 running/starting/error。
+   * stopped/unknown/null 时无意义。
+   */
+  canStop(a: MyBotAgentView): boolean {
+    if (a.status !== 'online') return false;
+    if (this.actionInFlight().has(a.licenseId)) return false;
+    return a.botStatus === 'running' || a.botStatus === 'starting' || a.botStatus === 'error';
+  }
+
+  /**
+   * 重载按钮可点：agent 在线 + bot 运行中。
+   * 非 running 时走「启动」而非「重载」，避免语义混淆。
+   */
+  canReload(a: MyBotAgentView): boolean {
+    if (a.status !== 'online') return false;
+    if (this.actionInFlight().has(a.licenseId)) return false;
+    return a.botStatus === 'running';
+  }
+
+  isActionInFlight(licenseId: number): boolean {
+    return this.actionInFlight().has(licenseId);
+  }
+
+  startBot(a: MyBotAgentView): void {
+    this.dispatchAction(a.licenseId, this.dataService.startBot(a.licenseId), '启动指令已下发');
+  }
+
+  stopBot(a: MyBotAgentView): void {
+    this.dispatchAction(a.licenseId, this.dataService.stopBot(a.licenseId), '停止指令已下发');
+  }
+
+  reloadBot(a: MyBotAgentView): void {
+    this.dispatchAction(a.licenseId, this.dataService.reloadBot(a.licenseId), '重载指令已下发');
+  }
+
+  /**
+   * 统一下发路径：
+   * 1. 标记 actionInFlight，防抖
+   * 2. 发 HTTP；BaseHttpService 已处理错误 toast（503 "agent 不在线" 等）
+   * 3. 成功后延迟 2s 再拉列表——给 agent 时间上报新的 bot 状态
+   *
+   * 未做乐观 UI 更新：真实状态以心跳回传为准；立即改本地状态会在 agent 启动
+   * 失败时误导用户。
+   */
+  private dispatchAction(
+    licenseId: number,
+    obs: ReturnType<MyBotService['startBot']>,
+    _successMsg: string,
+  ): void {
+    const mark = new Set(this.actionInFlight());
+    mark.add(licenseId);
+    this.actionInFlight.set(mark);
+
+    obs
+      .pipe(
+        finalize(() => {
+          // 2s 后刷新列表（心跳间隔最长 30s，但主动 action 后 agent 会立刻 heartbeat）
+          timer(2000)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe(() => {
+              this.loadAgents();
+            });
+          // 无论成功失败都解除 in-flight（刷新完成与否与此解耦）
+          const next = new Set(this.actionInFlight());
+          next.delete(licenseId);
+          this.actionInFlight.set(next);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        // BaseHttpService 的 needSuccessInfo: true 会自动 toast 成功信息，不再手动
+        // 处理。error 分支也由 BaseHttpService 统一 toast，这里只需静默。
+        next: () => { /* no-op */ },
+        error: () => { /* no-op，BaseHttpService 已 toast */ },
+      });
   }
 }

@@ -49,10 +49,13 @@ export function parseJsonRpc(raw: string): ParseResult {
   } catch {
     return { ok: false, code: JsonRpcErrorCode.ParseError };
   }
-  if (!obj || typeof obj !== 'object') return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+  if (!obj || typeof obj !== 'object')
+    return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
   const m = obj as Record<string, unknown>;
-  if (m.jsonrpc !== '2.0') return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
-  if (typeof m.method !== 'string' || !m.method) return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+  if (m.jsonrpc !== '2.0')
+    return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+  if (typeof m.method !== 'string' || !m.method)
+    return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
   return {
     ok: true,
     msg: {
@@ -64,7 +67,10 @@ export function parseJsonRpc(raw: string): ParseResult {
   };
 }
 
-export function jsonRpcResult(id: JsonRpcMessage['id'], result: unknown): string {
+export function jsonRpcResult(
+  id: JsonRpcMessage['id'],
+  result: unknown,
+): string {
   return JSON.stringify({ jsonrpc: '2.0', id, result });
 }
 
@@ -77,4 +83,16 @@ export function jsonRpcError(
   const err: Record<string, unknown> = { code, message };
   if (data !== undefined) err.data = data;
   return JSON.stringify({ jsonrpc: '2.0', id, error: err });
+}
+
+/**
+ * JSON-RPC 2.0 notification（服务端 → 客户端，无 id，不期望回包）。
+ *
+ * 使用场景（B3-T5）：主站下发 bot.start/bot.stop/bot.reload 到 agent。
+ * agent 端 client.handleServerFrame 识别「无 id + method」→ 调 Dispatcher。
+ */
+export function jsonRpcNotification(method: string, params?: unknown): string {
+  const frame: Record<string, unknown> = { jsonrpc: '2.0', method };
+  if (params !== undefined) frame.params = params;
+  return JSON.stringify(frame);
 }

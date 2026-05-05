@@ -5,6 +5,8 @@
 .host-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .host-name {
@@ -53,4 +55,11 @@
 
 .mt-16 {
   margin-top: 16px;
+}
+
+.bot-error-msg {
+  color: #cf1322;
+  word-break: break-word;
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-size: 12px;
 }

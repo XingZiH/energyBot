@@ -32,6 +32,15 @@ export interface MyBotAgentView {
   loadavg1: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+
+  // B3-T5：bot 运行态。agent 未启用 supervisor / 旧版 agent → 全 null。
+  // botStatus 取值：'unknown' | 'stopped' | 'starting' | 'running' | 'error' | null
+  botStatus: string | null;
+  botPid: number | null;
+  botUptimeSeconds: number | null;
+  botConfigVersion: string | null;
+  botLastTgPollAt: string | null;
+  botLastError: string | null;
 }
 
 /**
@@ -40,6 +49,13 @@ export interface MyBotAgentView {
  * 设计：
  * - 不接受任何 userId/customerId 入参——后端只信 JWT.userId
  * - 返回当前用户所属客户名下全部 agent；未绑定客户时后端 404，由前端展示"空状态"
+ *
+ * B3-T5 新增动作接口（start/stop/reload）：
+ * - 后端 204 + ResultData.success(null) 语义；ownership 校验后才下发 WS notification
+ * - 下发 fire-and-forget；真实状态由下一次心跳 bot 字段回传，前端应在动作后
+ *   延迟 ~2s 再 poll findMine() 刷新
+ * - 后端错误码：404（未绑客户）/ 403（licenseId 不属己）/ 503（agent 离线）
+ *   BaseHttpService 会 toast 错误，组件层只需 catchError 后恢复按钮 disabled
  */
 @Injectable({ providedIn: 'root' })
 export class MyBotService {
@@ -47,5 +63,17 @@ export class MyBotService {
 
   public findMine(): Observable<MyBotAgentView[]> {
     return this.http.get('/my-bot');
+  }
+
+  public startBot(licenseId: number): Observable<null> {
+    return this.http.post(`/my-bot/${licenseId}/start`, null, { needSuccessInfo: true });
+  }
+
+  public stopBot(licenseId: number): Observable<null> {
+    return this.http.post(`/my-bot/${licenseId}/stop`, null, { needSuccessInfo: true });
+  }
+
+  public reloadBot(licenseId: number): Observable<null> {
+    return this.http.post(`/my-bot/${licenseId}/reload`, null, { needSuccessInfo: true });
   }
 }

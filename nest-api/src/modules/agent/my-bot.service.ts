@@ -34,6 +34,16 @@ export interface MyBotAgentView {
   loadavg1: string | null; // numeric → string
   createdAt: string | null; // ISO
   updatedAt: string | null; // ISO
+
+  // B3-T5：agent 心跳上报的 bot 运行态（若 agent 未挂 supervisor → 全 null）
+  // 前端据此决定「开启/停止/重载」按钮的 enable/disable 与 Tag 颜色。
+  // 字段与 agentsTable 的 bot_* 列一一对应，命名保持 camelCase。
+  botStatus: string | null; // 'unknown' | 'stopped' | 'starting' | 'running' | 'error' | null
+  botPid: number | null;
+  botUptimeSeconds: number | null;
+  botConfigVersion: string | null;
+  botLastTgPollAt: string | null; // ISO
+  botLastError: string | null;
 }
 
 /**
@@ -108,6 +118,12 @@ export class MyBotService {
       loadavg1: a.loadavg1,
       createdAt: a.createdAt?.toISOString() ?? null,
       updatedAt: a.updatedAt?.toISOString() ?? null,
+      botStatus: a.botStatus ?? null,
+      botPid: a.botPid ?? null,
+      botUptimeSeconds: a.botUptimeSeconds ?? null,
+      botConfigVersion: a.botConfigVersion ?? null,
+      botLastTgPollAt: a.botLastTgPollAt?.toISOString() ?? null,
+      botLastError: a.botLastError ?? null,
     };
   }
 }
