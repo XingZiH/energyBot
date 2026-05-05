@@ -84,7 +84,10 @@ func main() {
 		}
 		botMgr.SetEnv(buildBotEnv(botDBPath))
 		botProvider = botMgr
-		dispatcher = newBotDispatcher(botMgr, ebtlog.StdLogger(zl, "dispatcher"))
+		bd := newBotDispatcher(botMgr, ebtlog.StdLogger(zl, "dispatcher"))
+		// T11.5：dispatcher 需要 bot binary 路径来执行 apply-config 子命令
+		bd.botBinary = cfg.BotBinary
+		dispatcher = bd
 		agentLog.Printf("supervisor: 启用 bot 管理，binary=%s，db=%s", cfg.BotBinary, botDBPath)
 	} else {
 		agentLog.Printf("supervisor: 未配置 EBT_BOT_BINARY，跳过 bot 管理（B2 兼容模式）")
