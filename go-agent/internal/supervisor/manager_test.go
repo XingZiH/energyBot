@@ -13,6 +13,7 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,21 +54,42 @@ type processExit struct {
 
 type fakeProcess struct {
 	pid       int
-	signalLog []string
-	killed    bool
 	exitCh    chan processExit
+
+	mu        sync.Mutex // 保护 signalLog/killed —— Manager.Stop 在 goroutine
+	signalLog []string   // 中调 Signal/Kill，主测试 goroutine 读断言；-race 必须加锁
+	killed    bool
 }
 
 func (p *fakeProcess) Pid() int { return p.pid }
 
 func (p *fakeProcess) Signal(sig string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.signalLog = append(p.signalLog, sig)
 	return nil
 }
 
 func (p *fakeProcess) Kill() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.killed = true
 	return nil
+}
+
+// wasKilled / signalsCopy —— 测试只读快照，避免外部直接读裸字段触发 race。
+func (p *fakeProcess) wasKilled() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.killed
+}
+
+func (p *fakeProcess) signalsCopy() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, len(p.signalLog))
+	copy(out, p.signalLog)
+	return out
 }
 
 // Wait 阻塞直到 triggerExit 被调用或 ctx 取消。
@@ -181,10 +203,11 @@ func TestManager_Stop_WhenRunning_SendsSigterm(t *testing.T) {
 	if err := m.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if len(proc.signalLog) == 0 || proc.signalLog[0] != "SIGTERM" {
-		t.Errorf("signalLog want=[SIGTERM] got=%v", proc.signalLog)
+	sigs := proc.signalsCopy()
+	if len(sigs) == 0 || sigs[0] != "SIGTERM" {
+		t.Errorf("signalLog want=[SIGTERM] got=%v", sigs)
 	}
-	if proc.killed {
+	if proc.wasKilled() {
 		t.Error("Kill should not be called on graceful exit")
 	}
 	snap, _ := m.Snapshot()
@@ -210,7 +233,7 @@ func TestManager_Stop_GraceTimeout_ForcesKill(t *testing.T) {
 
 	// 等 Kill 调用（通常在 stopGrace 到期后）
 	time.Sleep(80 * time.Millisecond)
-	if !proc.killed {
+	if !proc.wasKilled() {
 		t.Fatal("Kill should be called after grace timeout")
 	}
 	// 模拟 Kill 后进程退出
