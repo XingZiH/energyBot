@@ -253,36 +253,9 @@ func newBot(cfg config.Config, db *sql.DB, logger *log.Logger, agentID int, toke
 }
 
 func LoadEnabledAgentBots(ctx context.Context, cfg config.Config, db *sql.DB, logger *log.Logger) ([]*Bot, error) {
-	rows, err := db.QueryContext(ctx, `
-select c.agent_id, c.telegram_bot_token
-from agent_bot_configs c
-join agent_profiles p on p.id = c.agent_id
-where c.bot_status = 'enabled'
-  and c.telegram_bot_token is not null
-  and btrim(c.telegram_bot_token) <> ''
-  and p.status = 'active'
-  and c.deleted_at is null
-  and p.deleted_at is null
-order by c.agent_id asc`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var bots []*Bot
-	for rows.Next() {
-		var agentID int
-		var token string
-		if err := rows.Scan(&agentID, &token); err != nil {
-			return nil, err
-		}
-		bot, err := NewAgentBot(cfg, db, logger, agentID, token)
-		if err != nil {
-			return nil, err
-		}
-		bots = append(bots, bot)
-	}
-	return bots, rows.Err()
+	// B3 客户机单 agent 视角：bot 只通过 botruntime.Manager 派生 platform target
+	// 启动，无主站多租户场景。保留函数签名兼容老代码，但返回空。
+	return nil, nil
 }
 
 func (b *Bot) agentIDParam() any {
@@ -645,22 +618,12 @@ func (b *Bot) packageButtonTextByID(ctx context.Context) map[int]string {
 
 func (b *Bot) loadDesignerConfig(ctx context.Context) (BotDesignerConfig, error) {
 	var welcomeText, messageConfigRaw, menuConfigRaw string
-	var err error
-	if b.agentID > 0 {
-		err = b.db.QueryRowContext(ctx, `
+	// B3 客户机：bot 设计器配置统一存 bot_config 单例（id=1）
+	err := b.db.QueryRowContext(ctx, `
 select coalesce(welcome_text, ''), coalesce(message_config, ''), coalesce(menu_config, '')
-from agent_bot_configs
-where agent_id = $1
-  and deleted_at is null
-limit 1`, b.agentID).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
-	} else {
-		err = b.db.QueryRowContext(ctx, `
-select coalesce(welcome_text, ''), coalesce(message_config, ''), coalesce(menu_config, '')
-from energy_platform_config
+from bot_config
 where id = 1
-  and deleted_at is null
 limit 1`).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
-	}
 	if err != nil {
 		return BotDesignerConfig{}, err
 	}
@@ -722,18 +685,16 @@ select p.id,
        p.package_name,
        coalesce(base.energy_amount, p.energy_amount),
        coalesce(base.duration_hours, p.duration_hours),
-       p.price_sun::text,
-       coalesce(p.idle_price_sun, p.price_sun)::text,
-       coalesce(p.busy_price_sun, p.price_sun)::text
+       p.price_sun,
+       coalesce(p.idle_price_sun, p.price_sun),
+       coalesce(p.busy_price_sun, p.price_sun)
 from energy_packages p
 left join energy_packages base on base.id = p.platform_package_id and base.deleted_at is null
 where p.status = 'active'
   and p.deleted_at is null
-  and (
-    ($1::integer is null and p.package_kind = 'admin_package' and p.agent_id is null)
-    or ($1::integer is not null and p.package_kind = 'user_package' and p.agent_id is not distinct from $1::integer and coalesce(base.status, 'active') = 'active')
-  )
-order by p.sort_order asc, p.id asc`, b.agentIDParam())
+  and p.package_kind = 'user_package'
+  and coalesce(base.status, 'active') = 'active'
+order by p.sort_order asc, p.id asc`)
 	if err != nil {
 		return nil, err
 	}
@@ -758,18 +719,16 @@ select p.id,
        p.package_name,
        coalesce(base.energy_amount, p.energy_amount),
        coalesce(base.duration_hours, p.duration_hours),
-       p.price_sun::text,
-       coalesce(p.idle_price_sun, p.price_sun)::text,
-       coalesce(p.busy_price_sun, p.price_sun)::text
+       p.price_sun,
+       coalesce(p.idle_price_sun, p.price_sun),
+       coalesce(p.busy_price_sun, p.price_sun)
 from energy_packages p
 left join energy_packages base on base.id = p.platform_package_id and base.deleted_at is null
-where p.id = $1
+where p.id = ?1
   and p.status = 'active'
   and p.deleted_at is null
-  and (
-    ($2::integer is null and p.package_kind = 'admin_package' and p.agent_id is null)
-    or ($2::integer is not null and p.package_kind = 'user_package' and p.agent_id is not distinct from $2::integer and coalesce(base.status, 'active') = 'active')
-  )`, id, b.agentIDParam()).
+  and p.package_kind = 'user_package'
+  and coalesce(base.status, 'active') = 'active'`, id).
 		Scan(&pkg.ID, &pkg.PackageName, &pkg.EnergyAmount, &pkg.DurationHours, &pkg.PriceSun, &pkg.IdlePriceSun, &pkg.BusyPriceSun)
 	if err != nil {
 		return EnergyPackage{}, err
@@ -782,11 +741,10 @@ func (b *Bot) listUserAddresses(ctx context.Context, chatID int64) ([]UserAddres
 	rows, err := b.db.QueryContext(ctx, `
 select id, telegram_chat_id, label, address, is_default
 from energy_user_addresses
-where telegram_chat_id = $1
-  and agent_id is not distinct from $2
+where telegram_chat_id = ?1
   and status = 'active'
   and deleted_at is null
-order by is_default desc, id asc`, chatID, b.agentIDParam())
+order by is_default desc, id asc`, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -808,11 +766,10 @@ func (b *Bot) findUserAddress(ctx context.Context, chatID int64, addressID int) 
 	err := b.db.QueryRowContext(ctx, `
 select id, telegram_chat_id, label, address, is_default
 from energy_user_addresses
-where id = $1
-  and telegram_chat_id = $2
-  and agent_id is not distinct from $3
+where id = ?1
+  and telegram_chat_id = ?2
   and status = 'active'
-  and deleted_at is null`, addressID, chatID, b.agentIDParam()).
+  and deleted_at is null`, addressID, chatID).
 		Scan(&item.ID, &item.TelegramChatID, &item.Label, &item.Address, &item.IsDefault)
 	if err != nil {
 		return UserAddress{}, err
@@ -839,8 +796,8 @@ func (b *Bot) createUserAddress(ctx context.Context, chatID int64, address strin
 	label := fmt.Sprintf("地址%d", len(addresses)+1)
 	_, err = b.db.ExecContext(ctx, `
 insert into energy_user_addresses (
-  agent_id, telegram_chat_id, label, address, is_default, status, created_at, updated_at
-) values ($1, $2, $3, $4, $5, 'active', $6, $6)`, b.agentIDParam(), chatID, label, address, isDefault, time.Now())
+  telegram_chat_id, label, address, is_default, status, created_at, updated_at
+) values (?1, ?2, ?3, ?4, 'active', ?5, ?5)`, chatID, label, address, isDefault, time.Now())
 	return err
 }
 
@@ -866,12 +823,11 @@ func (b *Bot) updateUserAddress(ctx context.Context, chatID int64, addressID int
 
 	tag, err := b.db.ExecContext(ctx, `
 update energy_user_addresses
-set address = $1, updated_at = $2
-where id = $3
-  and telegram_chat_id = $4
-  and agent_id is not distinct from $5
+set address = ?1, updated_at = ?2
+where id = ?3
+  and telegram_chat_id = ?4
   and status = 'active'
-  and deleted_at is null`, address, time.Now(), addressID, chatID, b.agentIDParam())
+  and deleted_at is null`, address, time.Now(), addressID, chatID)
 	if err != nil {
 		return err
 	}
@@ -893,12 +849,11 @@ func (b *Bot) deleteUserAddress(ctx context.Context, chatID int64, addressID int
 	now := time.Now()
 	tag, err := b.db.ExecContext(ctx, `
 update energy_user_addresses
-set status = 'deleted', deleted_at = $1, updated_at = $1, is_default = false
-where id = $2
-  and telegram_chat_id = $3
-  and agent_id is not distinct from $4
+set status = 'deleted', deleted_at = ?1, updated_at = ?1, is_default = 0
+where id = ?2
+  and telegram_chat_id = ?3
   and status = 'active'
-  and deleted_at is null`, now, addressID, chatID, b.agentIDParam())
+  and deleted_at is null`, now, addressID, chatID)
 	if err != nil {
 		return err
 	}
@@ -912,16 +867,15 @@ where id = $2
 	if address.IsDefault {
 		_, _ = b.db.ExecContext(ctx, `
 update energy_user_addresses
-set is_default = true, updated_at = $1
+set is_default = 1, updated_at = ?1
 where id = (
   select id from energy_user_addresses
-  where telegram_chat_id = $2
-    and agent_id is not distinct from $3
+  where telegram_chat_id = ?2
     and status = 'active'
     and deleted_at is null
   order by id asc
   limit 1
-)`, now, chatID, b.agentIDParam())
+)`, now, chatID)
 	}
 	return nil
 }
@@ -933,12 +887,11 @@ func (b *Bot) setDefaultUserAddress(ctx context.Context, chatID int64, addressID
 	now := time.Now()
 	_, err := b.db.ExecContext(ctx, `
 update energy_user_addresses
-set is_default = case when id = $1 then true else false end,
-    updated_at = $2
-where telegram_chat_id = $3
-  and agent_id is not distinct from $4
+set is_default = case when id = ?1 then 1 else 0 end,
+    updated_at = ?2
+where telegram_chat_id = ?3
   and status = 'active'
-  and deleted_at is null`, addressID, now, chatID, b.agentIDParam())
+  and deleted_at is null`, addressID, now, chatID)
 	return err
 }
 
@@ -1069,11 +1022,10 @@ func (b *Bot) createOrder(ctx context.Context, packageID int, receiverAddress st
 	expiresAt := now.Add(b.orderPaymentTTL)
 	_, err = b.db.ExecContext(ctx, `
 insert into energy_orders (
-  agent_id, order_no, package_id, package_name, buyer_address, receiver_address,
+  order_no, package_id, package_name, buyer_address, receiver_address,
   energy_amount, duration_hours, payment_amount_sun, payment_expires_at,
   status, return_status, energy_provider, remark, created_at, updated_at
-) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', 'none', $11, $12, $13, $13)`,
-		b.agentIDParam(),
+) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', 'none', ?10, ?11, ?12, ?12)`,
 		orderNo,
 		pkg.ID,
 		pkg.PackageName,

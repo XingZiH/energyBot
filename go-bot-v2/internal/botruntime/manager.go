@@ -119,7 +119,7 @@ func (m *Manager) ReconcileOnce(ctx context.Context) error {
 	for _, target := range targets {
 		if err := m.reconcileTarget(ctx, cfg, target); err != nil {
 			m.logger.Printf("bot runtime target %s reconcile failed: %v", RuntimeKey(target), err)
-			_ = m.writeRuntimeStatus(ctx, target, RuntimeError, PollingError, err.Error(), nil, nil)
+			m.logRuntimeStatus(target, RuntimeError, PollingError, err.Error(), nil, nil)
 		}
 	}
 	return nil
@@ -141,14 +141,16 @@ func (m *Manager) reconcileTarget(ctx context.Context, cfg config.Config, target
 			polling = PollingError
 			lastError = "Telegram Bot Token 未配置"
 		}
-		return m.writeRuntimeStatus(ctx, target, status, polling, lastError, nil, stoppedAt)
+		m.logRuntimeStatus(target, status, polling, lastError, nil, stoppedAt)
+		return nil
 	}
 
 	m.mu.Lock()
 	active := m.active[key]
 	if active != nil && active.target.Token == target.Token {
 		m.mu.Unlock()
-		return m.writeRuntimeStatus(ctx, target, RuntimeRunning, PollingPolling, "", nil, nil)
+		m.logRuntimeStatus(target, RuntimeRunning, PollingPolling, "", nil, nil)
+		return nil
 	}
 	if active != nil {
 		active.cancel()
@@ -170,10 +172,7 @@ func (m *Manager) reconcileTarget(ctx context.Context, cfg config.Config, target
 	m.mu.Unlock()
 
 	startedAt := time.Now()
-	if err := m.writeRuntimeStatus(ctx, target, RuntimeRunning, PollingPolling, "", &startedAt, nil); err != nil {
-		cancel()
-		return err
-	}
+	m.logRuntimeStatus(target, RuntimeRunning, PollingPolling, "", &startedAt, nil)
 
 	go m.runBot(botCtx, key, target, bot)
 	return nil
@@ -198,11 +197,7 @@ func (m *Manager) runBot(ctx context.Context, key string, target Target, bot bot
 		lastError = err.Error()
 	}
 
-	writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if writeErr := m.writeRuntimeStatus(writeCtx, target, status, polling, lastError, nil, &stoppedAt); writeErr != nil {
-		m.logger.Printf("bot runtime status write failed: %v", writeErr)
-	}
+	m.logRuntimeStatus(target, status, polling, lastError, nil, &stoppedAt)
 }
 
 func (m *Manager) stopTarget(key string) bool {
@@ -225,90 +220,37 @@ func (m *Manager) stopAll() {
 	}
 }
 
+// loadAgentBotConfigs 在 B3 客户机单 agent 视角下：
+// 返回空切片——bot 只有唯一的 Platform target（从 energy_platform_config 单例派生）。
+// bot_config 表内容（加密 token、welcome 文案等）由 T5 Bot 启动时单独读取。
 func (m *Manager) loadAgentBotConfigs(ctx context.Context) ([]AgentBotConfig, error) {
-	rows, err := m.db.QueryContext(ctx, `
-select c.agent_id,
-       coalesce(c.bot_status, 'disabled'),
-       coalesce(c.telegram_bot_token, ''),
-       p.status = 'active'
-from agent_bot_configs c
-join agent_profiles p on p.id = c.agent_id
-where c.deleted_at is null
-  and p.deleted_at is null
-order by c.agent_id asc`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var configs []AgentBotConfig
-	for rows.Next() {
-		var item AgentBotConfig
-		if err := rows.Scan(
-			&item.AgentID,
-			&item.BotStatus,
-			&item.TelegramBotToken,
-			&item.AgentActive,
-		); err != nil {
-			return nil, err
-		}
-		configs = append(configs, item)
-	}
-	return configs, rows.Err()
+	return nil, nil
 }
 
-func (m *Manager) writeRuntimeStatus(
-	ctx context.Context,
+// logRuntimeStatus 客户机 bot 不入库 bot_runtime_status，只打日志。
+// 真实状态通过 go-agent 心跳扩展 bot 字段上报主站（T3 实现）。
+func (m *Manager) logRuntimeStatus(
 	target Target,
 	runtimeStatus string,
 	pollingStatus string,
 	lastError string,
 	startedAt *time.Time,
 	stoppedAt *time.Time,
-) error {
-	now := time.Now()
-	var agentID any
-	if target.Scope == ScopeAgent {
-		agentID = target.AgentID
-	}
-	_, err := m.db.ExecContext(ctx, `
-insert into bot_runtime_status (
-  bot_scope,
-  agent_id,
-  desired_status,
-  runtime_status,
-  polling_status,
-  instance_id,
-  last_heartbeat_at,
-  last_started_at,
-  last_stopped_at,
-  last_error,
-  created_at,
-  updated_at
-) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $7, $7)
-on conflict (bot_scope, coalesce(agent_id, 0))
-do update set
-  desired_status = excluded.desired_status,
-  runtime_status = excluded.runtime_status,
-  polling_status = excluded.polling_status,
-  instance_id = excluded.instance_id,
-  last_heartbeat_at = excluded.last_heartbeat_at,
-  last_started_at = coalesce(excluded.last_started_at, bot_runtime_status.last_started_at),
-  last_stopped_at = coalesce(excluded.last_stopped_at, bot_runtime_status.last_stopped_at),
-  last_error = excluded.last_error,
-  updated_at = excluded.updated_at`,
-		target.Scope,
-		agentID,
-		target.DesiredStatus,
-		runtimeStatus,
-		pollingStatus,
-		m.instanceID,
-		now,
-		startedAt,
-		stoppedAt,
-		strings.TrimSpace(lastError),
+) {
+	msg := fmt.Sprintf(
+		"bot runtime status: key=%s desired=%s runtime=%s polling=%s instance=%s",
+		RuntimeKey(target), target.DesiredStatus, runtimeStatus, pollingStatus, m.instanceID,
 	)
-	return err
+	if startedAt != nil {
+		msg += fmt.Sprintf(" started=%s", startedAt.Format(time.RFC3339))
+	}
+	if stoppedAt != nil {
+		msg += fmt.Sprintf(" stopped=%s", stoppedAt.Format(time.RFC3339))
+	}
+	if strings.TrimSpace(lastError) != "" {
+		msg += fmt.Sprintf(" error=%q", lastError)
+	}
+	m.logger.Print(msg)
 }
 
 func defaultBotFactory(cfg config.Config, db *sql.DB, logger *log.Logger, target Target) (botRunner, error) {

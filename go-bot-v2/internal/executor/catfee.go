@@ -235,13 +235,13 @@ func (s *Service) markCatFeeOrderDelegating(ctx context.Context, order PaidOrder
 	environment := catFeeOrderEnvironment(order.ExternalProviderEnvironment, s.cfg.CatFeeEnvironment)
 	_, err := s.db.ExecContext(ctx, `
 update energy_orders
-set external_order_id = $1,
-    external_status = $2,
-    external_confirm_status = $3,
-    provider_cost_sun = $4,
-    external_provider_environment = $5,
-    updated_at = $6
-where id = $7
+set external_order_id = ?1,
+    external_status = ?2,
+    external_confirm_status = ?3,
+    provider_cost_sun = ?4,
+    external_provider_environment = ?5,
+    updated_at = ?6
+where id = ?7
   and status = 'paid'`,
 		detail.ID,
 		detail.Status,
@@ -262,7 +262,7 @@ func (s *Service) markCatFeeOrderRenting(ctx context.Context, order PaidOrder, d
 	defer tx.Rollback()
 
 	var status string
-	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = ?1`, order.ID).Scan(&status); err != nil {
 		return err
 	}
 	if status != "paid" {
@@ -278,7 +278,7 @@ func (s *Service) markCatFeeOrderRenting(ctx context.Context, order PaidOrder, d
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, remark, created_at, updated_at
-) values ($1, $2, 'out', 'rent', $3, $4, 'success', $5, $6, $5, $5)`,
+) values (?1, ?2, 'out', 'rent', ?3, ?4, 'success', ?5, ?6, ?5, ?5)`,
 		txID,
 		"CatFee:"+environment,
 		costSun,
@@ -291,17 +291,17 @@ insert into energy_wallet_transactions (
 	if _, err := tx.ExecContext(ctx, `
 update energy_orders
 set status = 'renting',
-    return_status = $1,
-    rent_tx_hash = $2,
-    external_order_id = $3,
-    external_status = $4,
-    external_confirm_status = $5,
-    provider_cost_sun = $6,
-    external_provider_environment = $7,
-    rented_at = $8,
-    expires_at = $9,
-    updated_at = $8
-where id = $10`,
+    return_status = ?1,
+    rent_tx_hash = ?2,
+    external_order_id = ?3,
+    external_status = ?4,
+    external_confirm_status = ?5,
+    provider_cost_sun = ?6,
+    external_provider_environment = ?7,
+    rented_at = ?8,
+    expires_at = ?9,
+    updated_at = ?8
+where id = ?10`,
 		catFeeActiveReturnStatus(),
 		txID,
 		detail.ID,
@@ -327,11 +327,11 @@ func (s *Service) markCatFeeOrderCompleted(ctx context.Context, orderID int, det
 update energy_orders
 set status = 'completed',
     return_status = 'completed',
-    external_status = $1,
-    external_confirm_status = $2,
-    returned_at = $3,
-    updated_at = $4
-where id = $5
+    external_status = ?1,
+    external_confirm_status = ?2,
+    returned_at = ?3,
+    updated_at = ?4
+where id = ?5
   and status = 'renting'`,
 		detail.Status,
 		detail.ConfirmStatus,
@@ -347,14 +347,14 @@ func (s *Service) markCatFeeOrderFailed(ctx context.Context, orderID int, enviro
 	_, err := s.db.ExecContext(ctx, `
 update energy_orders
 set status = 'failed',
-    return_status = case when return_status in ('pending', $1) then 'failed' else return_status end,
-    external_order_id = coalesce(nullif($2, ''), external_order_id),
-    external_status = $3,
-    external_confirm_status = $4,
-    provider_cost_sun = $5,
-    external_provider_environment = coalesce(nullif($6, ''), external_provider_environment),
-    updated_at = $7
-where id = $8
+    return_status = case when return_status in ('pending', ?1) then 'failed' else return_status end,
+    external_order_id = coalesce(nullif(?2, ''), external_order_id),
+    external_status = ?3,
+    external_confirm_status = ?4,
+    provider_cost_sun = ?5,
+    external_provider_environment = coalesce(nullif(?6, ''), external_provider_environment),
+    updated_at = ?7
+where id = ?8
   and status in ('paid', 'renting')`,
 		catFeeActiveReturnStatus(),
 		detail.ID,
@@ -371,11 +371,11 @@ where id = $8
 func (s *Service) updateCatFeeOrderStatus(ctx context.Context, orderID int, detail catFeeOrderDetail) error {
 	_, err := s.db.ExecContext(ctx, `
 update energy_orders
-set external_status = $1,
-    external_confirm_status = $2,
-    provider_cost_sun = $3,
-    updated_at = $4
-where id = $5`,
+set external_status = ?1,
+    external_confirm_status = ?2,
+    provider_cost_sun = ?3,
+    updated_at = ?4
+where id = ?5`,
 		detail.Status,
 		detail.ConfirmStatus,
 		detail.providerCostSun(),

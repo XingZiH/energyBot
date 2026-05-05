@@ -113,14 +113,17 @@ CREATE INDEX IF NOT EXISTS idx_energy_return_tasks_status ON energy_return_tasks
 CREATE TABLE IF NOT EXISTS energy_user_addresses (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   telegram_chat_id  INTEGER NOT NULL,
+  label             TEXT NOT NULL,
   address           TEXT NOT NULL,
-  alias             TEXT,
+  is_default        INTEGER NOT NULL DEFAULT 0,
   status            TEXT NOT NULL DEFAULT 'active',
   remark            TEXT,
   updated_at        TEXT,
   created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   deleted_at        TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_energy_user_addresses_chat_id ON energy_user_addresses (telegram_chat_id);
+CREATE INDEX IF NOT EXISTS idx_energy_user_addresses_address ON energy_user_addresses (address);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_energy_user_addresses_active_address
   ON energy_user_addresses (telegram_chat_id, lower(address))
   WHERE deleted_at IS NULL AND status = 'active';

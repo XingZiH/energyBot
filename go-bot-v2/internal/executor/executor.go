@@ -524,7 +524,7 @@ func officialRentalExpiration(now time.Time, order officialRentOrder) (time.Time
 func (s *Service) fetchPendingOrders(ctx context.Context) ([]PendingOrder, error) {
 	rows, err := s.db.QueryContext(ctx, `
 select id, order_no, package_name, receiver_address, energy_amount, duration_hours,
-       payment_amount_sun::text, created_at, payment_expires_at, coalesce(remark, '')
+       payment_amount_sun, created_at, payment_expires_at, coalesce(remark, '')
 from energy_orders
 where status = 'pending' and deleted_at is null
 order by created_at asc`)
@@ -580,7 +580,7 @@ order by updated_at asc, id asc`)
 func (s *Service) fetchDueReturnTasks(ctx context.Context) ([]ReturnTask, error) {
 	rows, err := s.db.QueryContext(ctx, `
 select t.id, t.order_id, o.order_no, t.receiver_address, t.energy_amount,
-       o.duration_hours, coalesce(t.delegated_amount_sun, 0)::text,
+       o.duration_hours, coalesce(t.delegated_amount_sun, 0),
        t.attempts, coalesce(o.remark, '')
 from energy_return_tasks t
 join energy_orders o on o.id = t.order_id
@@ -588,7 +588,7 @@ where t.status = 'pending'
   and coalesce(o.energy_provider, 'justlend') = 'justlend'
   and t.deleted_at is null
   and o.deleted_at is null
-  and (t.next_retry_at is null or t.next_retry_at <= $1)
+  and (t.next_retry_at is null or t.next_retry_at <= ?1)
 order by coalesce(t.next_retry_at, t.created_at) asc, t.id asc`, time.Now())
 	if err != nil {
 		return nil, err
@@ -687,9 +687,9 @@ func (s *Service) updateRentalSchedule(ctx context.Context, orderID int, expires
 	now := time.Now()
 	if _, err := tx.ExecContext(ctx, `
 update energy_orders
-set expires_at = $1,
-    updated_at = $2
-where id = $3
+set expires_at = ?1,
+    updated_at = ?2
+where id = ?3
   and status = 'renting'
   and return_status = 'pending'
   and deleted_at is null`, expiresAt, now, orderID); err != nil {
@@ -697,9 +697,9 @@ where id = $3
 	}
 	if _, err := tx.ExecContext(ctx, `
 update energy_return_tasks
-set next_retry_at = $1,
-    updated_at = $2
-where order_id = $3
+set next_retry_at = ?1,
+    updated_at = ?2
+where order_id = ?3
   and status = 'pending'
   and deleted_at is null`, expiresAt, now, orderID); err != nil {
 		return err
@@ -715,7 +715,7 @@ func (s *Service) markOrderPaid(ctx context.Context, order PendingOrder, transfe
 	defer tx.Rollback()
 
 	var existing bool
-	if err := tx.QueryRowContext(ctx, `select exists(select 1 from energy_wallet_transactions where tx_hash = $1 and deleted_at is null)`, transfer.TxID).Scan(&existing); err != nil {
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from energy_wallet_transactions where tx_hash = ?1 and deleted_at is null)`, transfer.TxID).Scan(&existing); err != nil {
 		return false, err
 	}
 	if existing {
@@ -723,7 +723,7 @@ func (s *Service) markOrderPaid(ctx context.Context, order PendingOrder, transfe
 	}
 
 	var status string
-	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = ?1`, order.ID).Scan(&status); err != nil {
 		return false, err
 	}
 	if status != "pending" {
@@ -735,7 +735,7 @@ func (s *Service) markOrderPaid(ctx context.Context, order PendingOrder, transfe
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, created_at, updated_at
-) values ($1, $2, 'in', 'payment', $3, $4, 'success', $5, $6, $6)`,
+) values (?1, ?2, 'in', 'payment', ?3, ?4, 'success', ?5, ?6, ?6)`,
 		transfer.TxID, transfer.FromAddress, transfer.AmountSun, order.ID, transfer.ConfirmedAt, now,
 	); err != nil {
 		return false, err
@@ -743,11 +743,11 @@ insert into energy_wallet_transactions (
 
 	tag, err := tx.ExecContext(ctx, `
 update energy_orders
-set buyer_address = $1,
-    payment_tx_hash = $2,
+set buyer_address = ?1,
+    payment_tx_hash = ?2,
     status = 'paid',
-    updated_at = $3
-where id = $4 and status = 'pending'`,
+    updated_at = ?3
+where id = ?4 and status = 'pending'`,
 		transfer.FromAddress, transfer.TxID, now, order.ID,
 	)
 	if err != nil {
@@ -775,7 +775,7 @@ func (s *Service) markOrderRenting(ctx context.Context, order PaidOrder, txID st
 
 	now := time.Now()
 	var status string
-	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = ?1`, order.ID).Scan(&status); err != nil {
 		return err
 	}
 	if status != "paid" {
@@ -786,7 +786,7 @@ func (s *Service) markOrderRenting(ctx context.Context, order PaidOrder, txID st
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, remark, created_at, updated_at
-) values ($1, $2, 'out', 'rent', $3, $4, 'success', $5, $6, $5, $5)`,
+) values (?1, ?2, 'out', 'rent', ?3, ?4, 'success', ?5, ?6, ?5, ?5)`,
 		txID,
 		s.cfg.JustLendContractAddress,
 		amounts.PrepaySun,
@@ -804,11 +804,11 @@ insert into energy_wallet_transactions (
 update energy_orders
 set status = 'renting',
     return_status = 'pending',
-    rent_tx_hash = $1,
-    rented_at = $2,
-    expires_at = $3,
-    updated_at = $2
-where id = $4`,
+    rent_tx_hash = ?1,
+    rented_at = ?2,
+    expires_at = ?3,
+    updated_at = ?2
+where id = ?4`,
 		txID, now, expiresAt, order.ID,
 	); err != nil {
 		return err
@@ -818,7 +818,7 @@ where id = $4`,
 insert into energy_return_tasks (
   order_id, receiver_address, energy_amount, delegated_amount_sun,
   status, attempts, next_retry_at, created_at, updated_at
-) values ($1, $2, $3, $4, 'pending', 0, $5, $6, $6)`,
+) values (?1, ?2, ?3, ?4, 'pending', 0, ?5, ?6, ?6)`,
 		order.ID,
 		order.ReceiverAddress,
 		order.EnergyAmount,
@@ -835,8 +835,8 @@ insert into energy_return_tasks (
 func (s *Service) markReturnTaskRunning(ctx context.Context, taskID int) (bool, error) {
 	tag, err := s.db.ExecContext(ctx, `
 update energy_return_tasks
-set status = 'running', updated_at = $1
-where id = $2 and status = 'pending'`, time.Now(), taskID)
+set status = 'running', updated_at = ?1
+where id = ?2 and status = 'pending'`, time.Now(), taskID)
 	if err != nil {
 		return false, err
 	}
@@ -863,25 +863,25 @@ func (s *Service) markReturnTaskCompleted(ctx context.Context, task ReturnTask, 
 update energy_return_tasks
 set status = 'completed',
     last_error = null,
-    completed_at = $1,
-    updated_at = $1
-where id = $2`, now, task.ID); err != nil {
+    completed_at = ?1,
+    updated_at = ?1
+where id = ?2`, now, task.ID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 update energy_orders
 set status = 'completed',
     return_status = 'completed',
-    returned_at = $1,
-    updated_at = $1
-where id = $2`, now, task.OrderID); err != nil {
+    returned_at = ?1,
+    updated_at = ?1
+where id = ?2`, now, task.OrderID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, remark, created_at, updated_at
-) values ($1, $2, 'in', 'return', $3, $4, 'success', $5, $6, $5, $5)`,
+) values (?1, ?2, 'in', 'return', ?3, ?4, 'success', ?5, ?6, ?5, ?5)`,
 		txID,
 		s.cfg.JustLendContractAddress,
 		refundSun,
@@ -909,14 +909,14 @@ func (s *Service) markReturnTaskFailed(ctx context.Context, task ReturnTask, cau
 		defer tx.Rollback()
 		if _, err := tx.ExecContext(ctx, `
 update energy_return_tasks
-set status = 'failed', attempts = $1, last_error = $2, updated_at = $3
-where id = $4`, attempts, lastError, now, task.ID); err != nil {
+set status = 'failed', attempts = ?1, last_error = ?2, updated_at = ?3
+where id = ?4`, attempts, lastError, now, task.ID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
 update energy_orders
-set return_status = 'failed', updated_at = $1
-where id = $2`, now, task.OrderID); err != nil {
+set return_status = 'failed', updated_at = ?1
+where id = ?2`, now, task.OrderID); err != nil {
 			return err
 		}
 		return tx.Commit()
@@ -925,11 +925,11 @@ where id = $2`, now, task.OrderID); err != nil {
 	_, err := s.db.ExecContext(ctx, `
 update energy_return_tasks
 set status = 'pending',
-    attempts = $1,
-    last_error = $2,
-    next_retry_at = $3,
-    updated_at = $4
-where id = $5`, attempts, lastError, now.Add(time.Minute), now, task.ID)
+    attempts = ?1,
+    last_error = ?2,
+    next_retry_at = ?3,
+    updated_at = ?4
+where id = ?5`, attempts, lastError, now.Add(time.Minute), now, task.ID)
 	return err
 }
 
@@ -941,8 +941,8 @@ func (s *Service) cancelExpiredPendingOrders(ctx context.Context, now time.Time)
 	for _, order := range orders {
 		tag, err := s.db.ExecContext(ctx, `
 update energy_orders
-set status = 'cancelled', updated_at = $1
-where id = $2
+set status = 'cancelled', updated_at = ?1
+where id = ?2
   and status = 'pending'
   and deleted_at is null`, now, order.ID)
 		if err != nil {
@@ -963,12 +963,12 @@ where id = $2
 
 func (s *Service) fetchExpiredPendingOrders(ctx context.Context, now time.Time) ([]ExpiredOrder, error) {
 	rows, err := s.db.QueryContext(ctx, `
-select id, order_no, package_name, payment_amount_sun::text, coalesce(remark, '')
+select id, order_no, package_name, payment_amount_sun, coalesce(remark, '')
 from energy_orders
 where status = 'pending'
   and deleted_at is null
   and payment_expires_at is not null
-  and payment_expires_at < $1
+  and payment_expires_at < ?1
 order by payment_expires_at asc, id asc`, now)
 	if err != nil {
 		return nil, err
@@ -1065,7 +1065,7 @@ func insertNetworkFeeWalletTransaction(ctx context.Context, tx *sql.Tx, txID str
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, remark, created_at, updated_at
-) values ($1, $2, 'out', 'fee', $3, $4, 'success', $5, $6, $5, $5)`,
+) values (?1, ?2, 'out', 'fee', ?3, ?4, 'success', ?5, ?6, ?5, ?5)`,
 		txID,
 		walletAddress,
 		receipt.GetFee(),

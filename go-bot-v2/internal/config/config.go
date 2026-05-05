@@ -164,7 +164,7 @@ select
   coalesce(order_payment_ttl_minutes, 10),
   coalesce(telegram_polling_interval_seconds, 2),
   coalesce(worker_interval_seconds, 60),
-  coalesce(min_trx_reserve_sun, 0)::text,
+  coalesce(min_trx_reserve_sun, 0),
   coalesce(energy_provider, 'justlend'),
   coalesce(catfee_environment, 'nile'),
   coalesce(catfee_prod_api_base_url, 'https://api.catfee.io'),
