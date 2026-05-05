@@ -104,21 +104,18 @@ export class AgentApplyConfigService {
       throw new NotFoundException('license 不存在或无权访问');
     }
 
-    // 3. agent_profile：licenses.customerId → agent_profiles.userId？
-    //    注意 agent_profiles.userId 不是 licenses.customerId
-    //    真正路径见 MyBotService：agent_profiles 与 license 的关系是「一对一 per customer」
-    //    简化实现：当前系统每 customer 只一个 agent_profile
-    //    真实 schema 里 agent_profile 通过 userId 绑到客户管理员，所以先拿 customer
-    //    对应的 "agent user"。MVP 跳过复杂映射：取 agentProfilesTable 第一条
-    //    按 userId==customerId 或更宽松查询
-    //    FIXME(T11.x)：应由 license → customer → 该客户的 agent_profile 明确关联
+    // 3. agent_profile 绑定关系：agent_profiles.userId === 当前登录 user.id
+    //    （与 EnergyRentalService.resolveAccessScope 口径一致）
+    //    不是 customer_id——agent_profile 登记的是「哪个 user 是该 customer 的
+    //    agent 管理员」。业务上同 customer 可能多个 user，但 agent_profile 只绑
+    //    其中一个（当前 MVP 每 customer 一条，多 user 场景后续再议）
     const agentRows = await this.conn
       .select({ id: agentProfilesTable.id })
       .from(agentProfilesTable)
-      .where(eq(agentProfilesTable.userId, userRows[0].customerId))
+      .where(eq(agentProfilesTable.userId, userId))
       .limit(1);
     if (agentRows.length === 0) {
-      throw new NotFoundException('该客户未配置 agent_profile');
+      throw new NotFoundException('该用户未配置 agent_profile');
     }
     const agentProfileId = agentRows[0].id;
 
