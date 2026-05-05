@@ -201,9 +201,10 @@ run_sql() {
 
 log "Step 8: 跑 SQL migration（全部幂等）"
 
-# 顺序：先 agent-bot-configs-unique → agents 表 → v1 reset（可选）
+# 顺序：先 agent-bot-configs-unique → agents 表 → agents bot runtime (B3) → v1 reset（可选）
 run_sql "nest-api/sql/20260502-agent-bot-configs-unique.sql" "20260502-agent-bot-configs-unique"
 run_sql "nest-api/sql/20260504-agents-table.sql"            "20260504-agents-table（B1 agents 表 + 菜单 + 授权）"
+run_sql "nest-api/sql/20260505-agents-bot-runtime.sql"      "20260505-agents-bot-runtime（B3 心跳 bot_* 6 列）"
 
 if [[ $SKIP_RESET_V1 -eq 0 && -n "$OLD_RELEASE" ]]; then
   warn "  执行 v1 数据清空：20260503-reset-designer-config"
