@@ -27,6 +27,7 @@ import { NzSpinModule } from 'ng-zorro-antd/spin';
 import { NzSwitchModule } from 'ng-zorro-antd/switch';
 import { NzTabsModule } from 'ng-zorro-antd/tabs';
 import { NzTagModule } from 'ng-zorro-antd/tag';
+import { NzTooltipModule } from 'ng-zorro-antd/tooltip';
 
 /**
  * 机器人配置页面（v2 顶层容器）。
@@ -71,7 +72,8 @@ import { NzTagModule } from 'ng-zorro-antd/tag';
     NzSpinModule,
     NzSwitchModule,
     NzTabsModule,
-    NzTagModule
+    NzTagModule,
+    NzTooltipModule
   ]
 })
 export class EnergyRentalAgentBotConfigComponent implements OnInit {
