@@ -129,6 +129,7 @@
     "default:system:dept": "部门管理",
     "default:system:customers": "客户与License",
     "default:account:my-license": "我的 License",
+    "default:account:my-bot": "我的 Bot",
     "default:energy-rental": "机器人控制",
     "default:energy-rental:dashboard": "控制台",
     "default:energy-rental:bot-config": "机器人配置",

@@ -129,6 +129,7 @@
     "default:system:dept": "Quản lý phòng ban",
     "default:system:customers": "Khách hàng & License",
     "default:account:my-license": "License của tôi",
+    "default:account:my-bot": "Bot của tôi",
     "default:energy-rental": "机器人控制",
     "default:energy-rental:dashboard": "控制台",
     "default:energy-rental:bot-config": "机器人配置",
