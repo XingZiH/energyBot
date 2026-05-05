@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -53,6 +54,12 @@ func Open(path string) (*sql.DB, error) {
 //
 // 简单实现（B3 阶段够用）：每次 Open 都全量 exec，依赖 SQL 内部 IF NOT EXISTS / OR IGNORE
 // 保证幂等。后续若需要严格版本管理再引入 schema_migrations 表。
+//
+// 特殊处理：SQLite 的 `ALTER TABLE ... ADD COLUMN` 重复执行会报
+// `duplicate column name: xxx`——这是 SQLite 3.35 之前唯一的提示方式，没有
+// IF NOT EXISTS。我们**宽容吞掉**此类错，使 ADD COLUMN 型 migration 天然幂等。
+// 代价：如果 migration 里 **真正**的 schema bug 触发了此错，会被静默——但实际
+// 工程里 ADD COLUMN 的列名冲突几乎都是因为再跑一次，不是 bug 来源。
 func applyMigrations(db *sql.DB) error {
 	entries, err := fs.ReadDir(migrationsFS, "migrations")
 	if err != nil {
@@ -73,8 +80,24 @@ func applyMigrations(db *sql.DB) error {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 		if _, err := db.Exec(string(data)); err != nil {
+			if isDuplicateColumnErr(err) {
+				// 已经存在的列——视作幂等成功
+				continue
+			}
 			return fmt.Errorf("exec migration %s: %w", name, err)
 		}
 	}
 	return nil
+}
+
+// isDuplicateColumnErr 判断是不是 SQLite 重复添加列的错。
+//
+// mattn/go-sqlite3 的错误信息格式：`duplicate column name: platform_receive_address`
+// 没有稳定的错误 code 可用（sqlite3.Error.ExtendedCode 对 ADD COLUMN 不区分），
+// 只能做字符串匹配。
+func isDuplicateColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "duplicate column name")
 }

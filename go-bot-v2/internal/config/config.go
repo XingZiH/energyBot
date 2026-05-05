@@ -139,6 +139,22 @@ func Load(env EnvMap) (Config, error) {
 	}, nil
 }
 
+// LoadFromDatabase 从 SQLite 读 energy_platform_config（单例 id=1）+ bot_config（单例 id=1），
+// 组装成 Config。
+//
+// B3 schema 改造说明（T11.3c）：
+//   - 旧 B1 主站 schema 把 bot_status / telegram_bot_token / platform_receive_address
+//     都放在 energy_platform_config 单表。B3 单租户拆开了：
+//     - platform_receive_address 仍在 platform_config（由 0002 migration 补上）
+//     - telegram_bot_token 转移到 bot_config.encrypted_token（BLOB，加密 by AES-GCM）
+//     - bot_status 不再持久化——由 agent supervisor 内存管理
+//
+// MVP token 解密策略：
+//   - encrypted_token_nonce IS NULL → 视为明文 BLOB，直接 string(bytes)
+//   - encrypted_token_nonce 非 NULL → AES-GCM 解密（T11.6 实现，当前版本返 err）
+//
+// BotStatus 字段：LoadFromDatabase 总是返 "enabled"——既然 agent 决定了跑 bot
+// 进程才会调到这里。validateRuntimeConfig 的 BotStatus 检查保留兼容旧测试。
 func LoadFromDatabase(ctx context.Context, env EnvMap, store QueryRower) (Config, error) {
 	if env == nil {
 		env = EnvMap{}
@@ -153,39 +169,40 @@ func LoadFromDatabase(ctx context.Context, env EnvMap, store QueryRower) (Config
 	}
 
 	const query = `
-select
-  coalesce(bot_status, 'disabled'),
-  coalesce(telegram_bot_token, ''),
-  coalesce(tron_api_base_url, 'https://api.trongrid.io'),
-  coalesce(tron_api_key, ''),
-  coalesce(platform_receive_address, ''),
-  coalesce(justlend_contract_address, ''),
-  coalesce(justlend_payer_private_key, ''),
-  coalesce(order_payment_ttl_minutes, 10),
-  coalesce(telegram_polling_interval_seconds, 2),
-  coalesce(worker_interval_seconds, 60),
-  coalesce(min_trx_reserve_sun, 0),
-  coalesce(energy_provider, 'justlend'),
-  coalesce(catfee_environment, 'nile'),
-  coalesce(catfee_prod_api_base_url, 'https://api.catfee.io'),
-  coalesce(catfee_prod_api_key, ''),
-  coalesce(catfee_prod_api_secret, ''),
-  coalesce(catfee_nile_api_base_url, 'https://nile.catfee.io'),
-  coalesce(catfee_nile_api_key, ''),
-  coalesce(catfee_nile_api_secret, ''),
-  coalesce(catfee_auto_activate, true)
-from energy_platform_config
-where id = 1`
+SELECT
+  COALESCE(p.tron_api_base_url, 'https://api.trongrid.io'),
+  COALESCE(p.tron_api_key, ''),
+  COALESCE(p.platform_receive_address, ''),
+  COALESCE(p.justlend_contract_address, ''),
+  COALESCE(p.justlend_payer_private_key, ''),
+  COALESCE(p.order_payment_ttl_minutes, 10),
+  COALESCE(p.telegram_polling_interval_seconds, 2),
+  COALESCE(p.worker_interval_seconds, 60),
+  COALESCE(p.min_trx_reserve_sun, '0'),
+  COALESCE(p.energy_provider, 'justlend'),
+  COALESCE(p.catfee_environment, 'nile'),
+  COALESCE(p.catfee_prod_api_base_url, 'https://api.catfee.io'),
+  COALESCE(p.catfee_prod_api_key, ''),
+  COALESCE(p.catfee_prod_api_secret, ''),
+  COALESCE(p.catfee_nile_api_base_url, 'https://nile.catfee.io'),
+  COALESCE(p.catfee_nile_api_key, ''),
+  COALESCE(p.catfee_nile_api_secret, ''),
+  COALESCE(p.catfee_auto_activate, 1),
+  b.encrypted_token,
+  b.encrypted_token_nonce
+FROM energy_platform_config p
+LEFT JOIN bot_config b ON b.id = 1
+WHERE p.id = 1`
 
 	var (
-		cfg                           Config
-		orderPaymentTTLMinutes        int32
-		telegramPollingIntervalSecond int32
-		workerIntervalSeconds         int32
+		cfg                            Config
+		orderPaymentTTLMinutes         int32
+		telegramPollingIntervalSecond  int32
+		workerIntervalSeconds          int32
+		encryptedToken                 []byte
+		encryptedTokenNonce            []byte
 	)
 	err := store.QueryRow(ctx, query).Scan(
-		&cfg.BotStatus,
-		&cfg.TelegramBotToken,
 		&cfg.TronAPIBaseURL,
 		&cfg.TronAPIKey,
 		&cfg.PlatformReceiveAddress,
@@ -204,14 +221,29 @@ where id = 1`
 		&cfg.CatFeeNileAPIKey,
 		&cfg.CatFeeNileAPISecret,
 		&cfg.CatFeeAutoActivate,
+		&encryptedToken,
+		&encryptedTokenNonce,
 	)
 	if err != nil {
 		return Config{}, fmt.Errorf("load platform config from database: %w", err)
 	}
 
+	// 解析 token：MVP 仅支持明文（nonce IS NULL）。
+	token, err := decodeBotToken(encryptedToken, encryptedTokenNonce)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.TelegramBotToken = token
+
+	// BotStatus：能跑到 LoadFromDatabase 说明 agent 决定要跑 bot——给 enabled。
+	// validateRuntimeConfig 的兼容检查需要 enabled+token 两件都齐。
+	if strings.TrimSpace(token) == "" {
+		cfg.BotStatus = "disabled"
+	} else {
+		cfg.BotStatus = "enabled"
+	}
+
 	cfg.DatabaseURL = databaseURL
-	cfg.BotStatus = strings.TrimSpace(cfg.BotStatus)
-	cfg.TelegramBotToken = strings.TrimSpace(cfg.TelegramBotToken)
 	cfg.TronAPIBaseURL = strings.TrimSpace(cfg.TronAPIBaseURL)
 	cfg.TronAPIKey = strings.TrimSpace(cfg.TronAPIKey)
 	cfg.PlatformReceiveAddress = strings.TrimSpace(cfg.PlatformReceiveAddress)
@@ -441,4 +473,27 @@ func boolOrDefault(env EnvMap, key string, fallback bool) bool {
 		return fallback
 	}
 	return value == "1" || value == "true" || value == "yes" || value == "enabled"
+}
+
+// decodeBotToken 解码 bot_config.encrypted_token / encrypted_token_nonce 两列。
+//
+// MVP 阶段（T11.6 之前）：
+//   - 两列都为 NULL/空 → 返空 token（bot 启动会被 validateRuntimeConfig 拦下，
+//     由 supervisor 报错给主站；agent 应该在 applyConfig 之后才 start bot）
+//   - encryptedToken 非空、nonce IS NULL → 视为明文 UTF-8，直接转 string
+//   - encryptedToken 非空、nonce 非 NULL → AES-GCM 加密，T11.6 实现；当前返 err
+//
+// 注意：mattn/go-sqlite3 对 NULL BLOB 的反 Scan 行为是 `[]byte(nil)`，长度 0；
+// 对 NOT NULL 但 0 字节的 BLOB 也是长度 0。无法区分两者——但语义上等价（无 token）。
+func decodeBotToken(encryptedToken, nonce []byte) (string, error) {
+	if len(encryptedToken) == 0 {
+		return "", nil
+	}
+	if len(nonce) == 0 {
+		// MVP 明文路径
+		return strings.TrimSpace(string(encryptedToken)), nil
+	}
+	return "", errors.New(
+		"encrypted bot token detected but AES-GCM decoder not yet implemented (T11.6); " +
+			"re-run agent.applyConfig in plaintext mode for now")
 }

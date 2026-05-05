@@ -121,8 +121,6 @@ func TestLoadFromDatabaseLoadsAdminPlatformConfig(t *testing.T) {
 	cfg, err := LoadFromDatabase(context.Background(), EnvMap{
 		"DATABASE_URL": "postgres://bot:pass@localhost:5432/app?schema=public",
 	}, fakeStore{row: fakeRow{values: []any{
-		"enabled",
-		"telegram-token",
 		"https://api.trongrid.io",
 		"tron-api-key",
 		"TReceiveAddress",
@@ -141,6 +139,8 @@ func TestLoadFromDatabaseLoadsAdminPlatformConfig(t *testing.T) {
 		"",
 		"",
 		true,
+		[]byte("telegram-token"), // encrypted_token，MVP 明文
+		[]byte(nil),               // encrypted_token_nonce NULL
 	}}})
 	if err != nil {
 		t.Fatalf("expected valid database config, got error: %v", err)
@@ -180,14 +180,14 @@ func TestLoadFromDatabaseRequiresDatabaseURL(t *testing.T) {
 }
 
 func TestLoadFromDatabaseRequiresPlatformSecrets(t *testing.T) {
+	// token=空 → BotStatus 推为 disabled，不会再触发 TELEGRAM_BOT_TOKEN missing 错；
+	// 现在改为：缺 PLATFORM_RECEIVE_ADDRESS 应该报错（核心业务字段）。
 	_, err := LoadFromDatabase(context.Background(), EnvMap{
 		"DATABASE_URL": "postgres://bot:pass@localhost:5432/app",
 	}, fakeStore{row: fakeRow{values: []any{
-		"enabled",
-		"",
 		"https://api.trongrid.io",
 		"tron-api-key",
-		"TReceiveAddress",
+		"", // PlatformReceiveAddress 缺失
 		"TJustLendContract",
 		"private-key-placeholder",
 		int32(10),
@@ -203,18 +203,21 @@ func TestLoadFromDatabaseRequiresPlatformSecrets(t *testing.T) {
 		"",
 		"",
 		true,
+		[]byte("telegram-token"),
+		[]byte(nil),
 	}}})
-	if err == nil || !strings.Contains(err.Error(), "TELEGRAM_BOT_TOKEN") {
-		t.Fatalf("expected TELEGRAM_BOT_TOKEN error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "PLATFORM_RECEIVE_ADDRESS") {
+		t.Fatalf("expected PLATFORM_RECEIVE_ADDRESS error, got %v", err)
 	}
 }
 
+// TestLoadFromDatabaseAllowsDisabledPlatformBotWithoutTelegramToken：
+// MVP 单租户语义下，token=NULL 视为 BotStatus=disabled，validateRuntimeConfig
+// 应不报 token missing。
 func TestLoadFromDatabaseAllowsDisabledPlatformBotWithoutTelegramToken(t *testing.T) {
 	cfg, err := LoadFromDatabase(context.Background(), EnvMap{
 		"DATABASE_URL": "postgres://bot:pass@localhost:5432/app",
 	}, fakeStore{row: fakeRow{values: []any{
-		"disabled",
-		"",
 		"https://api.trongrid.io",
 		"tron-api-key",
 		"TReceiveAddress",
@@ -233,6 +236,8 @@ func TestLoadFromDatabaseAllowsDisabledPlatformBotWithoutTelegramToken(t *testin
 		"",
 		"",
 		true,
+		[]byte(nil), // token NULL
+		[]byte(nil),
 	}}})
 	if err != nil {
 		t.Fatalf("expected disabled bot config to load without telegram token, got %v", err)
@@ -246,8 +251,6 @@ func TestLoadFromDatabaseAllowsCatFeeNileWithoutJustLendSecrets(t *testing.T) {
 	cfg, err := LoadFromDatabase(context.Background(), EnvMap{
 		"DATABASE_URL": "postgres://bot:pass@localhost:5432/app",
 	}, fakeStore{row: fakeRow{values: []any{
-		"enabled",
-		"telegram-token",
 		"https://api.trongrid.io",
 		"tron-api-key",
 		"TReceiveAddress",
@@ -266,6 +269,8 @@ func TestLoadFromDatabaseAllowsCatFeeNileWithoutJustLendSecrets(t *testing.T) {
 		"nile-key",
 		"nile-secret",
 		true,
+		[]byte("telegram-token"),
+		[]byte(nil),
 	}}})
 	if err != nil {
 		t.Fatalf("expected CatFee config to load without JustLend secrets, got %v", err)
@@ -282,6 +287,38 @@ func TestLoadFromDatabaseAllowsCatFeeNileWithoutJustLendSecrets(t *testing.T) {
 	}
 	if !cfg.CatFeeAutoActivate {
 		t.Fatal("expected CatFee auto activate to load")
+	}
+}
+
+// TestLoadFromDatabase_RejectsEncryptedTokenWithoutDecoder（T11.6 之前）：
+// nonce 非 NULL 表示密文，当前未实现 AES-GCM 应该返显式错让人去 T11.6。
+func TestLoadFromDatabase_RejectsEncryptedTokenWithoutDecoder(t *testing.T) {
+	_, err := LoadFromDatabase(context.Background(), EnvMap{
+		"DATABASE_URL": "postgres://bot:pass@localhost:5432/app",
+	}, fakeStore{row: fakeRow{values: []any{
+		"https://api.trongrid.io",
+		"tron-api-key",
+		"TReceiveAddress",
+		"TJustLendContract",
+		"private-key-placeholder",
+		int32(10),
+		int32(2),
+		int32(60),
+		"0",
+		"justlend",
+		"nile",
+		"https://api.catfee.io",
+		"",
+		"",
+		"https://nile.catfee.io",
+		"",
+		"",
+		true,
+		[]byte("ciphertext"),
+		[]byte("nonce-12-bytes"),
+	}}})
+	if err == nil || !strings.Contains(err.Error(), "AES-GCM") {
+		t.Fatalf("expected AES-GCM not implemented error, got %v", err)
 	}
 }
 
@@ -357,6 +394,13 @@ func (r fakeRow) Scan(dest ...any) error {
 			*target = value.(int32)
 		case *bool:
 			*target = value.(bool)
+		case *[]byte:
+			// BLOB 列：value 可能是 []byte(nil)（NULL）或 []byte("...")（非空）
+			if v, ok := value.([]byte); ok {
+				*target = v
+			} else {
+				return errors.New("expected []byte for BLOB column")
+			}
 		default:
 			return errors.New("unsupported scan target")
 		}

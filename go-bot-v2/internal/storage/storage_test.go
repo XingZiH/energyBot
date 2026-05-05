@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -86,5 +87,50 @@ func TestOpen_Idempotent(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("重入后单例行数错: %d", n)
+	}
+}
+
+// TestOpen_Migration0002_AddsColumn 验证 0002 加的 platform_receive_address 列
+// 能被 SELECT 到（migration 真实 apply），且二开不因 duplicate column 报错。
+//
+// 这是 T11.3a 的直接契约测试——executor.go 的订单支付检测依赖此列。
+func TestOpen_Migration0002_AddsColumn(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "bot.db")
+
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// 直接 SELECT 该列——列不存在会报 `no such column: platform_receive_address`
+	var addr sql.NullString
+	err = db.QueryRow(
+		"SELECT platform_receive_address FROM energy_platform_config WHERE id = 1",
+	).Scan(&addr)
+	if err != nil {
+		t.Fatalf("SELECT platform_receive_address 失败: %v", err)
+	}
+	// 初始值应为 NULL（DEFAULT 未设，ADD COLUMN 默认 NULL）
+	if addr.Valid {
+		t.Errorf("platform_receive_address 初值应为 NULL，得到 %q", addr.String)
+	}
+
+	// 再写入一个值，验证可读回（round-trip）
+	if _, err := db.Exec(
+		"UPDATE energy_platform_config SET platform_receive_address = ? WHERE id = 1",
+		"TABC...",
+	); err != nil {
+		t.Fatalf("UPDATE 失败: %v", err)
+	}
+	if err := db.QueryRow(
+		"SELECT platform_receive_address FROM energy_platform_config WHERE id = 1",
+	).Scan(&addr); err != nil {
+		t.Fatalf("二次 SELECT 失败: %v", err)
+	}
+	if !addr.Valid || addr.String != "TABC..." {
+		t.Errorf("round-trip 失败，got valid=%v value=%q", addr.Valid, addr.String)
 	}
 }

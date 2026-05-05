@@ -32,8 +32,9 @@ type Process interface {
 }
 
 // ProcessLauncher 抽象 fork+exec；生产实现见 process_exec.go。
+// env 为子进程完整环境变量（key=value 列表）；传 nil 表示继承父进程。
 type ProcessLauncher interface {
-	Launch(bin string, args []string) (Process, error)
+	Launch(bin string, args []string, env []string) (Process, error)
 }
 
 // Logger 是 manager 内部用的最小日志接口（与心跳/客户端模块同款）。
@@ -50,6 +51,11 @@ type Manager struct {
 	stopGrace time.Duration
 	now       func() time.Time
 	logger    Logger
+
+	// 子进程启动时注入的 env（key=value 列表）；nil/空切片表示继承父进程。
+	// 由 SetEnv 设置，Start 时拷贝传给 launcher。T11 为让 bot 知道 DATABASE_URL
+	// （SQLite 路径）等配置，agent 启动时会构造这个切片。
+	env []string
 
 	// 状态
 	status        botinfo.BotStatus
@@ -89,7 +95,7 @@ func (m *Manager) Start() error {
 	if m.status == botinfo.BotStatusRunning || m.status == botinfo.BotStatusStarting {
 		return nil
 	}
-	proc, err := m.launcher.Launch(m.binPath, m.args)
+	proc, err := m.launcher.Launch(m.binPath, m.args, m.env)
 	if err != nil {
 		m.status = botinfo.BotStatusError
 		m.lastError = truncate(fmt.Sprintf("launch: %v", err), 500)
@@ -192,6 +198,21 @@ func (m *Manager) SetConfigVersion(v int) {
 	m.configVersion = v
 }
 
+// SetEnv 设置下次 Start 时注入给子进程的环境变量。
+// 传 nil 或空切片表示让子进程继承父进程 env（默认行为）。
+// 已 running 的进程不受影响——下次 Reload / Stop+Start 才生效。
+//
+// 典型用法：agent 启动时调 SetEnv([]string{"DATABASE_URL=sqlite:///..."})
+// 让 bot 能找到 SQLite；后续 applyConfig 往 SQLite 表写具体 token/API key 等。
+func (m *Manager) SetEnv(env []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// 拷贝防止外部修改影响 Manager 状态
+	cp := make([]string, len(env))
+	copy(cp, env)
+	m.env = cp
+}
+
 // shutdown 用于测试 cleanup：取消 watch goroutine 并等其退出。
 // 生产路径不应直接调用——agent 关停时调 Stop() 即可。
 func (m *Manager) shutdown(ctx context.Context) error {
@@ -245,8 +266,9 @@ func (m *Manager) watch(ctx context.Context, proc Process, done chan struct{}) {
 			m.lastError = truncate(fmt.Sprintf("exit code %d", res.code), 500)
 		}
 		m.proc = nil
+		errSnapshot := m.lastError // 锁内快照避免锁外读 race
 		m.mu.Unlock()
-		m.logger.Printf("supervisor: bot exited unexpectedly: %s", m.lastError)
+		m.logger.Printf("supervisor: bot exited unexpectedly: %s", errSnapshot)
 	case <-ctx.Done():
 		// shutdown 路径
 		return

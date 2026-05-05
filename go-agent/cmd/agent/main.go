@@ -71,9 +71,21 @@ func main() {
 		supLogger := ebtlog.StdLogger(zl, "supervisor")
 		launcher := supervisor.NewExecLauncher(supLogger)
 		botMgr = supervisor.NewManager(launcher, cfg.BotBinary, nil, supLogger)
+		// T11.2：为 bot 准备 SQLite 目录并注入 DATABASE_URL。
+		// 路径固定 /var/lib/energybot-agent/bot.db（与 install.sh 的 DATA_DIR 对齐）。
+		// 权限 0o750：仅 energybot-agent 用户及同组可访问（token 明文落盘需要更严权限）。
+		// 注意：env 中必须同时带上父进程的 PATH/HOME/TZ 等系统变量——SetEnv 走的是
+		// **完全替换** 模式（见 ExecLauncher.Launch 注释），缺 PATH 会让 bot 内的子调用炸。
+		const botDataDir = "/var/lib/energybot-agent"
+		botDBPath := botDataDir + "/bot.db"
+		if err := os.MkdirAll(botDataDir, 0o750); err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: mkdir %s: %v\n", botDataDir, err)
+			os.Exit(2)
+		}
+		botMgr.SetEnv(buildBotEnv(botDBPath))
 		botProvider = botMgr
 		dispatcher = newBotDispatcher(botMgr, ebtlog.StdLogger(zl, "dispatcher"))
-		agentLog.Printf("supervisor: 启用 bot 管理，binary=%s", cfg.BotBinary)
+		agentLog.Printf("supervisor: 启用 bot 管理，binary=%s，db=%s", cfg.BotBinary, botDBPath)
 	} else {
 		agentLog.Printf("supervisor: 未配置 EBT_BOT_BINARY，跳过 bot 管理（B2 兼容模式）")
 	}
@@ -150,4 +162,27 @@ func main() {
 		os.Exit(1)
 	}
 	agentLog.Print("agent exited cleanly")
+}
+
+// buildBotEnv 构造 bot 子进程的 env 列表。
+//
+// 设计决策（T11.2）：
+//   - 不直接继承 agent 自身 env——agent 的配置（EBT_API_URL、EBT_LICENSE_KEY 等）
+//     对 bot 无意义且可能污染 bot 的 EBT_ 前缀命名空间
+//   - 显式带上 bot 需要的系统变量（PATH/HOME/TZ/LANG）以免 shell 子调用炸
+//   - DATABASE_URL 用**裸文件路径**——bot 内部 storage.Open 直接把它当 sqlite3 dsn 用，
+//     不接受 sqlite:// scheme 前缀（验证：go-bot-v2/internal/storage/storage.go L34）。
+//     如果以后要兼容 sqlite:/// 三斜线 URL，需要在 normalizeDatabaseURL 里加剥离逻辑
+//
+// 未来扩展：若引入 EBT_BOT_LOG_LEVEL 等二级配置，统一从 cfg 读并在这里拼。
+func buildBotEnv(dbPath string) []string {
+	env := []string{
+		"DATABASE_URL=" + dbPath,
+	}
+	for _, key := range []string{"PATH", "HOME", "TZ", "LANG", "LC_ALL"} {
+		if v := os.Getenv(key); v != "" {
+			env = append(env, key+"="+v)
+		}
+	}
+	return env
 }

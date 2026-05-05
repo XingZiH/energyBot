@@ -31,10 +31,18 @@ type fakeLauncher struct {
 	launches int
 	// 测试可以覆盖：Launch 返 err 模拟 spawn 失败
 	launchErr error
+	// 最近一次 Launch 时接收到的 env（验证 SetEnv 透传）
+	lastEnv []string
 }
 
-func (l *fakeLauncher) Launch(bin string, args []string) (Process, error) {
+func (l *fakeLauncher) Launch(bin string, args []string, env []string) (Process, error) {
 	l.launches++
+	// 深拷贝 env 保存，隔离 Manager 内部的任何后续修改
+	if env != nil {
+		l.lastEnv = append([]string(nil), env...)
+	} else {
+		l.lastEnv = nil
+	}
 	if l.launchErr != nil {
 		return nil, l.launchErr
 	}
@@ -363,3 +371,53 @@ func waitFor(t *testing.T, timeout time.Duration, pred func() bool) {
 type discardLogger struct{}
 
 func (discardLogger) Printf(string, ...any) {}
+
+// ---- T11.1：SetEnv 透传到 Launch ----
+
+func TestManager_SetEnv_PropagatesToLauncher(t *testing.T) {
+	launcher := &fakeLauncher{}
+	m := newManagerForTest(t, launcher)
+
+	// 调 SetEnv 前先验证：默认 env 是 nil（=继承父 env）
+	if err := m.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if launcher.lastEnv != nil {
+		t.Errorf("first Launch env want=nil got=%v", launcher.lastEnv)
+	}
+
+	// stop 后 SetEnv，重启应收到新 env
+	// 触发进程退出使 Stop 能顺利完成
+	launcher.lastProc.triggerExit(0, nil)
+	waitFor(t, time.Second, func() bool {
+		snap, _ := m.Snapshot()
+		return snap.Status == botinfo.BotStatusError // 非 stopping 退出 → error
+	})
+	// 重置到 stopped 状态以便再 Start
+	_ = m.Stop()
+
+	env := []string{"DATABASE_URL=sqlite:///tmp/bot.db", "TZ=UTC"}
+	m.SetEnv(env)
+	if err := m.Start(); err != nil {
+		t.Fatalf("Start after SetEnv: %v", err)
+	}
+
+	if got := launcher.lastEnv; len(got) != 2 || got[0] != env[0] || got[1] != env[1] {
+		t.Errorf("launcher.lastEnv = %v, want %v", got, env)
+	}
+
+	// 外部修改原切片不应影响 Manager 内部（验证深拷贝）
+	env[0] = "MUTATED"
+	launcher.lastProc.triggerExit(0, nil)
+	waitFor(t, time.Second, func() bool {
+		snap, _ := m.Snapshot()
+		return snap.Status == botinfo.BotStatusError
+	})
+	_ = m.Stop()
+	// 再 Start 一次，验证内部 env[0] 仍是原值
+	_ = m.Start()
+	if launcher.lastEnv[0] != "DATABASE_URL=sqlite:///tmp/bot.db" {
+		t.Errorf("Manager.env 未深拷贝 —— 外部 env[0]=%q 污染到内部 %q",
+			env[0], launcher.lastEnv[0])
+	}
+}

@@ -26,8 +26,13 @@ func NewExecLauncher(logger Logger) *ExecLauncher {
 }
 
 // Launch fork+exec energybot-bot。
-func (l *ExecLauncher) Launch(bin string, args []string) (Process, error) {
+// env 为空时子进程继承父进程 env；非空时**完全替换**（不合并）——调用方需自行
+// 确保必要的系统 env（如 PATH/HOME）已包含在内。
+func (l *ExecLauncher) Launch(bin string, args []string, env []string) (Process, error) {
 	cmd := exec.Command(bin, args...)
+	if len(env) > 0 {
+		cmd.Env = env
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
