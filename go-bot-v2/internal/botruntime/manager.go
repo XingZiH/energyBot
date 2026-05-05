@@ -2,6 +2,7 @@ package botruntime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -9,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/anomalyco/energybot-bot/internal/config"
 	"github.com/anomalyco/energybot-bot/internal/telegram"
@@ -22,11 +21,11 @@ type botRunner interface {
 	Run(context.Context) error
 }
 
-type botFactory func(config.Config, *pgxpool.Pool, *log.Logger, Target) (botRunner, error)
+type botFactory func(config.Config, *sql.DB, *log.Logger, Target) (botRunner, error)
 
 type Manager struct {
 	cfg               config.Config
-	db                *pgxpool.Pool
+	db                *sql.DB
 	logger            *log.Logger
 	reconcileInterval time.Duration
 	instanceID        string
@@ -41,7 +40,7 @@ type runningBot struct {
 	cancel context.CancelFunc
 }
 
-func NewManager(cfg config.Config, db *pgxpool.Pool, logger *log.Logger) (*Manager, error) {
+func NewManager(cfg config.Config, db *sql.DB, logger *log.Logger) (*Manager, error) {
 	if strings.TrimSpace(cfg.DatabaseURL) == "" {
 		return nil, errors.New("database url is required")
 	}
@@ -227,7 +226,7 @@ func (m *Manager) stopAll() {
 }
 
 func (m *Manager) loadAgentBotConfigs(ctx context.Context) ([]AgentBotConfig, error) {
-	rows, err := m.db.Query(ctx, `
+	rows, err := m.db.QueryContext(ctx, `
 select c.agent_id,
        coalesce(c.bot_status, 'disabled'),
        coalesce(c.telegram_bot_token, ''),
@@ -272,7 +271,7 @@ func (m *Manager) writeRuntimeStatus(
 	if target.Scope == ScopeAgent {
 		agentID = target.AgentID
 	}
-	_, err := m.db.Exec(ctx, `
+	_, err := m.db.ExecContext(ctx, `
 insert into bot_runtime_status (
   bot_scope,
   agent_id,
@@ -312,7 +311,7 @@ do update set
 	return err
 }
 
-func defaultBotFactory(cfg config.Config, db *pgxpool.Pool, logger *log.Logger, target Target) (botRunner, error) {
+func defaultBotFactory(cfg config.Config, db *sql.DB, logger *log.Logger, target Target) (botRunner, error) {
 	if target.Scope == ScopeAgent {
 		return telegram.NewAgentBot(cfg, db, logger, target.AgentID, target.Token)
 	}
@@ -324,9 +323,9 @@ func timePtr(value time.Time) *time.Time {
 }
 
 type poolQueryRower struct {
-	db *pgxpool.Pool
+	db *sql.DB
 }
 
 func (p poolQueryRower) QueryRow(ctx context.Context, sql string, args ...any) config.RowScanner {
-	return p.db.QueryRow(ctx, sql, args...)
+	return p.db.QueryRowContext(ctx, sql, args...)
 }

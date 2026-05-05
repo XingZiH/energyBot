@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,8 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/anomalyco/energybot-bot/internal/config"
 	"github.com/anomalyco/energybot-bot/internal/telegram/actions"
 )
@@ -27,7 +26,7 @@ const telegramAPIBase = "https://api.telegram.org"
 type Bot struct {
 	agentID            int
 	token              string
-	db                 *pgxpool.Pool
+	db                 *sql.DB
 	client             *http.Client
 	logger             *log.Logger
 	pollingInterval    time.Duration
@@ -208,18 +207,18 @@ const (
 	maxUserAddresses = 10
 )
 
-func NewBot(cfg config.Config, db *pgxpool.Pool, logger *log.Logger) (*Bot, error) {
+func NewBot(cfg config.Config, db *sql.DB, logger *log.Logger) (*Bot, error) {
 	return newBot(cfg, db, logger, 0, cfg.TelegramBotToken)
 }
 
-func NewAgentBot(cfg config.Config, db *pgxpool.Pool, logger *log.Logger, agentID int, token string) (*Bot, error) {
+func NewAgentBot(cfg config.Config, db *sql.DB, logger *log.Logger, agentID int, token string) (*Bot, error) {
 	if agentID <= 0 {
 		return nil, errors.New("agent id is required")
 	}
 	return newBot(cfg, db, logger, agentID, token)
 }
 
-func newBot(cfg config.Config, db *pgxpool.Pool, logger *log.Logger, agentID int, token string) (*Bot, error) {
+func newBot(cfg config.Config, db *sql.DB, logger *log.Logger, agentID int, token string) (*Bot, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, errors.New("telegram bot token is required")
 	}
@@ -253,8 +252,8 @@ func newBot(cfg config.Config, db *pgxpool.Pool, logger *log.Logger, agentID int
 	return b, nil
 }
 
-func LoadEnabledAgentBots(ctx context.Context, cfg config.Config, db *pgxpool.Pool, logger *log.Logger) ([]*Bot, error) {
-	rows, err := db.Query(ctx, `
+func LoadEnabledAgentBots(ctx context.Context, cfg config.Config, db *sql.DB, logger *log.Logger) ([]*Bot, error) {
+	rows, err := db.QueryContext(ctx, `
 select c.agent_id, c.telegram_bot_token
 from agent_bot_configs c
 join agent_profiles p on p.id = c.agent_id
@@ -648,14 +647,14 @@ func (b *Bot) loadDesignerConfig(ctx context.Context) (BotDesignerConfig, error)
 	var welcomeText, messageConfigRaw, menuConfigRaw string
 	var err error
 	if b.agentID > 0 {
-		err = b.db.QueryRow(ctx, `
+		err = b.db.QueryRowContext(ctx, `
 select coalesce(welcome_text, ''), coalesce(message_config, ''), coalesce(menu_config, '')
 from agent_bot_configs
 where agent_id = $1
   and deleted_at is null
 limit 1`, b.agentID).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
 	} else {
-		err = b.db.QueryRow(ctx, `
+		err = b.db.QueryRowContext(ctx, `
 select coalesce(welcome_text, ''), coalesce(message_config, ''), coalesce(menu_config, '')
 from energy_platform_config
 where id = 1
@@ -718,7 +717,7 @@ func (b *Bot) sendWalletSnapshot(ctx context.Context, chatID int64, address stri
 }
 
 func (b *Bot) listPackages(ctx context.Context) ([]EnergyPackage, error) {
-	rows, err := b.db.Query(ctx, `
+	rows, err := b.db.QueryContext(ctx, `
 select p.id,
        p.package_name,
        coalesce(base.energy_amount, p.energy_amount),
@@ -754,7 +753,7 @@ order by p.sort_order asc, p.id asc`, b.agentIDParam())
 
 func (b *Bot) findPackage(ctx context.Context, id int) (EnergyPackage, error) {
 	var pkg EnergyPackage
-	err := b.db.QueryRow(ctx, `
+	err := b.db.QueryRowContext(ctx, `
 select p.id,
        p.package_name,
        coalesce(base.energy_amount, p.energy_amount),
@@ -780,7 +779,7 @@ where p.id = $1
 }
 
 func (b *Bot) listUserAddresses(ctx context.Context, chatID int64) ([]UserAddress, error) {
-	rows, err := b.db.Query(ctx, `
+	rows, err := b.db.QueryContext(ctx, `
 select id, telegram_chat_id, label, address, is_default
 from energy_user_addresses
 where telegram_chat_id = $1
@@ -806,7 +805,7 @@ order by is_default desc, id asc`, chatID, b.agentIDParam())
 
 func (b *Bot) findUserAddress(ctx context.Context, chatID int64, addressID int) (UserAddress, error) {
 	var item UserAddress
-	err := b.db.QueryRow(ctx, `
+	err := b.db.QueryRowContext(ctx, `
 select id, telegram_chat_id, label, address, is_default
 from energy_user_addresses
 where id = $1
@@ -838,7 +837,7 @@ func (b *Bot) createUserAddress(ctx context.Context, chatID int64, address strin
 
 	isDefault := len(addresses) == 0
 	label := fmt.Sprintf("地址%d", len(addresses)+1)
-	_, err = b.db.Exec(ctx, `
+	_, err = b.db.ExecContext(ctx, `
 insert into energy_user_addresses (
   agent_id, telegram_chat_id, label, address, is_default, status, created_at, updated_at
 ) values ($1, $2, $3, $4, $5, 'active', $6, $6)`, b.agentIDParam(), chatID, label, address, isDefault, time.Now())
@@ -865,7 +864,7 @@ func (b *Bot) updateUserAddress(ctx context.Context, chatID int64, addressID int
 		return fmt.Errorf("address not found")
 	}
 
-	tag, err := b.db.Exec(ctx, `
+	tag, err := b.db.ExecContext(ctx, `
 update energy_user_addresses
 set address = $1, updated_at = $2
 where id = $3
@@ -876,7 +875,11 @@ where id = $3
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	rowsAffected, err := tag.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
 		return fmt.Errorf("address not found")
 	}
 	return nil
@@ -888,7 +891,7 @@ func (b *Bot) deleteUserAddress(ctx context.Context, chatID int64, addressID int
 		return err
 	}
 	now := time.Now()
-	tag, err := b.db.Exec(ctx, `
+	tag, err := b.db.ExecContext(ctx, `
 update energy_user_addresses
 set status = 'deleted', deleted_at = $1, updated_at = $1, is_default = false
 where id = $2
@@ -899,11 +902,15 @@ where id = $2
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	rowsAffected, err := tag.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
 		return fmt.Errorf("address not found")
 	}
 	if address.IsDefault {
-		_, _ = b.db.Exec(ctx, `
+		_, _ = b.db.ExecContext(ctx, `
 update energy_user_addresses
 set is_default = true, updated_at = $1
 where id = (
@@ -924,7 +931,7 @@ func (b *Bot) setDefaultUserAddress(ctx context.Context, chatID int64, addressID
 		return err
 	}
 	now := time.Now()
-	_, err := b.db.Exec(ctx, `
+	_, err := b.db.ExecContext(ctx, `
 update energy_user_addresses
 set is_default = case when id = $1 then true else false end,
     updated_at = $2
@@ -1060,7 +1067,7 @@ func (b *Bot) createOrder(ctx context.Context, packageID int, receiverAddress st
 	now := time.Now()
 	orderNo := newOrderNo(now)
 	expiresAt := now.Add(b.orderPaymentTTL)
-	_, err = b.db.Exec(ctx, `
+	_, err = b.db.ExecContext(ctx, `
 insert into energy_orders (
   agent_id, order_no, package_id, package_name, buyer_address, receiver_address,
   energy_amount, duration_hours, payment_amount_sun, payment_expires_at,

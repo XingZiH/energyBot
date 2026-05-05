@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,8 +22,6 @@ import (
 	"github.com/fbsobreira/gotron-sdk/pkg/keys"
 	"github.com/fbsobreira/gotron-sdk/pkg/proto/api"
 	"github.com/fbsobreira/gotron-sdk/pkg/proto/core"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/anomalyco/energybot-bot/internal/config"
 )
@@ -48,7 +47,7 @@ var errOfficialRentalOrderNotFound = errors.New("official justlend rental order 
 
 type Service struct {
 	cfg        config.Config
-	db         *pgxpool.Pool
+	db         *sql.DB
 	httpClient *http.Client
 	logger     *log.Logger
 }
@@ -169,7 +168,7 @@ type tronGridTransaction struct {
 	} `json:"raw_data"`
 }
 
-func New(cfg config.Config, db *pgxpool.Pool, logger *log.Logger) (*Service, error) {
+func New(cfg config.Config, db *sql.DB, logger *log.Logger) (*Service, error) {
 	if db == nil {
 		return nil, errors.New("database pool is required")
 	}
@@ -523,7 +522,7 @@ func officialRentalExpiration(now time.Time, order officialRentOrder) (time.Time
 }
 
 func (s *Service) fetchPendingOrders(ctx context.Context) ([]PendingOrder, error) {
-	rows, err := s.db.Query(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 select id, order_no, package_name, receiver_address, energy_amount, duration_hours,
        payment_amount_sun::text, created_at, payment_expires_at, coalesce(remark, '')
 from energy_orders
@@ -554,7 +553,7 @@ order by created_at asc`)
 }
 
 func (s *Service) fetchPaidOrders(ctx context.Context) ([]PaidOrder, error) {
-	rows, err := s.db.Query(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 select id, order_no, receiver_address, energy_amount, duration_hours,
        coalesce(payment_tx_hash, ''), coalesce(remark, ''),
        coalesce(energy_provider, 'justlend'), coalesce(external_order_id, ''),
@@ -579,7 +578,7 @@ order by updated_at asc, id asc`)
 }
 
 func (s *Service) fetchDueReturnTasks(ctx context.Context) ([]ReturnTask, error) {
-	rows, err := s.db.Query(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 select t.id, t.order_id, o.order_no, t.receiver_address, t.energy_amount,
        o.duration_hours, coalesce(t.delegated_amount_sun, 0)::text,
        t.attempts, coalesce(o.remark, '')
@@ -645,7 +644,7 @@ func (s *Service) syncOfficialRentalExpirations(ctx context.Context) error {
 }
 
 func (s *Service) fetchRentingOrdersForScheduleSync(ctx context.Context) ([]rentingOrderForScheduleSync, error) {
-	rows, err := s.db.Query(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 select o.id, o.order_no, o.receiver_address,
        coalesce(o.expires_at, timestamp '1970-01-01 00:00:00') as expires_at
 from energy_orders o
@@ -679,14 +678,14 @@ order by o.id asc`)
 }
 
 func (s *Service) updateRentalSchedule(ctx context.Context, orderID int, expiresAt time.Time) error {
-	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	now := time.Now()
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 update energy_orders
 set expires_at = $1,
     updated_at = $2
@@ -696,7 +695,7 @@ where id = $3
   and deleted_at is null`, expiresAt, now, orderID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 update energy_return_tasks
 set next_retry_at = $1,
     updated_at = $2
@@ -705,18 +704,18 @@ where order_id = $3
   and deleted_at is null`, expiresAt, now, orderID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 func (s *Service) markOrderPaid(ctx context.Context, order PendingOrder, transfer IncomingTransfer) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	var existing bool
-	if err := tx.QueryRow(ctx, `select exists(select 1 from energy_wallet_transactions where tx_hash = $1 and deleted_at is null)`, transfer.TxID).Scan(&existing); err != nil {
+	if err := tx.QueryRowContext(ctx, `select exists(select 1 from energy_wallet_transactions where tx_hash = $1 and deleted_at is null)`, transfer.TxID).Scan(&existing); err != nil {
 		return false, err
 	}
 	if existing {
@@ -724,7 +723,7 @@ func (s *Service) markOrderPaid(ctx context.Context, order PendingOrder, transfe
 	}
 
 	var status string
-	if err := tx.QueryRow(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
 		return false, err
 	}
 	if status != "pending" {
@@ -732,7 +731,7 @@ func (s *Service) markOrderPaid(ctx context.Context, order PendingOrder, transfe
 	}
 
 	now := time.Now()
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, created_at, updated_at
@@ -742,7 +741,7 @@ insert into energy_wallet_transactions (
 		return false, err
 	}
 
-	tag, err := tx.Exec(ctx, `
+	tag, err := tx.ExecContext(ctx, `
 update energy_orders
 set buyer_address = $1,
     payment_tx_hash = $2,
@@ -754,32 +753,36 @@ where id = $4 and status = 'pending'`,
 	if err != nil {
 		return false, err
 	}
-	if tag.RowsAffected() == 0 {
+	rowsAffected, err := tag.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
 		return false, nil
 	}
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 func (s *Service) markOrderRenting(ctx context.Context, order PaidOrder, txID string, amounts RentalAmounts, expiresAt time.Time, receipt *core.TransactionInfo) error {
-	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	now := time.Now()
 	var status string
-	if err := tx.QueryRow(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
 		return err
 	}
 	if status != "paid" {
 		return nil
 	}
 
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, remark, created_at, updated_at
@@ -797,7 +800,7 @@ insert into energy_wallet_transactions (
 		return err
 	}
 
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 update energy_orders
 set status = 'renting',
     return_status = 'pending',
@@ -811,7 +814,7 @@ where id = $4`,
 		return err
 	}
 
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 insert into energy_return_tasks (
   order_id, receiver_address, energy_amount, delegated_amount_sun,
   status, attempts, next_retry_at, created_at, updated_at
@@ -826,33 +829,37 @@ insert into energy_return_tasks (
 		return err
 	}
 
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 func (s *Service) markReturnTaskRunning(ctx context.Context, taskID int) (bool, error) {
-	tag, err := s.db.Exec(ctx, `
+	tag, err := s.db.ExecContext(ctx, `
 update energy_return_tasks
 set status = 'running', updated_at = $1
 where id = $2 and status = 'pending'`, time.Now(), taskID)
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	rowsAffected, err := tag.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected: %w", err)
+	}
+	return rowsAffected > 0, nil
 }
 
 func (s *Service) markReturnTaskCompleted(ctx context.Context, task ReturnTask, txID string, receipt *core.TransactionInfo) error {
-	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	now := time.Now()
 	refundSun, err := justLendRefundToAddressSun(receipt, s.cfg.PlatformReceiveAddress)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 update energy_return_tasks
 set status = 'completed',
     last_error = null,
@@ -861,7 +868,7 @@ set status = 'completed',
 where id = $2`, now, task.ID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 update energy_orders
 set status = 'completed',
     return_status = 'completed',
@@ -870,7 +877,7 @@ set status = 'completed',
 where id = $2`, now, task.OrderID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, remark, created_at, updated_at
@@ -887,7 +894,7 @@ insert into energy_wallet_transactions (
 	if err := insertNetworkFeeWalletTransaction(ctx, tx, txID, s.cfg.JustLendContractAddress, task.OrderID, receipt, now, "return contract fee"); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 func (s *Service) markReturnTaskFailed(ctx context.Context, task ReturnTask, cause error) error {
@@ -895,27 +902,27 @@ func (s *Service) markReturnTaskFailed(ctx context.Context, task ReturnTask, cau
 	attempts := task.Attempts + 1
 	lastError := cause.Error()
 	if attempts >= maxReturnAttempts {
-		tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback(ctx)
-		if _, err := tx.Exec(ctx, `
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, `
 update energy_return_tasks
 set status = 'failed', attempts = $1, last_error = $2, updated_at = $3
 where id = $4`, attempts, lastError, now, task.ID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 update energy_orders
 set return_status = 'failed', updated_at = $1
 where id = $2`, now, task.OrderID); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
+		return tx.Commit()
 	}
 
-	_, err := s.db.Exec(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 update energy_return_tasks
 set status = 'pending',
     attempts = $1,
@@ -932,7 +939,7 @@ func (s *Service) cancelExpiredPendingOrders(ctx context.Context, now time.Time)
 		return err
 	}
 	for _, order := range orders {
-		tag, err := s.db.Exec(ctx, `
+		tag, err := s.db.ExecContext(ctx, `
 update energy_orders
 set status = 'cancelled', updated_at = $1
 where id = $2
@@ -941,7 +948,11 @@ where id = $2
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
+		rowsAffected, err := tag.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("rows affected: %w", err)
+		}
+		if rowsAffected == 0 {
 			continue
 		}
 		s.logger.Printf("payment order expired: order=%s", order.OrderNo)
@@ -951,7 +962,7 @@ where id = $2
 }
 
 func (s *Service) fetchExpiredPendingOrders(ctx context.Context, now time.Time) ([]ExpiredOrder, error) {
-	rows, err := s.db.Query(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 select id, order_no, package_name, payment_amount_sun::text, coalesce(remark, '')
 from energy_orders
 where status = 'pending'
@@ -1046,11 +1057,11 @@ func justLendPayerAddress(privateKey string) (string, error) {
 	return address.BTCECPubkeyToAddress(signerKey.PubKey()).String(), nil
 }
 
-func insertNetworkFeeWalletTransaction(ctx context.Context, tx pgx.Tx, txID string, walletAddress string, orderID int, receipt *core.TransactionInfo, confirmedAt time.Time, remark string) error {
+func insertNetworkFeeWalletTransaction(ctx context.Context, tx *sql.Tx, txID string, walletAddress string, orderID int, receipt *core.TransactionInfo, confirmedAt time.Time, remark string) error {
 	if receipt == nil || receipt.GetFee() <= 0 {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `
+	_, err := tx.ExecContext(ctx, `
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, remark, created_at, updated_at

@@ -9,12 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/anomalyco/energybot-bot/internal/botruntime"
 	"github.com/anomalyco/energybot-bot/internal/config"
 	"github.com/anomalyco/energybot-bot/internal/executor"
 	"github.com/anomalyco/energybot-bot/internal/scheduler"
+	"github.com/anomalyco/energybot-bot/internal/storage"
 )
 
 func main() {
@@ -28,11 +27,11 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	db, err := storage.Open(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("connect database: %v", err)
+		log.Fatalf("open sqlite: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	executorService, err := executor.New(cfg, db, log.Default())
 	if err != nil {

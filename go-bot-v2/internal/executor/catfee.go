@@ -14,8 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -206,7 +204,7 @@ func (s *Service) catFeeRequest(ctx context.Context, environment string, method 
 }
 
 func (s *Service) fetchCatFeeRentingOrders(ctx context.Context) ([]catFeeTrackedOrder, error) {
-	rows, err := s.db.Query(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 select id, order_no, coalesce(external_order_id, ''),
        coalesce(external_provider_environment, ''),
        coalesce(remark, '')
@@ -235,7 +233,7 @@ order by id asc`)
 
 func (s *Service) markCatFeeOrderDelegating(ctx context.Context, order PaidOrder, detail catFeeOrderDetail) error {
 	environment := catFeeOrderEnvironment(order.ExternalProviderEnvironment, s.cfg.CatFeeEnvironment)
-	_, err := s.db.Exec(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 update energy_orders
 set external_order_id = $1,
     external_status = $2,
@@ -257,14 +255,14 @@ where id = $7
 }
 
 func (s *Service) markCatFeeOrderRenting(ctx context.Context, order PaidOrder, detail catFeeOrderDetail) error {
-	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	var status string
-	if err := tx.QueryRow(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `select status from energy_orders where id = $1 for update`, order.ID).Scan(&status); err != nil {
 		return err
 	}
 	if status != "paid" {
@@ -276,7 +274,7 @@ func (s *Service) markCatFeeOrderRenting(ctx context.Context, order PaidOrder, d
 	txID := catFeeTransactionID(detail)
 	costSun := detail.providerCostSun()
 	expiresAt := detail.expiredAt(now.Add(time.Duration(order.DurationHours) * time.Hour))
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 insert into energy_wallet_transactions (
   tx_hash, wallet_address, direction, transaction_type, amount_sun,
   related_order_id, status, confirmed_at, remark, created_at, updated_at
@@ -290,7 +288,7 @@ insert into energy_wallet_transactions (
 	); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 update energy_orders
 set status = 'renting',
     return_status = $1,
@@ -317,7 +315,7 @@ where id = $10`,
 	); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 func (s *Service) markCatFeeOrderCompleted(ctx context.Context, orderID int, detail catFeeOrderDetail) error {
@@ -325,7 +323,7 @@ func (s *Service) markCatFeeOrderCompleted(ctx context.Context, orderID int, det
 	if detail.ReclaimTimestamp > 0 {
 		completedAt = time.Unix(detail.ReclaimTimestamp, 0).In(time.Local)
 	}
-	_, err := s.db.Exec(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 update energy_orders
 set status = 'completed',
     return_status = 'completed',
@@ -346,7 +344,7 @@ where id = $5
 
 func (s *Service) markCatFeeOrderFailed(ctx context.Context, orderID int, environment string, detail catFeeOrderDetail) error {
 	environment = catFeeOrderEnvironment(environment, s.cfg.CatFeeEnvironment)
-	_, err := s.db.Exec(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 update energy_orders
 set status = 'failed',
     return_status = case when return_status in ('pending', $1) then 'failed' else return_status end,
@@ -371,7 +369,7 @@ where id = $8
 }
 
 func (s *Service) updateCatFeeOrderStatus(ctx context.Context, orderID int, detail catFeeOrderDetail) error {
-	_, err := s.db.Exec(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 update energy_orders
 set external_status = $1,
     external_confirm_status = $2,
