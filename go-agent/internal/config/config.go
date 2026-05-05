@@ -6,6 +6,8 @@
 //	EBT_LICENSE_SECRET （必填）agent license secret，仅用于签名，不出现在日志
 //	EBT_API_URL        （可选）默认 wss://www.feiyijt.com/agent
 //	EBT_LOG_LEVEL      （可选）debug|info|warn|error，默认 info
+//	EBT_BOT_BINARY     （可选）energybot-bot 二进制路径；未设则 agent 不管理 bot
+//	                    T5 后默认 /opt/energybot/bin/energybot-bot
 //
 // 设计注意：
 //   - Load 只读 env、不读文件；系统配置落在 systemd EnvironmentFile 中。
@@ -27,6 +29,7 @@ type Config struct {
 	LicenseSecret string
 	APIURL        string // wss://... 或 ws://...
 	LogLevel      string // debug|info|warn|error（小写）
+	BotBinary     string // energybot-bot 二进制绝对路径；空表示不管理 bot（B2 兼容）
 }
 
 const (
@@ -48,6 +51,7 @@ func load(getenv func(string) string) (*Config, error) {
 		LicenseSecret: strings.TrimSpace(getenv("EBT_LICENSE_SECRET")),
 		APIURL:        strings.TrimSpace(getenv("EBT_API_URL")),
 		LogLevel:      strings.TrimSpace(getenv("EBT_LOG_LEVEL")),
+		BotBinary:     strings.TrimSpace(getenv("EBT_BOT_BINARY")),
 	}
 	if cfg.LicenseKey == "" {
 		return nil, errors.New("config: EBT_LICENSE_KEY is required")

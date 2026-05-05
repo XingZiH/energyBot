@@ -278,9 +278,11 @@ func (c *Client) runOnce(ctx context.Context) (closeCode int, helloOK bool, err 
 		}
 	}()
 
-	// 主读循环：server 推消息或 close。暂不处理 server 下行消息（spec 未定义）。
+	// 主读循环：server 推消息或 close。
+	// B1：仅处理 response（含 hello ack 已在上方 helloCh 处理，此处应不再有 hello）
+	// B3-T5：支持 server 下行 notification（无 id），调 Dispatcher 转发给 supervisor。
 	for {
-		_, _, readErr := conn.ReadMessage()
+		_, data, readErr := conn.ReadMessage()
 		if readErr != nil {
 			code := extractCloseCode(readErr)
 			// 触发 cleanup：切断 sendCh + 关 stopCh。
@@ -300,7 +302,39 @@ func (c *Client) runOnce(ctx context.Context) (closeCode int, helloOK bool, err 
 			}
 			return code, helloOK, readErr
 		}
-		// 当前协议下 agent 不处理 server 请求，忽略。
+		c.handleServerFrame(data)
+	}
+}
+
+// handleServerFrame 处理一条服务端下行消息。
+//
+// JSON-RPC 2.0 语义：
+//   - 带 id + method → 请求（agent 不是 responder，记 debug 忽略）
+//   - 带 id + result/error → 响应（B1 只有 hello 响应，在 helloCh 分支已处理；
+//     此处若再来视为意外，debug 忽略）
+//   - 无 id + method → notification（B3-T5：转给 Dispatcher）
+func (c *Client) handleServerFrame(data []byte) {
+	var req jsonrpc.Request
+	if err := json.Unmarshal(data, &req); err != nil {
+		c.cfg.Logger.Printf("client: 下行消息解析失败，已丢弃: %v", err)
+		return
+	}
+	if req.Method == "" {
+		// 非请求/通知——可能是响应或无意义消息；B1 阶段忽略。
+		return
+	}
+	if req.ID != nil {
+		// 服务端请求 agent 回包。当前协议未定义，debug 忽略。
+		c.cfg.Logger.Printf("client: 忽略服务端 request method=%s（agent 不做 responder）", req.Method)
+		return
+	}
+	// notification：dispatch 给外部
+	if c.cfg.Dispatcher == nil {
+		c.cfg.Logger.Printf("client: 未设 Dispatcher，丢弃 notification method=%s", req.Method)
+		return
+	}
+	if err := c.cfg.Dispatcher.Dispatch(req.Method, req.Params); err != nil {
+		c.cfg.Logger.Printf("client: Dispatcher 处理 method=%s 失败: %v", req.Method, err)
 	}
 }
 

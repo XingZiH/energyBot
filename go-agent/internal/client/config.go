@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -8,6 +9,21 @@ import (
 
 	"github.com/anomalyco/energybot-agent/internal/host"
 )
+
+// Dispatcher 处理主站下发的 notification（B3-T5）。
+//
+// agent.client 读到无 id 的 JSON-RPC 消息时（notification），
+// 会调 Dispatch(method, params)。实现方（生产为 supervisor.Manager 的适配器）
+// 负责根据 method 分发到 bot.Start / bot.Stop / bot.Reload 等。
+//
+// 设计原则：
+//   - Dispatch 必须快（非阻塞），内部排队或开 goroutine 执行实际 I/O
+//   - 返错仅供 agent 日志使用，不会回 response 给服务端
+//     （因为 notification 本就不等回包）
+//   - 可选：cfg.Dispatcher=nil 时 client 静默丢弃所有下行消息（B1 行为）
+type Dispatcher interface {
+	Dispatch(method string, params json.RawMessage) error
+}
 
 // Config 是 Client 的完整配置。所有可选时间参数允许测试覆盖以加速。
 //
@@ -38,6 +54,8 @@ type Config struct {
 	DialTimeout time.Duration
 	// SendBuffer 指 sendCh 容量，默认 16；满则 SendHeartbeat 返 ErrSendBufferFull。
 	SendBuffer int
+	// Dispatcher 处理主站下行 notification（B3-T5）；nil 表示静默丢弃。
+	Dispatcher Dispatcher
 }
 
 // validate 校验必填字段。调用时不修改 c。

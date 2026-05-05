@@ -25,10 +25,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/anomalyco/energybot-agent/internal/botinfo"
 	"github.com/anomalyco/energybot-agent/internal/client"
 	"github.com/anomalyco/energybot-agent/internal/config"
 	"github.com/anomalyco/energybot-agent/internal/host"
 	ebtlog "github.com/anomalyco/energybot-agent/internal/log"
+	"github.com/anomalyco/energybot-agent/internal/supervisor"
 )
 
 // Version 由 ldflags 注入（`-X 'main.Version=x.y.z'`），dev 是本地构建默认值。
@@ -54,8 +56,27 @@ func main() {
 		Version, cfg.APIURL, cfg.LogLevel,
 	)
 
-	// ---- 3. Collector / Client / Heartbeat ----
+	// ---- 3. Collector / Supervisor / Client / Heartbeat ----
 	collector := host.NewGopsutil()
+
+	// Supervisor（B3-T5）：管理 energybot-bot 子进程生命周期。
+	// 若未配置 EBT_BOT_BINARY，则不构造 Manager，走 NoopProvider + 无 Dispatcher
+	// 的 B2 兼容路径（agent 只做心跳，不管理 bot）。
+	var (
+		botProvider  botinfo.Provider = botinfo.NoopProvider{}
+		dispatcher   client.Dispatcher
+		botMgr       *supervisor.Manager
+	)
+	if cfg.BotBinary != "" {
+		supLogger := ebtlog.StdLogger(zl, "supervisor")
+		launcher := supervisor.NewExecLauncher(supLogger)
+		botMgr = supervisor.NewManager(launcher, cfg.BotBinary, nil, supLogger)
+		botProvider = botMgr
+		dispatcher = newBotDispatcher(botMgr, ebtlog.StdLogger(zl, "dispatcher"))
+		agentLog.Printf("supervisor: 启用 bot 管理，binary=%s", cfg.BotBinary)
+	} else {
+		agentLog.Printf("supervisor: 未配置 EBT_BOT_BINARY，跳过 bot 管理（B2 兼容模式）")
+	}
 
 	cli, err := client.New(client.Config{
 		APIURL:        cfg.APIURL,
@@ -64,6 +85,7 @@ func main() {
 		AgentVersion:  Version,
 		Collector:     collector,
 		Logger:        ebtlog.StdLogger(zl, "client"),
+		Dispatcher:    dispatcher, // nil 时 client 静默丢弃下行消息
 		// ExitFunc 不设，默认 os.Exit；terminal close 时直接 42。
 	})
 	if err != nil {
@@ -72,9 +94,10 @@ func main() {
 	}
 
 	hb, err := client.NewHeartbeat(client.HeartbeatConfig{
-		Sender:    cli,
-		Collector: collector,
-		Logger:    ebtlog.StdLogger(zl, "heartbeat"),
+		Sender:      cli,
+		Collector:   collector,
+		BotProvider: botProvider,
+		Logger:      ebtlog.StdLogger(zl, "heartbeat"),
 		// Interval 不设，默认 30s。
 	})
 	if err != nil {
@@ -102,6 +125,14 @@ func main() {
 
 	// ---- 6. 优雅等待 heartbeat 退出（ctx 应已 cancel） ----
 	stop() // 主动取消 signal 订阅，确保后续无泄漏。
+
+	// B3-T5：先 Stop bot 子进程，避免 agent 退出后 bot 变孤儿。
+	if botMgr != nil {
+		if err := botMgr.Stop(); err != nil {
+			agentLog.Printf("supervisor: Stop 失败: %v", err)
+		}
+	}
+
 	waitDone := make(chan struct{})
 	go func() {
 		wg.Wait()
