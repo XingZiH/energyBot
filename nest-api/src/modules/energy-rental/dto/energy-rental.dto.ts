@@ -301,6 +301,16 @@ export class UpdatePlatformConfigDto {
   @IsString()
   justlendPayerPrivateKey?: string;
 
+  /**
+   * catfee 模式下平台收款地址的派生私钥（T11.11 起新增）。
+   * 与 justlendPayerPrivateKey 对称：nest-api 加密存储；agent 端从该私钥
+   * 派生 platform_receive_address 用于用户付款收款。
+   */
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  catfeePayerPrivateKey?: string;
+
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()

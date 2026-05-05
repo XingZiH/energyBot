@@ -664,6 +664,8 @@ export class EnergyRentalService {
       justlendContractAddress: row?.justlendContractAddress ?? '',
       justlendPayerPrivateKey: '',
       justlendPayerPrivateKeyConfigured: hasValue(row?.justlendPayerPrivateKey),
+      catfeePayerPrivateKey: '',
+      catfeePayerPrivateKeyConfigured: hasValue(row?.catfeePayerPrivateKey),
       energyProvider:
         row?.energyProvider ?? platformConfigDefaults.energyProvider,
       catfeeEnvironment:
@@ -2593,6 +2595,7 @@ export class EnergyRentalService {
     setSecret(values, 'telegramBotToken', data.telegramBotToken);
     setSecret(values, 'tronApiKey', data.tronApiKey);
     setSecret(values, 'justlendPayerPrivateKey', data.justlendPayerPrivateKey);
+    setSecret(values, 'catfeePayerPrivateKey', data.catfeePayerPrivateKey);
     setSecret(values, 'catfeeProdApiKey', data.catfeeProdApiKey);
     setSecret(values, 'catfeeProdApiSecret', data.catfeeProdApiSecret);
     setSecret(values, 'catfeeNileApiKey', data.catfeeNileApiKey);

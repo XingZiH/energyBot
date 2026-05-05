@@ -27,8 +27,10 @@ import { deriveTronAddress } from './util/tron-address.util';
  * 职责：
  * - 根据 licenseId 汇总 user → customer → license ownership 校验（防越权）
  * - 从 energy_platform_config（单例）+ agent_bot_configs（agentProfileId 绑定）读全量字段
- * - 动态派生 platform_receive_address（= justlendPayerPrivateKey 对应钱包地址）
- *   这样主站 schema 不用加冗余字段；bot 端 0002 migration 已补本地列
+ * - 动态派生 platform_receive_address：
+ *     - justlend 模式 = justlendPayerPrivateKey 对应钱包地址
+ *     - catfee 模式   = catfeePayerPrivateKey 对应钱包地址（T11.11 引入）
+ *   两种模式 bot 端都需要此地址做用户付款收款（bot.go:243 / executor.go:345）
  * - 组装 camelCase JSON → AgentRegistry.sendToAgent('agent.applyConfig', params)
  *
  * 与 MyBotActionService 的关系：
@@ -145,6 +147,8 @@ export class AgentApplyConfigService {
           energyPlatformConfigTable.justlendContractAddress,
         justlendPayerPrivateKey:
           energyPlatformConfigTable.justlendPayerPrivateKey,
+        catfeePayerPrivateKey:
+          energyPlatformConfigTable.catfeePayerPrivateKey,
         energyProvider: energyPlatformConfigTable.energyProvider,
         catfeeEnvironment: energyPlatformConfigTable.catfeeEnvironment,
         catfeeProdApiBaseUrl: energyPlatformConfigTable.catfeeProdApiBaseUrl,
@@ -168,23 +172,50 @@ export class AgentApplyConfigService {
     }
     const plat = platRows[0];
 
-    // 6. 派生 receiveAddress（仅 justlend 模式需要；catfee 不需要钱包）
+    // 6. 派生 platformReceiveAddress
+    //    两种 provider 都需要：用户打款的 TRX/USDT 平台收款地址
+    //      - justlend: 从 justlendPayerPrivateKey 派生（也兼任归还给 justlend 池的地址）
+    //      - catfee:   从 catfeePayerPrivateKey 派生（T11.11 起引入对称字段）
+    //    bot 端 go-bot-v2/internal/telegram/bot.go:243、executor.go:345
+    //    两种模式都会用此地址查 TronGrid incoming transfers / 作为收款地址展示
     let platformReceiveAddress = '';
-    if (plat.energyProvider === 'justlend' && plat.justlendPayerPrivateKey) {
-      try {
-        platformReceiveAddress = await this.deriveTronAddressFn(
-          plat.justlendPayerPrivateKey,
-          plat.tronApiBaseUrl,
-          plat.tronApiKey ?? undefined,
-        );
-      } catch (err) {
-        this.logger.error(
-          `派生 TRON 地址失败 license=${licenseId}: ${(err as Error).message}`,
-        );
-        throw new InternalServerErrorException(
-          '平台付款私钥无法派生钱包地址，请检查配置',
-        );
-      }
+    let receivePrivateKey: string | null = null;
+    let receiveSource = '';
+    if (plat.energyProvider === 'justlend') {
+      receivePrivateKey = plat.justlendPayerPrivateKey;
+      receiveSource = 'justlend_payer_private_key';
+    } else if (plat.energyProvider === 'catfee') {
+      receivePrivateKey = plat.catfeePayerPrivateKey;
+      receiveSource = 'catfee_payer_private_key';
+    } else {
+      // 其他未知 provider 不下发非空地址；由 bot 端 required 校验报错
+      // （保底路径，日常配置校验应在 platformConfig 保存时拦截）
+    }
+
+    if (!receivePrivateKey || !receivePrivateKey.trim()) {
+      // 私钥缺失是系统配置错误，不是客户操作可修复
+      // 拒绝下发避免 bot 启动后因 PLATFORM_RECEIVE_ADDRESS required 死循环 exit 1
+      this.logger.error(
+        `平台收款私钥未配置 license=${licenseId} provider=${plat.energyProvider} source=${receiveSource}`,
+      );
+      throw new InternalServerErrorException(
+        `平台收款私钥（${receiveSource}）未配置，无法派生收款地址`,
+      );
+    }
+
+    try {
+      platformReceiveAddress = await this.deriveTronAddressFn(
+        receivePrivateKey,
+        plat.tronApiBaseUrl,
+        plat.tronApiKey ?? undefined,
+      );
+    } catch (err) {
+      this.logger.error(
+        `派生 TRON 地址失败 license=${licenseId} source=${receiveSource}: ${(err as Error).message}`,
+      );
+      throw new InternalServerErrorException(
+        '平台付款私钥无法派生钱包地址，请检查配置',
+      );
     }
 
     // 7. 组装 params（camelCase，与 go-bot-v2 apply_config.go Params struct 对齐）
@@ -196,6 +227,7 @@ export class AgentApplyConfigService {
         platformReceiveAddress,
         justlendContractAddress: plat.justlendContractAddress ?? '',
         justlendPayerPrivateKey: plat.justlendPayerPrivateKey ?? '',
+        catfeePayerPrivateKey: plat.catfeePayerPrivateKey ?? '',
         energyProvider: plat.energyProvider,
         catfeeEnvironment: plat.catfeeEnvironment,
         catfeeProdApiBaseUrl: plat.catfeeProdApiBaseUrl,

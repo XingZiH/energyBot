@@ -278,6 +278,8 @@ export interface EnergyPlatformConfig {
   justlendContractAddress: string;
   justlendPayerPrivateKey: string;
   justlendPayerPrivateKeyConfigured: boolean;
+  catfeePayerPrivateKey: string;
+  catfeePayerPrivateKeyConfigured: boolean;
   energyProvider: string;
   catfeeEnvironment: string;
   catfeeProdApiBaseUrl: string;

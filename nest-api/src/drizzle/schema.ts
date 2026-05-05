@@ -275,6 +275,13 @@ export const energyPlatformConfigTable = pgTable('energy_platform_config', {
     length: 128,
   }),
   justlendPayerPrivateKey: text('justlend_payer_private_key'),
+  // B3-T11.11：catfee 模式下平台收款地址的派生私钥。
+  // 背景：catfee 模式也需要「平台收款地址」（用户打款 TRX/USDT 到此，
+  // 见 go-bot-v2/internal/telegram/bot.go:243、executor.go:345），
+  // 原代码只有 justlend 模式派生 platformReceiveAddress，导致 catfee
+  // 模式下发给 bot 的 platform_receive_address='' 触发 validateRuntimeConfig
+  // required 校验失败（exit 1）。此列与 justlendPayerPrivateKey 对称。
+  catfeePayerPrivateKey: text('catfee_payer_private_key'),
   energyProvider: varchar('energy_provider', { length: 32 })
     .notNull()
     .default('justlend'),

@@ -1,5 +1,8 @@
 import { Test } from '@nestjs/testing';
-import { ServiceUnavailableException } from '@nestjs/common';
+import {
+  InternalServerErrorException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 
 import { DrizzleAsyncProvider } from '../../drizzle/drizzle.provider';
 import { AgentRegistry } from './agent.registry';
@@ -39,6 +42,7 @@ describe('AgentApplyConfigService', () => {
       tronApiKey: string | null;
       justlendContractAddress: string | null;
       justlendPayerPrivateKey: string | null;
+      catfeePayerPrivateKey: string | null;
       energyProvider: string;
       catfeeEnvironment: string;
       catfeeProdApiBaseUrl: string;
@@ -97,7 +101,11 @@ describe('AgentApplyConfigService', () => {
   async function buildSvc(
     conn: unknown,
     registry: unknown,
-    deriveAddr?: (privateKey: string) => Promise<string>,
+    deriveAddr?: (
+      privateKey: string,
+      tronApiBaseUrl: string,
+      tronApiKey?: string,
+    ) => Promise<string>,
   ) {
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -137,6 +145,7 @@ describe('AgentApplyConfigService', () => {
           justlendContractAddress: 'TCONTRACT',
           justlendPayerPrivateKey:
             'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          catfeePayerPrivateKey: null,
           energyProvider: 'justlend',
           catfeeEnvironment: 'nile',
           catfeeProdApiBaseUrl: 'https://api.catfee.io',
@@ -208,6 +217,8 @@ describe('AgentApplyConfigService', () => {
           tronApiKey: '',
           justlendContractAddress: '',
           justlendPayerPrivateKey: '',
+          catfeePayerPrivateKey:
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           energyProvider: 'catfee',
           catfeeEnvironment: 'nile',
           catfeeProdApiBaseUrl: 'https://api.catfee.io',
@@ -255,6 +266,8 @@ describe('AgentApplyConfigService', () => {
           tronApiKey: '',
           justlendContractAddress: '',
           justlendPayerPrivateKey: '',
+          catfeePayerPrivateKey:
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           energyProvider: 'catfee',
           catfeeEnvironment: 'nile',
           catfeeProdApiBaseUrl: 'https://api.catfee.io',
@@ -281,5 +294,140 @@ describe('AgentApplyConfigService', () => {
     await expect(svc.applyConfig(50, 4)).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
+  });
+
+  // ============================================================
+  // T11.11：catfee 模式下也必须派生 platformReceiveAddress 下发
+  //
+  // 根因背景：
+  //   原代码只在 energyProvider==='justlend' 时派生地址，catfee 模式下
+  //   platformReceiveAddress='' 透传，触发 go-bot-v2 validateRuntimeConfig
+  //   PLATFORM_RECEIVE_ADDRESS required 校验失败，bot exit 1。
+  //
+  // 修复：catfee 模式从 catfeePayerPrivateKey 派生地址，与 justlend 对称。
+  // ============================================================
+
+  it('catfee 模式：从 catfeePayerPrivateKey 派生 platformReceiveAddress 并下发', async () => {
+    const derivedAddr = 'TCATFEEDERIVED777';
+    const catfeePk =
+      'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+    const callsTo: Array<{ pk: string; baseUrl: string; key?: string }> = [];
+
+    const conn = makeFakeConn({
+      user: [{ customerId: 100 }],
+      license: [{ id: 4 }],
+      agentProfile: [{ id: 1 }],
+      botConfig: [
+        {
+          telegramBotToken: '123:ABC',
+          telegramBotUsername: 'mybot',
+          welcomeText: 'hi',
+          menuConfig: null,
+          messageConfig: null,
+        },
+      ],
+      platformConfig: [
+        {
+          tronApiBaseUrl: 'https://api.trongrid.io',
+          tronApiKey: 'tron-key',
+          justlendContractAddress: '',
+          justlendPayerPrivateKey: '',
+          catfeePayerPrivateKey: catfeePk,
+          energyProvider: 'catfee',
+          catfeeEnvironment: 'nile',
+          catfeeProdApiBaseUrl: 'https://api.catfee.io',
+          catfeeProdApiKey: '',
+          catfeeProdApiSecret: '',
+          catfeeNileApiBaseUrl: 'https://nile.catfee.io',
+          catfeeNileApiKey: 'nk',
+          catfeeNileApiSecret: 'ns',
+          catfeeAutoActivate: true,
+          orderPaymentTtlMinutes: 10,
+          telegramPollingIntervalSeconds: 2,
+          workerIntervalSeconds: 60,
+          minTrxReserveSun: '0',
+        },
+      ],
+    });
+    const registry = makeRegistry();
+    const svc = await buildSvc(conn, registry, async (pk, baseUrl, key) => {
+      callsTo.push({ pk, baseUrl, key });
+      return derivedAddr;
+    });
+
+    await svc.applyConfig(50, 4);
+
+    // 1. 派生函数被调用：使用 catfee 私钥（不是 justlend 的空字符串）
+    expect(callsTo).toHaveLength(1);
+    expect(callsTo[0].pk).toBe(catfeePk);
+    expect(callsTo[0].baseUrl).toBe('https://api.trongrid.io');
+    expect(callsTo[0].key).toBe('tron-key');
+
+    // 2. 下发的 platformReceiveAddress 是派生地址而非空串
+    expect(registry.callAgent).toHaveBeenCalledTimes(1);
+    const params = registry.callAgent.mock.calls[0][2] as Record<
+      string,
+      unknown
+    >;
+    const platform = params.platform as Record<string, unknown>;
+    expect(platform.platformReceiveAddress).toBe(derivedAddr);
+    expect(platform.energyProvider).toBe('catfee');
+
+    // 3. catfee 私钥透传（agent 端可能用于内部签名 / 后续扩展）
+    expect(platform.catfeePayerPrivateKey).toBe(catfeePk);
+
+    // 4. justlend 字段保持为空字符串（catfee 模式下不需要）
+    expect(platform.justlendPayerPrivateKey).toBe('');
+  });
+
+  it('catfee 模式但 catfeePayerPrivateKey 缺失 → 500（配置错误，不能下发空地址）', async () => {
+    const conn = makeFakeConn({
+      user: [{ customerId: 100 }],
+      license: [{ id: 4 }],
+      agentProfile: [{ id: 1 }],
+      botConfig: [
+        {
+          telegramBotToken: '123:ABC',
+          telegramBotUsername: 'mybot',
+          welcomeText: '',
+          menuConfig: null,
+          messageConfig: null,
+        },
+      ],
+      platformConfig: [
+        {
+          tronApiBaseUrl: 'https://api.trongrid.io',
+          tronApiKey: '',
+          justlendContractAddress: '',
+          justlendPayerPrivateKey: '',
+          catfeePayerPrivateKey: null, // ← 缺失
+          energyProvider: 'catfee',
+          catfeeEnvironment: 'nile',
+          catfeeProdApiBaseUrl: 'https://api.catfee.io',
+          catfeeProdApiKey: '',
+          catfeeProdApiSecret: '',
+          catfeeNileApiBaseUrl: 'https://nile.catfee.io',
+          catfeeNileApiKey: 'nk',
+          catfeeNileApiSecret: 'ns',
+          catfeeAutoActivate: true,
+          orderPaymentTtlMinutes: 10,
+          telegramPollingIntervalSeconds: 2,
+          workerIntervalSeconds: 60,
+          minTrxReserveSun: '0',
+        },
+      ],
+    });
+    const registry = makeRegistry();
+    const svc = await buildSvc(conn, registry, () =>
+      Promise.resolve('SHOULD_NOT_BE_CALLED'),
+    );
+
+    // 与 justlend 私钥派生失败一致：500（系统级配置错误）
+    await expect(svc.applyConfig(50, 4)).rejects.toBeInstanceOf(
+      InternalServerErrorException,
+    );
+
+    // 派生地址失败时不应该下发给 agent
+    expect(registry.callAgent).not.toHaveBeenCalled();
   });
 });

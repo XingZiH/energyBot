@@ -31,14 +31,14 @@
 
         <div nz-col [nzLg]="12" [nzXs]="24">
           <nz-form-item>
-            <nz-form-label>平台付款私钥</nz-form-label>
+            <nz-form-label>JustLend 平台付款私钥</nz-form-label>
             <nz-form-control>
               <nz-input-group [nzSuffix]="payerKeyStatus">
                 <input
                   type="password"
                   formControlName="justlendPayerPrivateKey"
                   nz-input
-                  placeholder="用于向服务商充值和链上付款，支持 64 位私钥或 0x 开头私钥；留空不修改"
+                  placeholder="JustLend 模式下用于押金、租赁、归还的钱包私钥；留空不修改"
                 />
               </nz-input-group>
               <ng-template #payerKeyStatus>
@@ -47,7 +47,31 @@
                 </nz-tag>
               </ng-template>
               <div class="field-help">
-                用于向服务商充值和链上付款；必须填写可签名付款钱包的原始私钥，不能填写助记词、钱包地址或 TRON API Key。
+                JustLend 模式专用，用于向 JustLend 合约充值和链上付款；必须填写可签名钱包的原始私钥（64 位 hex 或 0x 开头）。
+              </div>
+            </nz-form-control>
+          </nz-form-item>
+        </div>
+
+        <div nz-col [nzLg]="12" [nzXs]="24">
+          <nz-form-item>
+            <nz-form-label>CatFee 平台收款私钥</nz-form-label>
+            <nz-form-control>
+              <nz-input-group [nzSuffix]="catfeePayerKeyStatus">
+                <input
+                  type="password"
+                  formControlName="catfeePayerPrivateKey"
+                  nz-input
+                  placeholder="CatFee 模式下平台收款地址的派生私钥；留空不修改"
+                />
+              </nz-input-group>
+              <ng-template #catfeePayerKeyStatus>
+                <nz-tag [nzColor]="statusColor(config()?.catfeePayerPrivateKeyConfigured)">
+                  {{ statusText(config()?.catfeePayerPrivateKeyConfigured) }}
+                </nz-tag>
+              </ng-template>
+              <div class="field-help">
+                CatFee 模式专用，用于派生「平台收款地址」（用户向此地址打款 TRX/USDT 兑换能量）；必须填写可签名钱包的原始私钥（64 位 hex 或 0x 开头）。
               </div>
             </nz-form-control>
           </nz-form-item>
