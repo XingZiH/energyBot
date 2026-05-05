@@ -1,65 +1,70 @@
-// Package main 是 energybot-bot 的可执行入口。
-//
-// B3 阶段最小骨架：
-//   - 依赖 mattn/go-sqlite3（cgo）验证交叉编译链路
-//   - 当前仅打开/关闭 SQLite 连接，证明二进制能跑
-//   - 后续 T1/T2 把 /go-bot/internal/ 的业务代码搬过来
-//
-// 启动：
-//
-//	energybot-bot --db=/var/lib/energybot-agent/bot.db
-//
-// 退出码：
-//
-//	0 正常退出
-//	1 运行期错误
-//	2 启动期错误（DB 打不开、配置缺失）
 package main
 
 import (
-	"database/sql"
-	"flag"
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/anomalyco/energybot-bot/internal/botruntime"
+	"github.com/anomalyco/energybot-bot/internal/config"
+	"github.com/anomalyco/energybot-bot/internal/executor"
+	"github.com/anomalyco/energybot-bot/internal/scheduler"
 )
 
-// Version 由 ldflags 注入。
-var Version = "dev"
-
 func main() {
-	dbPath := flag.String("db", "/var/lib/energybot-agent/bot.db", "SQLite 数据库路径")
-	showVersion := flag.Bool("version", false, "打印版本并退出")
-	flag.Parse()
+	log.SetOutput(os.Stdout)
 
-	if *showVersion {
-		fmt.Println(Version)
-		return
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	log.Printf("energybot-bot %s starting (db=%s)", Version, *dbPath)
-
-	// ---- 1. 打开 SQLite ----
-	db, err := sql.Open("sqlite3", *dbPath+"?_busy_timeout=5000&_journal_mode=WAL")
+	cfg, err := config.LoadRuntimeFromEnv(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: open sqlite: %v\n", err)
-		os.Exit(2)
+		log.Fatalf("load config: %v", err)
 	}
-	defer func() { _ = db.Close() }()
 
-	if err := db.Ping(); err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: ping sqlite: %v\n", err)
-		os.Exit(2)
+	db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("connect database: %v", err)
 	}
-	log.Printf("sqlite ready")
+	defer db.Close()
 
-	// ---- 2. 等信号 ----
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigCh
-	log.Printf("received %s, shutting down", sig)
+	executorService, err := executor.New(cfg, db, log.Default())
+	if err != nil {
+		log.Fatalf("create executor: %v", err)
+	}
+
+	worker, err := scheduler.New(cfg.WorkerInterval, executorService.RunOnce)
+	if err != nil {
+		log.Fatalf("create scheduler: %v", err)
+	}
+
+	runtimeManager, err := botruntime.NewManager(cfg, db, log.Default())
+	if err != nil {
+		log.Fatalf("create bot runtime manager: %v", err)
+	}
+
+	log.Println("go-bot executor started")
+	errCh := make(chan error, 2)
+
+	go func() {
+		errCh <- worker.Run(ctx)
+	}()
+	go func() {
+		errCh <- runtimeManager.Run(ctx)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Fatal(fmt.Errorf("run bot executor: %w", err))
+		}
+	}
 }
