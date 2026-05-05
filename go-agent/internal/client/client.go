@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/anomalyco/energybot-agent/internal/auth"
+	"github.com/anomalyco/energybot-agent/internal/botinfo"
 	"github.com/anomalyco/energybot-agent/internal/host"
 	"github.com/anomalyco/energybot-agent/internal/jsonrpc"
 )
@@ -328,8 +329,10 @@ func (c *Client) writeLoop(
 
 // SendHeartbeat 编码 agent.heartbeat notification 并非阻塞入队。
 // 未进入 ready 状态（未完成 hello 或已断开）时返 ErrSendBufferFull。
-func (c *Client) SendHeartbeat(m host.Metrics) error {
-	body, err := buildHeartbeatRequest(m)
+//
+// botInfo 可为 nil（agent 不管理 bot 时），心跳 payload 将省略 bot 字段。
+func (c *Client) SendHeartbeat(m host.Metrics, botInfo *botinfo.BotInfo) error {
+	body, err := buildHeartbeatRequest(m, botInfo)
 	if err != nil {
 		return fmt.Errorf("build heartbeat: %w", err)
 	}
@@ -431,13 +434,19 @@ func (c *Client) buildHelloRequest() ([]byte, error) {
 // 所以这里必须带 id 才能触达 handleAgentHeartbeat 真正写入 last_heartbeat_at。
 // id 使用单调递增值（基于 nanosecond 时间戳的高 31 位），保证连接生命周期内
 // 全局唯一；agent 不等 ack，纯单向汇报。
-func buildHeartbeatRequest(m host.Metrics) ([]byte, error) {
+//
+// botInfo 非 nil 时，会以 "bot" 键嵌入 params 顶层；为 nil 时 payload 完全省略
+// bot 字段，保持与未接入 supervisor 的旧 agent 协议兼容。
+func buildHeartbeatRequest(m host.Metrics, botInfo *botinfo.BotInfo) ([]byte, error) {
 	params := map[string]any{
 		"uptime_seconds":  m.UptimeSeconds,
 		"cpu_percent":     m.CPUPercent,
 		"mem_used_bytes":  m.MemUsedBytes,
 		"mem_total_bytes": m.MemTotalBytes,
 		"loadavg_1":       m.Loadavg1,
+	}
+	if botInfo != nil {
+		params["bot"] = botInfo
 	}
 	paramsRaw, err := json.Marshal(params)
 	if err != nil {

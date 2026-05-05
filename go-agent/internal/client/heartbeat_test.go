@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/anomalyco/energybot-agent/internal/botinfo"
 	"github.com/anomalyco/energybot-agent/internal/host"
 	"github.com/anomalyco/energybot-agent/internal/jsonrpc"
 )
@@ -55,10 +56,11 @@ func (s *stubCollector) callCount() int {
 // 已 closed channel，让 heartbeat 测试跟旧行为等价；改 closed=false 构造开着
 // 的 channel，用于验证 heartbeat 在 ready 前不 tick。
 type stubSender struct {
-	mu     sync.Mutex
-	calls  []host.Metrics
-	sendFn func(call int, m host.Metrics) error
-	ready  chan struct{}
+	mu       sync.Mutex
+	calls    []host.Metrics
+	botCalls []*botinfo.BotInfo
+	sendFn   func(call int, m host.Metrics) error
+	ready    chan struct{}
 }
 
 // newStubSender 构造 stubSender。readyClosed=true 表示"已进入 ready 状态"，
@@ -75,9 +77,10 @@ func (s *stubSender) Ready() <-chan struct{} {
 	return s.ready
 }
 
-func (s *stubSender) SendHeartbeat(m host.Metrics) error {
+func (s *stubSender) SendHeartbeat(m host.Metrics, bi *botinfo.BotInfo) error {
 	s.mu.Lock()
 	s.calls = append(s.calls, m)
+	s.botCalls = append(s.botCalls, bi)
 	n := len(s.calls)
 	fn := s.sendFn
 	s.mu.Unlock()
@@ -99,6 +102,43 @@ func (s *stubSender) snapshot() []host.Metrics {
 	out := make([]host.Metrics, len(s.calls))
 	copy(out, s.calls)
 	return out
+}
+
+// botSnapshot 返回所有 tick 中 sender 收到的 bot 参数，用于验证
+// heartbeat 是否正确将 provider.Snapshot() 的结果透传给 client。
+func (s *stubSender) botSnapshot() []*botinfo.BotInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*botinfo.BotInfo, len(s.botCalls))
+	copy(out, s.botCalls)
+	return out
+}
+
+// stubBotProvider 是 botinfo.Provider 的测试桩。
+//
+// snapshotFn 返 nil 时走默认 (nil, nil)；想测「agent 管理 bot 但未就绪」可注入
+// 返 &BotInfo{Status: BotStatusUnknown}, nil 的 fn。
+type stubBotProvider struct {
+	mu         sync.Mutex
+	calls      int
+	snapshotFn func() (*botinfo.BotInfo, error)
+}
+
+func (p *stubBotProvider) Snapshot() (*botinfo.BotInfo, error) {
+	p.mu.Lock()
+	p.calls++
+	fn := p.snapshotFn
+	p.mu.Unlock()
+	if fn != nil {
+		return fn()
+	}
+	return nil, nil
+}
+
+func (p *stubBotProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
 }
 
 // --- Case 1: NewHeartbeat 必填项校验 ---
@@ -473,7 +513,7 @@ func TestHeartbeat_Integration_SendsToRealClient(t *testing.T) {
 
 	// 再等 sendCh 就绪：SendHeartbeat 不再返 ErrSendBufferFull。
 	waitFor(t, 1*time.Second, func() bool {
-		err := cli.SendHeartbeat(host.Metrics{}) // 探针
+		err := cli.SendHeartbeat(host.Metrics{}, nil) // 探针
 		return err == nil
 	}, "client 未进入 ready")
 
@@ -538,5 +578,198 @@ func TestHeartbeat_Integration_SendsToRealClient(t *testing.T) {
 	case <-cliDone:
 	case <-time.After(1 * time.Second):
 		t.Fatal("cli.Run 未在 ctx cancel 后退出")
+	}
+}
+
+// --- B3 T3: bot 信息 provider 注入 ---
+
+// TestHeartbeat_Run_DefaultBotProviderIsNoop 未配置 BotProvider 时，
+// heartbeat tick 发给 sender 的 bot 参数应为 nil（即 NoopProvider.Snapshot() 结果）。
+func TestHeartbeat_Run_DefaultBotProviderIsNoop(t *testing.T) {
+	col := &stubCollector{}
+	sender := newStubSender(true)
+
+	hb, err := NewHeartbeat(HeartbeatConfig{
+		Sender:    sender,
+		Collector: col,
+		Interval:  10 * time.Millisecond,
+		Logger:    quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewHeartbeat: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hb.Run(ctx)
+
+	waitFor(t, 300*time.Millisecond, func() bool {
+		return sender.callCount() >= 2
+	}, "sender 未被调用足够次数")
+
+	cancel()
+
+	for i, got := range sender.botSnapshot() {
+		if got != nil {
+			t.Errorf("tick#%d 应无 bot 字段（默认 NoopProvider），got %+v", i, got)
+		}
+	}
+}
+
+// TestHeartbeat_Run_ForwardsBotProviderSnapshot 配置了 BotProvider 时，
+// 每个 tick 的 bot 参数应等于 provider.Snapshot() 返回值。
+func TestHeartbeat_Run_ForwardsBotProviderSnapshot(t *testing.T) {
+	want := &botinfo.BotInfo{
+		Status:        botinfo.BotStatusRunning,
+		PID:           12345,
+		UptimeSeconds: 60,
+		ConfigVersion: 3,
+	}
+	provider := &stubBotProvider{
+		snapshotFn: func() (*botinfo.BotInfo, error) {
+			return want, nil
+		},
+	}
+
+	col := &stubCollector{}
+	sender := newStubSender(true)
+
+	hb, err := NewHeartbeat(HeartbeatConfig{
+		Sender:      sender,
+		Collector:   col,
+		BotProvider: provider,
+		Interval:    10 * time.Millisecond,
+		Logger:      quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewHeartbeat: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hb.Run(ctx)
+
+	waitFor(t, 300*time.Millisecond, func() bool {
+		return sender.callCount() >= 2
+	}, "sender 未被调用足够次数")
+
+	cancel()
+
+	for i, got := range sender.botSnapshot() {
+		if got != want {
+			t.Errorf("tick#%d bot 不匹配: got %+v want %+v", i, got, want)
+		}
+	}
+
+	if provider.callCount() < 2 {
+		t.Errorf("provider 调用次数 %d 少于预期 2", provider.callCount())
+	}
+}
+
+// TestHeartbeat_Run_BotProviderErrorDoesNotBlockMetrics provider 报错时，
+// heartbeat 仍应发送主指标，bot 字段降级为 nil。
+func TestHeartbeat_Run_BotProviderErrorDoesNotBlockMetrics(t *testing.T) {
+	provider := &stubBotProvider{
+		snapshotFn: func() (*botinfo.BotInfo, error) {
+			return nil, errors.New("simulated supervisor error")
+		},
+	}
+
+	wantMetrics := host.Metrics{UptimeSeconds: 999}
+	col := &stubCollector{
+		sampleFn: func(_ int) (host.Metrics, error) { return wantMetrics, nil },
+	}
+	sender := newStubSender(true)
+
+	hb, err := NewHeartbeat(HeartbeatConfig{
+		Sender:      sender,
+		Collector:   col,
+		BotProvider: provider,
+		Interval:    10 * time.Millisecond,
+		Logger:      quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewHeartbeat: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hb.Run(ctx)
+
+	waitFor(t, 300*time.Millisecond, func() bool {
+		return sender.callCount() >= 2
+	}, "sender 未被调用足够次数")
+
+	cancel()
+
+	// metrics 应正常；bot 应全部为 nil（provider 报错降级）
+	for i, got := range sender.snapshot() {
+		if got != wantMetrics {
+			t.Errorf("tick#%d metrics 不匹配: got %+v want %+v", i, got, wantMetrics)
+		}
+	}
+	for i, got := range sender.botSnapshot() {
+		if got != nil {
+			t.Errorf("tick#%d provider 报错应导致 bot=nil，实际 %+v", i, got)
+		}
+	}
+}
+
+// TestBuildHeartbeatRequest_EmbedsBotField 确保 wire 协议按约定：
+//   - botInfo 非 nil 时 params.bot 嵌入
+//   - botInfo nil 时 params 不含 bot 键
+func TestBuildHeartbeatRequest_EmbedsBotField(t *testing.T) {
+	metrics := host.Metrics{
+		UptimeSeconds: 10,
+		CPUPercent:    1.5,
+		MemUsedBytes:  100,
+		MemTotalBytes: 1000,
+		Loadavg1:      0.5,
+	}
+
+	// case 1: botInfo nil → params 不含 bot
+	raw, err := buildHeartbeatRequest(metrics, nil)
+	if err != nil {
+		t.Fatalf("build nil: %v", err)
+	}
+	var req1 struct {
+		Params map[string]any `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &req1); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := req1.Params["bot"]; ok {
+		t.Errorf("botInfo=nil 时 params 不应含 bot 键")
+	}
+
+	// case 2: botInfo 非 nil → params.bot 内嵌
+	bot := &botinfo.BotInfo{
+		Status: botinfo.BotStatusRunning,
+		PID:    999,
+	}
+	raw, err = buildHeartbeatRequest(metrics, bot)
+	if err != nil {
+		t.Fatalf("build bot: %v", err)
+	}
+	var req2 struct {
+		Params map[string]any `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &req2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	botRaw, ok := req2.Params["bot"]
+	if !ok {
+		t.Fatal("botInfo 非 nil 时 params 应含 bot 键")
+	}
+	botMap, ok := botRaw.(map[string]any)
+	if !ok {
+		t.Fatalf("params.bot 应为 object，实际 %T", botRaw)
+	}
+	if botMap["status"] != "running" {
+		t.Errorf("params.bot.status = %v, want running", botMap["status"])
+	}
+	// 数字 JSON unmarshal 会成 float64
+	if pid, _ := botMap["pid"].(float64); int(pid) != 999 {
+		t.Errorf("params.bot.pid = %v, want 999", botMap["pid"])
 	}
 }

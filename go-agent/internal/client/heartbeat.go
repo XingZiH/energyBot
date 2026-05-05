@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/anomalyco/energybot-agent/internal/botinfo"
 	"github.com/anomalyco/energybot-agent/internal/host"
 )
 
@@ -17,10 +18,11 @@ import (
 //   - SendHeartbeat 返 ErrSendBufferFull：log + 继续，不中断循环
 //   - 首次 tick 在等满一个 interval 后才发（不立即发）
 type Heartbeat struct {
-	sender    heartbeatSender
-	collector host.Collector
-	interval  time.Duration
-	logger    *log.Logger
+	sender      heartbeatSender
+	collector   host.Collector
+	botProvider botinfo.Provider
+	interval    time.Duration
+	logger      *log.Logger
 }
 
 // heartbeatSender 仅为测试时注入 fake 留的最小接口，生产即 *Client。
@@ -29,7 +31,7 @@ type Heartbeat struct {
 // 启动后先阻塞等待 ready，避免在 client 尚未进入 ready 时发心跳造成
 // ErrSendBufferFull 日志噪声。
 type heartbeatSender interface {
-	SendHeartbeat(host.Metrics) error
+	SendHeartbeat(host.Metrics, *botinfo.BotInfo) error
 	Ready() <-chan struct{}
 }
 
@@ -39,6 +41,9 @@ type HeartbeatConfig struct {
 	Sender heartbeatSender
 	// Collector 必填。
 	Collector host.Collector
+	// BotProvider 可选，nil 时使用 NoopProvider（心跳不带 bot 字段）。
+	// T5 supervisor 接入后通过此字段注入真实 bot 状态来源。
+	BotProvider botinfo.Provider
 	// Interval 可选，默认 30s。
 	Interval time.Duration
 	// Logger 可选，默认 log.Default()。
@@ -62,11 +67,16 @@ func NewHeartbeat(cfg HeartbeatConfig) (*Heartbeat, error) {
 	if logger == nil {
 		logger = log.Default()
 	}
+	botProvider := cfg.BotProvider
+	if botProvider == nil {
+		botProvider = botinfo.NoopProvider{}
+	}
 	return &Heartbeat{
-		sender:    cfg.Sender,
-		collector: cfg.Collector,
-		interval:  interval,
-		logger:    logger,
+		sender:      cfg.Sender,
+		collector:   cfg.Collector,
+		botProvider: botProvider,
+		interval:    interval,
+		logger:      logger,
 	}, nil
 }
 
@@ -108,7 +118,13 @@ func (h *Heartbeat) tick() {
 		h.logger.Printf("heartbeat: sample failed: %v", err)
 		return
 	}
-	if err := h.sender.SendHeartbeat(metrics); err != nil {
+	// 采集 bot 信息：失败仅记日志，不阻塞主指标发送
+	botSnap, botErr := h.botProvider.Snapshot()
+	if botErr != nil {
+		h.logger.Printf("heartbeat: bot snapshot failed (continuing without bot): %v", botErr)
+		botSnap = nil
+	}
+	if err := h.sender.SendHeartbeat(metrics, botSnap); err != nil {
 		if errors.Is(err, ErrSendBufferFull) {
 			h.logger.Printf("heartbeat: dropped, buffer full")
 			return
@@ -118,6 +134,11 @@ func (h *Heartbeat) tick() {
 		return
 	}
 	// 成功路径：打一条 INFO 便于生产排查（journald 可过滤；频率 30s 不会噪）
-	h.logger.Printf("heartbeat: sent cpu=%.1f%% mem=%d/%d uptime=%ds",
-		metrics.CPUPercent, metrics.MemUsedBytes, metrics.MemTotalBytes, metrics.UptimeSeconds)
+	if botSnap != nil {
+		h.logger.Printf("heartbeat: sent cpu=%.1f%% mem=%d/%d uptime=%ds bot=%s",
+			metrics.CPUPercent, metrics.MemUsedBytes, metrics.MemTotalBytes, metrics.UptimeSeconds, botSnap.Status)
+	} else {
+		h.logger.Printf("heartbeat: sent cpu=%.1f%% mem=%d/%d uptime=%ds",
+			metrics.CPUPercent, metrics.MemUsedBytes, metrics.MemTotalBytes, metrics.UptimeSeconds)
+	}
 }

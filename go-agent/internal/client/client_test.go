@@ -472,7 +472,7 @@ func TestClient_CtxCancel_ReturnsNil(t *testing.T) {
 	waitFor(t, 1*time.Second, func() bool { return ms.dials() >= 1 }, "未连上")
 	// 等 client 进入 ready（SendHeartbeat 返 nil 即 sendCh 就绪）。
 	waitFor(t, 1*time.Second, func() bool {
-		return cli.SendHeartbeat(host.Metrics{UptimeSeconds: 1}) == nil
+		return cli.SendHeartbeat(host.Metrics{UptimeSeconds: 1}, nil) == nil
 	}, "client 未进入 ready")
 
 	cancel()
@@ -528,7 +528,7 @@ func TestClient_SendHeartbeat_EncodesCorrectly(t *testing.T) {
 	}
 	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := cli.SendHeartbeat(metrics); err == nil {
+		if err := cli.SendHeartbeat(metrics, nil); err == nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -620,7 +620,7 @@ func TestClient_SendHeartbeat_BufferFull(t *testing.T) {
 	deadline := time.Now().Add(1 * time.Second)
 	metrics := host.Metrics{UptimeSeconds: 1}
 	for time.Now().Before(deadline) {
-		if err := cli.SendHeartbeat(metrics); err == nil {
+		if err := cli.SendHeartbeat(metrics, nil); err == nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -634,7 +634,7 @@ func TestClient_SendHeartbeat_BufferFull(t *testing.T) {
 	// 满之前制造出 channel 积压——写 100 条几乎一定能触发。
 	var lastErr error
 	for i := 0; i < 10000; i++ {
-		lastErr = cli.SendHeartbeat(metrics)
+		lastErr = cli.SendHeartbeat(metrics, nil)
 		if lastErr == ErrSendBufferFull {
 			break
 		}
