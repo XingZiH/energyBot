@@ -219,18 +219,27 @@ export class AgentApplyConfigService {
       },
     };
 
-    // 8. 下发（B3-T11.5 gate：需要在 agent 侧实现 agent.applyConfig method
-    //    才能真正生效；T11.4 先把下行通道打通）
-    const ok = this.registry.sendToAgent(
-      licenseId,
-      'agent.applyConfig',
-      params,
-    );
-    if (!ok) {
-      this.logger.warn(
-        `applyConfig license=${licenseId} user=${userId} 失败：agent 不在线`,
+    // 8. 下发 agent.applyConfig request，等待 agent 回 result
+    //    T11.10 升级：由 notification 改为 JSON-RPC request，避免 bot.start
+    //    与 agent.applyConfig 并发 goroutine 在 bot 进程冷启时争抢 SQLite 锁
+    //    超时 15s：apply-config 子进程 cold start + migration + UPSERT 一般 < 2s，
+    //    留 10x buffer 兜底 cgo 冷启/磁盘 stall
+    try {
+      await this.registry.callAgent(
+        licenseId,
+        'agent.applyConfig',
+        params,
+        15_000,
       );
-      throw new ServiceUnavailableException('agent 不在线，请稍后重试');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `applyConfig license=${licenseId} user=${userId} 失败：${msg}`,
+      );
+      if (err instanceof ServiceUnavailableException) throw err;
+      // 其他一切错误（timeout / agent-error / unexpected）归一为 503，
+      // 业务语义："agent 当前无法完成配置下发，请稍后重试"
+      throw new ServiceUnavailableException('agent 配置下发失败，请稍后重试');
     }
     this.logger.log(
       `applyConfig license=${licenseId} user=${userId} 已下发 (provider=${plat.energyProvider})`,

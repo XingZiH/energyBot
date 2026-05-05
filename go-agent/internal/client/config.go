@@ -25,6 +25,25 @@ type Dispatcher interface {
 	Dispatch(method string, params json.RawMessage) error
 }
 
+// RequestDispatcher 扩展 Dispatcher，处理主站下发的 request（T11.10）。
+//
+// agent.client 读到**带 id + method** 的 JSON-RPC 消息时（request），
+// 若 cfg.Dispatcher 实现了本接口，会调 DispatchRequest 拿到 result/error 后
+// 生成 JSON-RPC response 发给 server。
+//
+// 用途：nest-api 的 AgentApplyConfigService 需要等 agent 真正 exec 完
+// apply-config 子命令才能下发 bot.start，否则两个并发 goroutine 会让
+// bot 冷启时争抢 SQLite WAL 锁（ping: database is locked）。
+//
+// 设计原则：
+//   - DispatchRequest 允许阻塞（整个请求 lifecycle 都在它内部）
+//   - 返回的 result 可序列化为 JSON 即可；agent client 不检查具体类型
+//   - 返回 error 会被包成 JSON-RPC -40001 业务错（code 由 client 固定，避免
+//     每个 handler 都造 ErrorCoded 接口。后续如需细分再扩展）
+type RequestDispatcher interface {
+	DispatchRequest(method string, params json.RawMessage) (any, error)
+}
+
 // Config 是 Client 的完整配置。所有可选时间参数允许测试覆盖以加速。
 //
 // 必填项由 validate() 校验；可选项由 fillDefaults() 补齐。

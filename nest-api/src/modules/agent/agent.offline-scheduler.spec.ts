@@ -17,13 +17,17 @@ import { WebSocket } from 'ws';
  * - 调 markStaleAsOffline 时传入 OFFLINE_THRESHOLD_MS = 90_000
  */
 describe('AgentOfflineScheduler', () => {
-  function createMockAgents(): jest.Mocked<Pick<AgentService, 'markStaleAsOffline'>> {
+  function createMockAgents(): jest.Mocked<
+    Pick<AgentService, 'markStaleAsOffline'>
+  > {
     return {
       markStaleAsOffline: jest.fn(),
     } as unknown as jest.Mocked<Pick<AgentService, 'markStaleAsOffline'>>;
   }
 
-  function createMockRegistry(): jest.Mocked<Pick<AgentRegistry, 'get' | 'unregister'>> {
+  function createMockRegistry(): jest.Mocked<
+    Pick<AgentRegistry, 'get' | 'unregister'>
+  > {
     return {
       get: jest.fn(),
       unregister: jest.fn(),

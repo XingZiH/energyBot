@@ -39,7 +39,14 @@ export const AgentRpcErrorCode = {
 } as const;
 
 export type ParseResult =
-  | { ok: true; msg: JsonRpcMessage }
+  | { ok: true; kind: 'request'; msg: JsonRpcMessage }
+  | {
+      ok: true;
+      kind: 'response';
+      id: number | string;
+      result?: unknown;
+      error?: { code: number; message: string; data?: unknown };
+    }
   | { ok: false; code: number };
 
 export function parseJsonRpc(raw: string): ParseResult {
@@ -54,14 +61,53 @@ export function parseJsonRpc(raw: string): ParseResult {
   const m = obj as Record<string, unknown>;
   if (m.jsonrpc !== '2.0')
     return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
-  if (typeof m.method !== 'string' || !m.method)
-    return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+
+  const hasMethod = typeof m.method === 'string' && !!m.method;
+  // 用 `in` 代替 hasOwnProperty：规避 @typescript-eslint/no-unsafe-assignment
+  // 语义区别可忽略——JSON.parse 产出的对象不带继承属性，`in` 等价于 hasOwnProperty
+  const hasResult = 'result' in m;
+  const hasError = 'error' in m;
+
+  // response: 带 id + 恰好一个 result/error，且无 method
+  if (!hasMethod && (hasResult || hasError)) {
+    if (hasResult && hasError)
+      return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+    const idRaw = m.id;
+    if (idRaw === null || idRaw === undefined)
+      return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+    if (typeof idRaw !== 'number' && typeof idRaw !== 'string')
+      return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+    if (hasError) {
+      const errObj = m.error as Record<string, unknown> | null;
+      if (!errObj || typeof errObj !== 'object')
+        return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+      const code = errObj.code;
+      const message = errObj.message;
+      if (typeof code !== 'number' || typeof message !== 'string')
+        return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
+      return {
+        ok: true,
+        kind: 'response',
+        id: idRaw,
+        error: {
+          code,
+          message,
+          ...(errObj.data !== undefined ? { data: errObj.data } : {}),
+        },
+      };
+    }
+    return { ok: true, kind: 'response', id: idRaw, result: m.result };
+  }
+
+  // request / notification
+  if (!hasMethod) return { ok: false, code: JsonRpcErrorCode.InvalidRequest };
   return {
     ok: true,
+    kind: 'request',
     msg: {
       jsonrpc: '2.0',
       id: (m.id ?? null) as JsonRpcMessage['id'],
-      method: m.method,
+      method: m.method as string,
       params: m.params,
     },
   };
@@ -93,6 +139,23 @@ export function jsonRpcError(
  */
 export function jsonRpcNotification(method: string, params?: unknown): string {
   const frame: Record<string, unknown> = { jsonrpc: '2.0', method };
+  if (params !== undefined) frame.params = params;
+  return JSON.stringify(frame);
+}
+
+/**
+ * JSON-RPC 2.0 request（服务端 → 客户端，带 id，期望 agent 回 response）。
+ *
+ * 使用场景（T11.10）：agent.applyConfig 需要等 agent 真的把 bot.db 写好
+ * 才能下发 bot.start，否则两个 notification 并发 goroutine 导致 SQLite locked。
+ * nest-api 发 request 后在 pending map 里挂 Promise，agent 回包后 resolve。
+ */
+export function jsonRpcRequest(
+  id: number | string,
+  method: string,
+  params?: unknown,
+): string {
+  const frame: Record<string, unknown> = { jsonrpc: '2.0', id, method };
   if (params !== undefined) frame.params = params;
   return JSON.stringify(frame);
 }

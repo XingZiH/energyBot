@@ -118,4 +118,81 @@ describe('AgentRegistry', () => {
       expect(ok).toBe(false);
     });
   });
+
+  describe('callAgent / resolvePending', () => {
+    it('在线 agent → send 出 request 帧（带递增 id + method + params）', async () => {
+      const ws = mockWs();
+      reg.register(1, ws, 1000);
+      const p = reg.callAgent(1, 'agent.applyConfig', { licenseId: 4 }, 5000);
+      expect(ws.send).toHaveBeenCalledTimes(1);
+      const raw = (ws.send as jest.Mock).mock.calls[0][0] as string;
+      const frame = JSON.parse(raw);
+      expect(frame.jsonrpc).toBe('2.0');
+      expect(frame.method).toBe('agent.applyConfig');
+      expect(frame.params).toEqual({ licenseId: 4 });
+      expect(typeof frame.id).toBe('number');
+      // 清理 pending 避免 jest 报漏 timer
+      reg.resolvePending(1, frame.id, { ok: true }, undefined);
+      await p;
+    });
+
+    it('resolvePending 命中 id → Promise resolve(result)', async () => {
+      const ws = mockWs();
+      reg.register(1, ws, 1000);
+      const p = reg.callAgent(1, 'agent.applyConfig', { a: 1 }, 5000);
+      const raw = (ws.send as jest.Mock).mock.calls[0][0] as string;
+      const sentId = JSON.parse(raw).id as number;
+      reg.resolvePending(1, sentId, { ok: true }, undefined);
+      await expect(p).resolves.toEqual({ ok: true });
+    });
+
+    it('resolvePending 带 error → Promise reject(Error 含 code/message)', async () => {
+      const ws = mockWs();
+      reg.register(1, ws, 1000);
+      const p = reg.callAgent(1, 'agent.applyConfig', { a: 1 }, 5000);
+      const raw = (ws.send as jest.Mock).mock.calls[0][0] as string;
+      const sentId = JSON.parse(raw).id as number;
+      reg.resolvePending(1, sentId, undefined, {
+        code: -40001,
+        message: 'bad',
+      });
+      await expect(p).rejects.toMatchObject({
+        message: expect.stringContaining('bad'),
+      });
+    });
+
+    it('agent 不在线 → callAgent reject(ServiceUnavailable-like)', async () => {
+      await expect(
+        reg.callAgent(999, 'agent.applyConfig', {}, 1000),
+      ).rejects.toThrow(/未在线|offline|not online/i);
+    });
+
+    it('超时未回包 → Promise reject(Timeout)，pending 被清理', async () => {
+      jest.useFakeTimers();
+      try {
+        const ws = mockWs();
+        reg.register(1, ws, 1000);
+        const p = reg.callAgent(1, 'agent.applyConfig', {}, 500);
+        // 主动让超时触发
+        jest.advanceTimersByTime(600);
+        await expect(p).rejects.toThrow(/timeout|超时/i);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('resolvePending 未知 id → 返 false，不抛', () => {
+      const ws = mockWs();
+      reg.register(1, ws, 1000);
+      expect(reg.resolvePending(1, 99999, { ok: true }, undefined)).toBe(false);
+    });
+
+    it('unregister 时 pending 的 callAgent 全部 reject', async () => {
+      const ws = mockWs();
+      reg.register(1, ws, 1000);
+      const p = reg.callAgent(1, 'agent.applyConfig', {}, 5000);
+      reg.unregister(1, ws);
+      await expect(p).rejects.toThrow(/断开|disconnect|closed/i);
+    });
+  });
 });

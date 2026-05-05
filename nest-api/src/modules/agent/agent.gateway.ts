@@ -40,14 +40,42 @@ const PRECHECK_TO_WS: Record<
   { rpc: number; close: 1008 | 4003; reason: string }
 > = {
   // -40001 / 1008 —— 请求协议/签名/时钟类，客户端可重试
-  [PrecheckErrorCode.BAD_REQUEST]:       { rpc: AgentRpcErrorCode.BAD_REQUEST, close: 1008, reason: 'bad request' },
-  [PrecheckErrorCode.CLOCK_SKEW]:        { rpc: AgentRpcErrorCode.BAD_REQUEST, close: 1008, reason: 'clock skew' },
-  [PrecheckErrorCode.SIGNATURE_INVALID]: { rpc: AgentRpcErrorCode.BAD_REQUEST, close: 1008, reason: 'signature invalid' },
-  [PrecheckErrorCode.NONCE_REPLAYED]:    { rpc: AgentRpcErrorCode.BAD_REQUEST, close: 1008, reason: 'nonce replayed' },
+  [PrecheckErrorCode.BAD_REQUEST]: {
+    rpc: AgentRpcErrorCode.BAD_REQUEST,
+    close: 1008,
+    reason: 'bad request',
+  },
+  [PrecheckErrorCode.CLOCK_SKEW]: {
+    rpc: AgentRpcErrorCode.BAD_REQUEST,
+    close: 1008,
+    reason: 'clock skew',
+  },
+  [PrecheckErrorCode.SIGNATURE_INVALID]: {
+    rpc: AgentRpcErrorCode.BAD_REQUEST,
+    close: 1008,
+    reason: 'signature invalid',
+  },
+  [PrecheckErrorCode.NONCE_REPLAYED]: {
+    rpc: AgentRpcErrorCode.BAD_REQUEST,
+    close: 1008,
+    reason: 'nonce replayed',
+  },
   // -40003 / 4003 —— license 状态类，客户端应退出不重连
-  [PrecheckErrorCode.KEY_NOT_FOUND]:      { rpc: AgentRpcErrorCode.LICENSE_REVOKED, close: 4003, reason: 'license not found' },
-  [PrecheckErrorCode.LICENSE_REVOKED]:    { rpc: AgentRpcErrorCode.LICENSE_REVOKED, close: 4003, reason: 'license revoked' },
-  [PrecheckErrorCode.CUSTOMER_SUSPENDED]: { rpc: AgentRpcErrorCode.LICENSE_REVOKED, close: 4003, reason: 'customer suspended' },
+  [PrecheckErrorCode.KEY_NOT_FOUND]: {
+    rpc: AgentRpcErrorCode.LICENSE_REVOKED,
+    close: 4003,
+    reason: 'license not found',
+  },
+  [PrecheckErrorCode.LICENSE_REVOKED]: {
+    rpc: AgentRpcErrorCode.LICENSE_REVOKED,
+    close: 4003,
+    reason: 'license revoked',
+  },
+  [PrecheckErrorCode.CUSTOMER_SUSPENDED]: {
+    rpc: AgentRpcErrorCode.LICENSE_REVOKED,
+    close: 4003,
+    reason: 'customer suspended',
+  },
 };
 
 type AgentState = 'connected' | 'hello_received';
@@ -121,7 +149,8 @@ export class AgentGateway implements OnGatewayConnection {
         licenseId: result.licenseId,
         customerId: result.customerId,
         licenseKey: headers.licenseKey,
-        publicIp: (req.socket && (req.socket as any).remoteAddress) || 'unknown',
+        publicIp:
+          (req.socket && (req.socket as any).remoteAddress) || 'unknown',
         state: 'connected',
       });
 
@@ -154,13 +183,33 @@ export class AgentGateway implements OnGatewayConnection {
   private async handleMessage(ws: WebSocket, buf: any): Promise<void> {
     let id: JsonRpcMessage['id'] = null;
     try {
-      const raw = typeof buf === 'string' ? buf : buf?.toString?.() ?? '';
+      const raw = typeof buf === 'string' ? buf : (buf?.toString?.() ?? '');
       const parsed = parseJsonRpc(raw);
       if (parsed.ok === false) {
         // 非法 JSON：不 close、回 -32700。id 未知用 null（jsonrpc 规范允许）
         ws.send(jsonRpcError(null, parsed.code, 'parse error'));
         return;
       }
+
+      // T11.10：agent → nest 新增 response 方向（带 id + result/error，无 method）。
+      // 路由到 registry 的 pending 表，resolve/reject 对应 callAgent Promise。
+      if (parsed.kind === 'response') {
+        const slot = this.agentSlots.get(ws);
+        if (!slot) {
+          this.logger.warn(
+            `收到 response 但 ws 未握手，已丢弃 id=${String(parsed.id)}`,
+          );
+          return;
+        }
+        this.registry.resolvePending(
+          slot.licenseId,
+          parsed.id,
+          parsed.result,
+          parsed.error,
+        );
+        return;
+      }
+
       const msg = parsed.msg;
       id = msg.id ?? null;
 
@@ -201,14 +250,15 @@ export class AgentGateway implements OnGatewayConnection {
 
     if (slot.state !== 'connected') {
       // 已 hello_received 再发 → -40029 already_hello
-      ws.send(
-        jsonRpcError(id, AgentRpcErrorCode.NOT_READY, 'already hello'),
-      );
+      ws.send(jsonRpcError(id, AgentRpcErrorCode.NOT_READY, 'already hello'));
       return;
     }
 
     const params = this.requireObject(rawParams, 'params');
-    const agentVersion = this.requireString(params.agent_version, 'agent_version');
+    const agentVersion = this.requireString(
+      params.agent_version,
+      'agent_version',
+    );
     const hostName = this.requireString(params.host_name, 'host_name');
     const osInfo = this.requireString(params.os_info, 'os_info');
     const bootTime = this.requireBootTime(params.boot_time);
@@ -217,9 +267,7 @@ export class AgentGateway implements OnGatewayConnection {
     const reg = this.registry.register(slot.licenseId, ws, bootTime);
     if (reg.outcome === 'rejected_flapping') {
       // 计划 7a 第 5 条：抗抖动 close 4013
-      ws.send(
-        jsonRpcError(id, AgentRpcErrorCode.FLAPPING, 'flapping'),
-      );
+      ws.send(jsonRpcError(id, AgentRpcErrorCode.FLAPPING, 'flapping'));
       ws.close(4013, 'flapping');
       return;
     }
@@ -265,11 +313,7 @@ export class AgentGateway implements OnGatewayConnection {
       row.customerStatus !== 'active'
     ) {
       ws.send(
-        jsonRpcError(
-          id,
-          AgentRpcErrorCode.LICENSE_REVOKED,
-          'license revoked',
-        ),
+        jsonRpcError(id, AgentRpcErrorCode.LICENSE_REVOKED, 'license revoked'),
       );
       ws.close(4003, 'license revoked');
       return;
@@ -277,10 +321,16 @@ export class AgentGateway implements OnGatewayConnection {
 
     const params = this.requireObject(rawParams, 'params');
     const metrics: HeartbeatMetrics = {
-      uptimeSeconds: this.requireNumber(params.uptime_seconds, 'uptime_seconds'),
+      uptimeSeconds: this.requireNumber(
+        params.uptime_seconds,
+        'uptime_seconds',
+      ),
       cpuPercent: this.requireNumber(params.cpu_percent, 'cpu_percent'),
       memUsedBytes: this.requireNumber(params.mem_used_bytes, 'mem_used_bytes'),
-      memTotalBytes: this.requireNumber(params.mem_total_bytes, 'mem_total_bytes'),
+      memTotalBytes: this.requireNumber(
+        params.mem_total_bytes,
+        'mem_total_bytes',
+      ),
       loadavg1: this.requireNumber(params.loadavg_1, 'loadavg_1'),
     };
 
@@ -350,7 +400,10 @@ export class AgentGateway implements OnGatewayConnection {
       throw new BadRequestError('invalid boot_time');
     }
     const now = Date.now();
-    if (v <= now - BOOT_TIME_MIN_OFFSET_MS || v > now + BOOT_TIME_MAX_FUTURE_MS) {
+    if (
+      v <= now - BOOT_TIME_MIN_OFFSET_MS ||
+      v > now + BOOT_TIME_MAX_FUTURE_MS
+    ) {
       throw new BadRequestError('boot_time out of range');
     }
     return v;
@@ -378,20 +431,39 @@ export class AgentGateway implements OnGatewayConnection {
     const out: BotRuntime = {};
 
     // status: unknown | stopped | starting | running | error
-    if (typeof raw.status === 'string' && raw.status.length > 0 && raw.status.length <= 16) {
+    if (
+      typeof raw.status === 'string' &&
+      raw.status.length > 0 &&
+      raw.status.length <= 16
+    ) {
       out.status = raw.status;
     }
-    if (typeof raw.pid === 'number' && Number.isFinite(raw.pid) && raw.pid >= 0) {
+    if (
+      typeof raw.pid === 'number' &&
+      Number.isFinite(raw.pid) &&
+      raw.pid >= 0
+    ) {
       out.pid = Math.trunc(raw.pid);
     }
-    if (typeof raw.uptime_seconds === 'number' && Number.isFinite(raw.uptime_seconds) && raw.uptime_seconds >= 0) {
+    if (
+      typeof raw.uptime_seconds === 'number' &&
+      Number.isFinite(raw.uptime_seconds) &&
+      raw.uptime_seconds >= 0
+    ) {
       out.uptimeSeconds = Math.trunc(raw.uptime_seconds);
     }
-    if (typeof raw.config_version === 'string' && raw.config_version.length > 0 && raw.config_version.length <= 64) {
+    if (
+      typeof raw.config_version === 'string' &&
+      raw.config_version.length > 0 &&
+      raw.config_version.length <= 64
+    ) {
       out.configVersion = raw.config_version;
     }
     // last_tg_poll_at: agent 按 RFC3339 字符串上报（go-agent JSON marshal time.Time 默认行为）
-    if (typeof raw.last_tg_poll_at === 'string' && raw.last_tg_poll_at.length > 0) {
+    if (
+      typeof raw.last_tg_poll_at === 'string' &&
+      raw.last_tg_poll_at.length > 0
+    ) {
       const d = new Date(raw.last_tg_poll_at);
       if (!Number.isNaN(d.getTime())) {
         out.lastTgPollAt = d;
@@ -399,7 +471,10 @@ export class AgentGateway implements OnGatewayConnection {
     }
     if (typeof raw.last_error === 'string' && raw.last_error.length > 0) {
       // 防止超大 error 撑爆 varchar(500)；agent 端已做截断，这里保险再截一刀
-      out.lastError = raw.last_error.length > 500 ? raw.last_error.slice(0, 500) : raw.last_error;
+      out.lastError =
+        raw.last_error.length > 500
+          ? raw.last_error.slice(0, 500)
+          : raw.last_error;
     }
 
     // 全部字段都没有 → 视为未上报

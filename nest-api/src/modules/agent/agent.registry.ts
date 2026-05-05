@@ -1,7 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { WebSocket } from 'ws';
 
-import { jsonRpcNotification } from './util/jsonrpc.util';
+import { jsonRpcNotification, jsonRpcRequest } from './util/jsonrpc.util';
 
 export interface AgentConn {
   ws: WebSocket;
@@ -31,6 +35,32 @@ export class AgentRegistry {
 
   private readonly logger = new Logger(AgentRegistry.name);
   private readonly conns = new Map<number, AgentConn>();
+
+  /**
+   * pending request 表：licenseId → (id → resolver)。
+   *
+   * callAgent 下发 JSON-RPC request 时插入；handleResponse（gateway 回调）按 id
+   * 查表 resolve/reject。每个连接独立 namespace，避免 license 间 id 冲突。
+   *
+   * 清理路径：
+   *  - 收到匹配 id 的 response → resolve/reject + delete
+   *  - 超时 → reject(Timeout) + delete
+   *  - unregister（连接关闭）→ 全部 reject(Disconnected) + 清空该 license map
+   */
+  private readonly pending = new Map<
+    number,
+    Map<
+      number,
+      {
+        resolve: (v: unknown) => void;
+        reject: (err: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    >
+  >();
+
+  // 单调递增 id 生成器；进程内全局唯一即够（pending 表内仍按 license 分桶）。
+  private nextRequestId = 1;
 
   register(licenseId: number, ws: WebSocket, bootTime: number): RegisterResult {
     const now = Date.now();
@@ -65,12 +95,25 @@ export class AgentRegistry {
   /**
    * 只有当 ws 仍是 map 中当前持有的 ws 时才删除。
    * 防止"替换后旧 ws 的 close 回调迟到"错误清除新连接。
+   *
+   * 连接真的下线时，附带把该 license 名下所有 pending callAgent 全部 reject。
    */
   unregister(licenseId: number, ws: WebSocket): void {
     const cur = this.conns.get(licenseId);
     if (cur && cur.ws === ws) {
       this.conns.delete(licenseId);
+      this.rejectAllPending(licenseId, 'agent 连接已断开');
     }
+  }
+
+  private rejectAllPending(licenseId: number, reason: string): void {
+    const bucket = this.pending.get(licenseId);
+    if (!bucket) return;
+    for (const [, p] of bucket) {
+      clearTimeout(p.timer);
+      p.reject(new Error(reason));
+    }
+    this.pending.delete(licenseId);
   }
 
   get(licenseId: number): AgentConn | undefined {
@@ -133,5 +176,129 @@ export class AgentRegistry {
   /** 测试用 */
   size(): number {
     return this.conns.size;
+  }
+
+  /**
+   * 向指定 licenseId 的在线 agent 发送 JSON-RPC **request**（带 id），等待 agent
+   * 回 response 后 resolve/reject。
+   *
+   * 与 sendToAgent（notification）的区别：
+   *  - sendToAgent 是 fire-and-forget，UI/调用方不知道 agent 端成败
+   *  - callAgent 是同步语义，nest-api 可以串行依赖 agent 真实完成
+   *
+   * 失败语义（reject 抛 Error）：
+   *  - agent 不在线 / ws 非 OPEN → ServiceUnavailableException
+   *  - send 异常（broken pipe）→ ServiceUnavailableException
+   *  - 超时 → Error('agent {licenseId} {method} timeout')
+   *  - agent 回 error 包 → Error(error.message)（保留 code 在 message）
+   *  - 连接断开（unregister）→ Error('agent 连接已断开')
+   *
+   * timeoutMs 调用方按业务语义指定；建议 agent.applyConfig 用 10000（exec
+   * subprocess 在 cgo 编译的 sqlite3 binary 上 cold start 可能 1-2s）。
+   */
+  callAgent(
+    licenseId: number,
+    method: string,
+    params: unknown,
+    timeoutMs: number,
+  ): Promise<unknown> {
+    const conn = this.conns.get(licenseId);
+    if (!conn) {
+      return Promise.reject(
+        new ServiceUnavailableException(
+          `agent license=${licenseId} 未在线，无法调用 ${method}`,
+        ),
+      );
+    }
+    if (conn.ws.readyState !== 1) {
+      return Promise.reject(
+        new ServiceUnavailableException(
+          `agent license=${licenseId} ws 非 OPEN (state=${conn.ws.readyState})，无法调用 ${method}`,
+        ),
+      );
+    }
+
+    const id = this.nextRequestId++;
+    const frame = jsonRpcRequest(id, method, params);
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const bucket = this.pending.get(licenseId);
+        bucket?.delete(id);
+        if (bucket && bucket.size === 0) this.pending.delete(licenseId);
+        reject(
+          new Error(
+            `agent license=${licenseId} ${method} timeout (${timeoutMs}ms)`,
+          ),
+        );
+      }, timeoutMs);
+
+      let bucket = this.pending.get(licenseId);
+      if (!bucket) {
+        bucket = new Map();
+        this.pending.set(licenseId, bucket);
+      }
+      bucket.set(id, { resolve, reject, timer });
+
+      try {
+        conn.ws.send(frame);
+      } catch (e: unknown) {
+        // 立刻清理 pending；用 ServiceUnavailable 语义 reject
+        bucket.delete(id);
+        if (bucket.size === 0) this.pending.delete(licenseId);
+        clearTimeout(timer);
+        const msg =
+          e instanceof Error
+            ? e.message
+            : typeof e === 'string'
+              ? e
+              : JSON.stringify(e);
+        reject(
+          new ServiceUnavailableException(
+            `agent license=${licenseId} ${method} send 失败: ${msg}`,
+          ),
+        );
+      }
+    });
+  }
+
+  /**
+   * 收到 agent 回的 response 时由 gateway 调用：根据 (licenseId, id) 查 pending
+   * 表 resolve（result）或 reject（error）。
+   *
+   * 返 true 表示有 pending 被处理；返 false 表示 id 不在表里——属意外（agent 回了
+   * 一个 nest 没发过的 id），日志一下静默忽略。
+   */
+  resolvePending(
+    licenseId: number,
+    id: number | string,
+    result: unknown,
+    error: { code: number; message: string; data?: unknown } | undefined,
+  ): boolean {
+    if (typeof id !== 'number') {
+      this.logger.warn(
+        `resolvePending license=${licenseId} 非数字 id=${String(id)} 已丢弃`,
+      );
+      return false;
+    }
+    const bucket = this.pending.get(licenseId);
+    const entry = bucket?.get(id);
+    if (!bucket || !entry) {
+      this.logger.warn(
+        `resolvePending license=${licenseId} id=${id} 不在 pending 表（已超时或意外）`,
+      );
+      return false;
+    }
+    clearTimeout(entry.timer);
+    bucket.delete(id);
+    if (bucket.size === 0) this.pending.delete(licenseId);
+    if (error) {
+      entry.reject(
+        new Error(`agent error code=${error.code} message=${error.message}`),
+      );
+    } else {
+      entry.resolve(result);
+    }
+    return true;
   }
 }

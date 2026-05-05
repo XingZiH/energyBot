@@ -188,3 +188,109 @@ func TestDispatcher_ApplyConfig_NoBinary(t *testing.T) {
 		t.Errorf("runner 调用次数 = %d, want 0", n)
 	}
 }
+
+// ---- T11.10：DispatchRequest 同步路径 ----
+//
+// agent.applyConfig 升级为 JSON-RPC request/response 后，必须同步返
+// result/error，让 client.go 能序列化成 response 回给 nest-api。
+// 验证：
+//   - 成功：返回 result map[string]any{"ok": true}，无 error；tmp 文件被清理
+//   - 失败：返回 error（msg 包含 runner 错）；tmp 文件保留
+//   - 未配置 botBinary：返回 error，runner 未被调
+//   - 未知 method：返回 error（MethodNotFound 语义）
+
+func TestDispatcher_DispatchRequest_ApplyConfig_Happy(t *testing.T) {
+	runner := newFakeRunner()
+	runner.returnFn = func(_ string, _ ...string) error { return nil }
+	logger := stdlog.New(os.Stderr, "", 0)
+	d := newBotDispatcher(nil, logger)
+	d.botBinary = "/usr/local/bin/energybot-bot"
+	d.runner = runner
+
+	params := json.RawMessage(`{"bot":{"token":"123:ABC"}}`)
+	result, err := d.DispatchRequest("agent.applyConfig", params)
+	if err != nil {
+		t.Fatalf("DispatchRequest 返错: %v", err)
+	}
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("result 类型 = %T, want map[string]any", result)
+	}
+	if m["ok"] != true {
+		t.Errorf("result[ok] = %v, want true", m["ok"])
+	}
+
+	call := runner.lastCall(t)
+	if call.bin != "/usr/local/bin/energybot-bot" {
+		t.Errorf("bin = %q", call.bin)
+	}
+	if len(call.args) != 3 || call.args[0] != "apply-config" {
+		t.Errorf("args = %v", call.args)
+	}
+	// tmp 已清理
+	tmpPath := call.args[2]
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Errorf("tmp 文件未被清理：%s (err=%v)", tmpPath, err)
+	}
+}
+
+func TestDispatcher_DispatchRequest_ApplyConfig_RunnerError(t *testing.T) {
+	runner := newFakeRunner()
+	runner.returnFn = func(_ string, _ ...string) error {
+		return errors.New("sqlite locked")
+	}
+	logger := stdlog.New(os.Stderr, "", 0)
+	d := newBotDispatcher(nil, logger)
+	d.botBinary = "/usr/local/bin/energybot-bot"
+	d.runner = runner
+
+	params := json.RawMessage(`{}`)
+	result, err := d.DispatchRequest("agent.applyConfig", params)
+	if err == nil {
+		t.Fatal("DispatchRequest 应返错，但返 nil")
+	}
+	if result != nil {
+		t.Errorf("失败时 result 应为 nil，got %v", result)
+	}
+	// 失败保留 tmp
+	call := runner.lastCall(t)
+	tmpPath := call.args[2]
+	if _, statErr := os.Stat(tmpPath); statErr != nil {
+		t.Errorf("失败时 tmp 应保留，Stat 返错: %v", statErr)
+	}
+	_ = os.Remove(tmpPath)
+}
+
+func TestDispatcher_DispatchRequest_ApplyConfig_NoBinary(t *testing.T) {
+	runner := newFakeRunner()
+	logger := stdlog.New(os.Stderr, "", 0)
+	d := newBotDispatcher(nil, logger)
+	d.runner = runner
+	// botBinary 留空
+
+	result, err := d.DispatchRequest("agent.applyConfig", json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("未配置 botBinary 时 DispatchRequest 应返错")
+	}
+	if result != nil {
+		t.Errorf("result 应为 nil，got %v", result)
+	}
+	runner.mu.Lock()
+	n := len(runner.calls)
+	runner.mu.Unlock()
+	if n != 0 {
+		t.Errorf("runner 不应被调，got %d 次", n)
+	}
+}
+
+func TestDispatcher_DispatchRequest_UnknownMethod(t *testing.T) {
+	logger := stdlog.New(os.Stderr, "", 0)
+	d := newBotDispatcher(nil, logger)
+	result, err := d.DispatchRequest("agent.unknown", json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("未知 method 应返错")
+	}
+	if result != nil {
+		t.Errorf("result 应为 nil")
+	}
+}

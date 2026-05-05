@@ -90,8 +90,8 @@ describe('AgentApplyConfigService', () => {
 
   function makeRegistry() {
     return {
-      sendToAgent: jest.fn().mockReturnValue(true),
-    } as unknown as jest.Mocked<Pick<AgentRegistry, 'sendToAgent'>>;
+      callAgent: jest.fn().mockResolvedValue({ ok: true }),
+    } as unknown as jest.Mocked<Pick<AgentRegistry, 'callAgent'>>;
   }
 
   async function buildSvc(
@@ -160,10 +160,13 @@ describe('AgentApplyConfigService', () => {
 
     await svc.applyConfig(50, 4); // userId=50, licenseId=4
 
-    expect(registry.sendToAgent).toHaveBeenCalledTimes(1);
-    const [licenseId, method, params] = registry.sendToAgent.mock.calls[0];
+    expect(registry.callAgent).toHaveBeenCalledTimes(1);
+    const [licenseId, method, params, timeoutMs] =
+      registry.callAgent.mock.calls[0];
     expect(licenseId).toBe(4);
     expect(method).toBe('agent.applyConfig');
+    expect(typeof timeoutMs).toBe('number');
+    expect(timeoutMs).toBeGreaterThan(0);
     const p = params as Record<string, unknown>;
     expect(p.databaseUrl).toBe('/var/lib/energybot-agent/bot.db');
     expect(p.platform).toMatchObject({
@@ -185,7 +188,7 @@ describe('AgentApplyConfigService', () => {
     });
   });
 
-  it('agent 离线 → ServiceUnavailableException', async () => {
+  it('agent 离线（callAgent reject 503）→ ServiceUnavailableException 透传', async () => {
     const conn = makeFakeConn({
       user: [{ customerId: 100 }],
       license: [{ id: 4 }],
@@ -222,10 +225,59 @@ describe('AgentApplyConfigService', () => {
       ],
     });
     const registry = makeRegistry();
-    registry.sendToAgent.mockReturnValue(false);
-    // catfee 模式没有 payer key，receiveAddress 留空（业务上 catfee 不需要）
+    registry.callAgent.mockRejectedValue(
+      new ServiceUnavailableException('agent license=4 未在线'),
+    );
     const svc = await buildSvc(conn, registry, () => Promise.resolve('X'));
 
+    await expect(svc.applyConfig(50, 4)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+  });
+
+  it('agent 回 error（apply-config exec 失败）→ ServiceUnavailableException', async () => {
+    const conn = makeFakeConn({
+      user: [{ customerId: 100 }],
+      license: [{ id: 4 }],
+      agentProfile: [{ id: 1 }],
+      botConfig: [
+        {
+          telegramBotToken: '123:ABC',
+          telegramBotUsername: 'mybot',
+          welcomeText: '',
+          menuConfig: null,
+          messageConfig: null,
+        },
+      ],
+      platformConfig: [
+        {
+          tronApiBaseUrl: 'https://api.trongrid.io',
+          tronApiKey: '',
+          justlendContractAddress: '',
+          justlendPayerPrivateKey: '',
+          energyProvider: 'catfee',
+          catfeeEnvironment: 'nile',
+          catfeeProdApiBaseUrl: 'https://api.catfee.io',
+          catfeeProdApiKey: '',
+          catfeeProdApiSecret: '',
+          catfeeNileApiBaseUrl: 'https://nile.catfee.io',
+          catfeeNileApiKey: 'nk',
+          catfeeNileApiSecret: 'ns',
+          catfeeAutoActivate: true,
+          orderPaymentTtlMinutes: 10,
+          telegramPollingIntervalSeconds: 2,
+          workerIntervalSeconds: 60,
+          minTrxReserveSun: '0',
+        },
+      ],
+    });
+    const registry = makeRegistry();
+    registry.callAgent.mockRejectedValue(
+      new Error('agent error code=-40001 message=apply-config 进程退出'),
+    );
+    const svc = await buildSvc(conn, registry, () => Promise.resolve('X'));
+
+    // service 把任意 callAgent 错误归一为 503，避免业务调用方区分网络/逻辑错
     await expect(svc.applyConfig(50, 4)).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );

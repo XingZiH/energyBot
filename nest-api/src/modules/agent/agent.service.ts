@@ -78,7 +78,15 @@ export class AgentService {
     bootTime: Date;
   }): Promise<void> {
     const now = new Date();
-    const { licenseId, customerId, agentVersion, publicIp, hostName, kernel, bootTime } = params;
+    const {
+      licenseId,
+      customerId,
+      agentVersion,
+      publicIp,
+      hostName,
+      kernel,
+      bootTime,
+    } = params;
 
     await this.conn
       .insert(agentsTable)

@@ -32,7 +32,10 @@ describe('AgentService', () => {
     const conn: any = {
       insert: jest.fn((table: unknown) => ({
         values: jest.fn((values: any) => {
-          const record: { table: unknown; values: any; conflict?: any } = { table, values };
+          const record: { table: unknown; values: any; conflict?: any } = {
+            table,
+            values,
+          };
           state.inserts.push(record);
           return {
             // 对同一个 values() 返回的链尾同时支持 await（不走 conflict）与 .onConflictDoUpdate()
@@ -154,7 +157,11 @@ describe('AgentService', () => {
     };
 
     await svc.updateHeartbeat(LICENSE_ID, metrics);
-    await svc.updateHeartbeat(LICENSE_ID, { ...metrics, uptimeSeconds: 101, cpuPercent: 1.6 });
+    await svc.updateHeartbeat(LICENSE_ID, {
+      ...metrics,
+      uptimeSeconds: 101,
+      cpuPercent: 1.6,
+    });
 
     // 第 1 次应穿透写 DB；第 2 次在 20s 窗口内直接 return
     expect(conn._state.updates).toHaveLength(1);

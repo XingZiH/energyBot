@@ -41,8 +41,8 @@ describe('MyBotController', () => {
       new NotFoundException('当前账号未绑定客户'),
     );
 
-    await expect(
-      ctrl.findMine({ user: { userId: 1 } } as any),
-    ).rejects.toThrow(NotFoundException);
+    await expect(ctrl.findMine({ user: { userId: 1 } } as any)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });

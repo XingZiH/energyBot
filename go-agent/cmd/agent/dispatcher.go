@@ -66,6 +66,10 @@ func newBotDispatcher(mgr *supervisor.Manager, logger *stdlog.Logger) *botDispat
 }
 
 // Dispatch 不阻塞：拿到 method 后启动独立 goroutine 执行动作。
+//
+// 本方法只处理 server → agent 的 notification（无 id）。
+// agent.applyConfig 保留在这里是**向后兼容**——生产路径会走 DispatchRequest
+// （T11.10 升级），但保留此 case 让老版本 nest-api 或未来的 reload 场景仍能工作。
 func (d *botDispatcher) Dispatch(method string, params json.RawMessage) error {
 	switch method {
 	case "bot.start":
@@ -75,11 +79,33 @@ func (d *botDispatcher) Dispatch(method string, params json.RawMessage) error {
 	case "bot.reload":
 		go d.runBotReload(params)
 	case "agent.applyConfig":
-		go d.runApplyConfig(params)
+		// 向后兼容：fire-and-forget path；生产用 DispatchRequest
+		go func() { _, _ = d.runApplyConfigSync(params) }()
 	default:
 		d.logger.Printf("dispatch: 未知 method=%s，已忽略", method)
 	}
 	return nil
+}
+
+// DispatchRequest 处理 server → agent 的 request（T11.10）。
+//
+// 返回 (result any, err error)：result 会被 client.go 序列化成 JSON-RPC response
+// 的 result 字段；err != nil 时 client.go 回 -40001 业务错 response。
+//
+// 目前只支持 agent.applyConfig；其他 method 返 method not found（client 侧
+// 会把 message 透传为 -40001 错码 + 描述）。
+//
+// 与 Dispatch 的关键差异：
+//   - Dispatch 是 fire-and-forget，内部 go funcs 异步执行
+//   - DispatchRequest **同步阻塞**直到 apply-config exec 完成
+//     nest-api callAgent 正是要等这个同步完成的语义
+func (d *botDispatcher) DispatchRequest(method string, params json.RawMessage) (any, error) {
+	switch method {
+	case "agent.applyConfig":
+		return d.runApplyConfigSync(params)
+	default:
+		return nil, fmt.Errorf("method not found: %s", method)
+	}
 }
 
 type startParams struct {
@@ -130,64 +156,60 @@ func (d *botDispatcher) runBotReload(raw json.RawMessage) {
 	}
 }
 
-// runApplyConfig —— T11.5。
+// runApplyConfigSync —— T11.5 + T11.10。
 //
 // 流程：
 //  1. 拒绝未配置 bot binary 的情况（B2 兼容模式）
 //  2. 写 params JSON 到 /tmp/ebt-apply-<unix>-<pid>.json
 //  3. exec: <botBinary> apply-config --json <tmpPath>
-//  4. 成功 → 删 tmp；失败 → 保留 tmp 便于诊断
+//  4. 成功 → 删 tmp，返 result map[string]any{"ok": true, ...}
+//  5. 失败 → 保留 tmp 便于诊断，返 err
 //
 // 设计权衡：
 //   - 不用 stdin 管 json：systemd + exec 复合路径下 stdin 不稳定，且 bot 子命令
 //     要支持命令行调试（sre 手工 cat 某个 tmp 再 replay）
 //   - tmp 权限 0o600：payload 含 token 明文（T11.6 加密版前）+ payer 私钥明文
-//   - 不写 t.logger.Fatalf——fatal 会杀 agent 进程；applyConfig 失败只日志不退出
-//     让主站通过后续心跳（bot.status）感知真实状态
-func (d *botDispatcher) runApplyConfig(raw json.RawMessage) {
+//   - 同步返 (any, error) 让 DispatchRequest path 直接得到结果
+func (d *botDispatcher) runApplyConfigSync(raw json.RawMessage) (any, error) {
 	if d.botBinary == "" {
 		d.logger.Printf("dispatch: agent.applyConfig 拒绝：未配置 EBT_BOT_BINARY")
-		return
+		return nil, fmt.Errorf("agent.applyConfig: bot binary not configured")
 	}
 	if d.runner == nil {
 		d.logger.Printf("dispatch: agent.applyConfig 拒绝：runner 未注入（内部错误）")
-		return
+		return nil, fmt.Errorf("agent.applyConfig: runner not injected")
 	}
 
-	// 写 tmp：使用 CreateTemp 保证唯一命名 + 0o600 权限
 	tmp, err := os.CreateTemp("", fmt.Sprintf("ebt-apply-*-%d.json", os.Getpid()))
 	if err != nil {
 		d.logger.Printf("dispatch: agent.applyConfig 创建 tmp 失败: %v", err)
-		return
+		return nil, fmt.Errorf("create tmp: %w", err)
 	}
 	tmpPath := tmp.Name()
-	// CreateTemp 默认权限 0o600，正合需求
 	if _, err := tmp.Write(raw); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
 		d.logger.Printf("dispatch: agent.applyConfig 写 tmp %s 失败: %v", tmpPath, err)
-		return
+		return nil, fmt.Errorf("write tmp: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)
 		d.logger.Printf("dispatch: agent.applyConfig 关闭 tmp %s 失败: %v", tmpPath, err)
-		return
+		return nil, fmt.Errorf("close tmp: %w", err)
 	}
 
-	// exec
 	if err := d.runner.Run(d.botBinary, "apply-config", "--json", tmpPath); err != nil {
-		// 失败保留 tmp 以便运维 cat/diff；运维清理后建议 rm
+		// 失败保留 tmp 以便运维 cat/diff
 		d.logger.Printf(
 			"dispatch: agent.applyConfig 执行失败（保留 %s 供诊断）: %v",
 			tmpPath, err,
 		)
-		return
+		return nil, fmt.Errorf("apply-config exec: %w", err)
 	}
-	// 成功：清理 tmp（payload 含敏感数据）
 	if err := os.Remove(tmpPath); err != nil {
-		// 删不掉只日志不算失败——bot apply-config 本身已成功
 		d.logger.Printf("dispatch: agent.applyConfig ok，但清理 tmp %s 失败: %v", tmpPath, err)
 	} else {
 		d.logger.Printf("dispatch: agent.applyConfig ok")
 	}
+	return map[string]any{"ok": true}, nil
 }

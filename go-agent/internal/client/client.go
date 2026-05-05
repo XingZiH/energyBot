@@ -309,9 +309,10 @@ func (c *Client) runOnce(ctx context.Context) (closeCode int, helloOK bool, err 
 // handleServerFrame 处理一条服务端下行消息。
 //
 // JSON-RPC 2.0 语义：
-//   - 带 id + method → 请求（agent 不是 responder，记 debug 忽略）
-//   - 带 id + result/error → 响应（B1 只有 hello 响应，在 helloCh 分支已处理；
-//     此处若再来视为意外，debug 忽略）
+//   - 带 id + method → 请求（T11.10：调 RequestDispatcher 同步拿 result，回 response）
+//   - 带 id + result/error → 响应（agent 不会收到 server 回它自己的 response；
+//     当前 agent 侧 hello/heartbeat 的 response 在 helloCh/写路径处理。
+//     这里兜底忽略。）
 //   - 无 id + method → notification（B3-T5：转给 Dispatcher）
 func (c *Client) handleServerFrame(data []byte) {
 	var req jsonrpc.Request
@@ -320,12 +321,12 @@ func (c *Client) handleServerFrame(data []byte) {
 		return
 	}
 	if req.Method == "" {
-		// 非请求/通知——可能是响应或无意义消息；B1 阶段忽略。
+		// 非请求/通知——可能是响应或无意义消息；忽略。
 		return
 	}
 	if req.ID != nil {
-		// 服务端请求 agent 回包。当前协议未定义，debug 忽略。
-		c.cfg.Logger.Printf("client: 忽略服务端 request method=%s（agent 不做 responder）", req.Method)
+		// server → agent request：需要回 response。
+		c.handleServerRequest(req)
 		return
 	}
 	// notification：dispatch 给外部
@@ -336,6 +337,94 @@ func (c *Client) handleServerFrame(data []byte) {
 	if err := c.cfg.Dispatcher.Dispatch(req.Method, req.Params); err != nil {
 		c.cfg.Logger.Printf("client: Dispatcher 处理 method=%s 失败: %v", req.Method, err)
 	}
+}
+
+// handleServerRequest 处理 server 下行 JSON-RPC request（T11.10）。
+//
+// 调用 RequestDispatcher（若实现）同步拿 result 或 error，构造 response
+// 帧写入 sendCh。若 Dispatcher 未实现 RequestDispatcher，回 -32601
+// MethodNotFound 错，避免 server 端 callAgent Promise 悬挂至超时。
+//
+// 非阻塞：DispatchRequest 本身可能耗时（exec 子进程），开 goroutine 避免
+// 阻塞 client 主读循环。
+func (c *Client) handleServerRequest(req jsonrpc.Request) {
+	go func() {
+		id := req.ID
+		reqDisp, ok := c.cfg.Dispatcher.(RequestDispatcher)
+		if !ok {
+			c.cfg.Logger.Printf(
+				"client: Dispatcher 未实现 RequestDispatcher，回 MethodNotFound method=%s",
+				req.Method,
+			)
+			c.sendResponseError(id, -32601, fmt.Sprintf("method %s not found", req.Method))
+			return
+		}
+		result, err := reqDisp.DispatchRequest(req.Method, req.Params)
+		if err != nil {
+			c.cfg.Logger.Printf(
+				"client: DispatchRequest method=%s 失败: %v",
+				req.Method, err,
+			)
+			c.sendResponseError(id, -40001, err.Error())
+			return
+		}
+		c.sendResponseResult(id, result)
+	}()
+}
+
+// sendResponseResult 把 result 序列化为 JSON-RPC response 帧写入 sendCh。
+// 若 sendCh 已满或连接已断（ch=nil），日志记录丢弃，不阻塞。
+func (c *Client) sendResponseResult(id *jsonrpc.RequestID, result any) {
+	resp := jsonrpc.Response{JSONRPC: "2.0", ID: id, Result: mustMarshalRaw(result)}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		c.cfg.Logger.Printf("client: 序列化 response result 失败: %v", err)
+		return
+	}
+	c.enqueueFrame(body)
+}
+
+// sendResponseError 把 error 序列化为 JSON-RPC response 帧写入 sendCh。
+func (c *Client) sendResponseError(id *jsonrpc.RequestID, code int, message string) {
+	resp := jsonrpc.Response{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error:   &jsonrpc.ErrorObject{Code: code, Message: message},
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		c.cfg.Logger.Printf("client: 序列化 response error 失败: %v", err)
+		return
+	}
+	c.enqueueFrame(body)
+}
+
+// enqueueFrame 把 raw frame 写入 sendCh（非阻塞）。
+// sendCh 已 close 或满 → 记日志丢弃，避免阻塞 server request 处理 goroutine。
+func (c *Client) enqueueFrame(body []byte) {
+	c.sendChMu.RLock()
+	ch := c.sendCh
+	c.sendChMu.RUnlock()
+	if ch == nil {
+		c.cfg.Logger.Printf("client: response 帧无处可发（连接已断），已丢弃")
+		return
+	}
+	select {
+	case ch <- body:
+	default:
+		c.cfg.Logger.Printf("client: sendCh 满（SendBuffer=%d），response 帧已丢弃", c.cfg.SendBuffer)
+	}
+}
+
+// mustMarshalRaw 把任意 any 序列化为 json.RawMessage。
+// 失败时返回 "null"（配合 jsonrpc.Response.Result 的 omitempty 不会生效，
+// 所以要保证至少是合法 JSON 字面量）。
+func mustMarshalRaw(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage(`null`)
+	}
+	return json.RawMessage(b)
 }
 
 // writeLoop 从 sendCh 连续读取 bytes 写入 conn。

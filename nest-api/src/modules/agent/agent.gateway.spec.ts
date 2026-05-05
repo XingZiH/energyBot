@@ -35,7 +35,9 @@ function createMockWs() {
   };
 }
 
-function createMockReq(overrides: Partial<Record<string, string | undefined>> = {}) {
+function createMockReq(
+  overrides: Partial<Record<string, string | undefined>> = {},
+) {
   const headers = {
     'x-license-key': 'ebt_' + 'A'.repeat(32),
     'x-timestamp': String(Date.now()),
@@ -54,10 +56,12 @@ function createMockReq(overrides: Partial<Record<string, string | undefined>> = 
   };
 }
 
-function createMockLicenseService(overrides: {
-  verifyResult?: any;
-  findActiveResult?: any;
-} = {}) {
+function createMockLicenseService(
+  overrides: {
+    verifyResult?: any;
+    findActiveResult?: any;
+  } = {},
+) {
   const defaultVerify = {
     ok: true,
     licenseId: 101,
@@ -101,6 +105,7 @@ function createMockRegistry() {
     }) as AnyFn,
     get: jest.fn((licenseId: number) => store.get(licenseId)) as AnyFn,
     touchHeartbeat: jest.fn() as AnyFn,
+    resolvePending: jest.fn().mockReturnValue(true) as AnyFn,
   };
 }
 
@@ -112,15 +117,11 @@ function createMockAgentService() {
   };
 }
 
-function createGateway(opts?: {
-  license?: any;
-  registry?: any;
-  agents?: any;
-}) {
+function createGateway(opts?: { license?: any; registry?: any; agents?: any }) {
   const license = opts?.license ?? createMockLicenseService();
   const registry = opts?.registry ?? createMockRegistry();
   const agents = opts?.agents ?? createMockAgentService();
-  const gw = new AgentGateway(license as any, registry as any, agents as any);
+  const gw = new AgentGateway(license, registry, agents);
   return { gw, license, registry, agents };
 }
 
@@ -138,7 +139,9 @@ function getCloseHandler(ws: { on: AnyFn }): () => Promise<void> | void {
 }
 
 /** 同理取 message handler。 */
-function getMessageHandler(ws: { on: AnyFn }): (buf: any) => Promise<void> | void {
+function getMessageHandler(ws: {
+  on: AnyFn;
+}): (buf: any) => Promise<void> | void {
   const call = ws.on.mock.calls.find((c: any[]) => c[0] === 'message');
   if (!call) throw new Error('ws.on("message", ...) 未绑定');
   return call[1];
@@ -157,9 +160,9 @@ describe('AgentGateway.handleConnection', () => {
     // 挂 state
     const slot = gw.agentSlots.get(ws as any);
     expect(slot).toBeDefined();
-    expect(slot!.state).toBe('connected');
-    expect(slot!.licenseId).toBe(101);
-    expect(slot!.customerId).toBe(7);
+    expect(slot.state).toBe('connected');
+    expect(slot.licenseId).toBe(101);
+    expect(slot.customerId).toBe(7);
 
     // 绑定了 close / message
     const eventNames = ws.on.mock.calls.map((c: any[]) => c[0]);
@@ -232,7 +235,10 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
     return { ...env, ws, onMessage };
   }
 
-  function helloFrame(params: Record<string, unknown>, id: number | string = 1) {
+  function helloFrame(
+    params: Record<string, unknown>,
+    id: number | string = 1,
+  ) {
     return JSON.stringify({
       jsonrpc: '2.0',
       id,
@@ -242,7 +248,8 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
   }
 
   it('合法 hello → upsertOnline 被调；state=hello_received；回 jsonRpcResult', async () => {
-    const { gw, onMessage, ws, agents, registry } = await handshakeAndGetMsgHandler();
+    const { gw, onMessage, ws, agents, registry } =
+      await handshakeAndGetMsgHandler();
 
     const bootTime = Date.now() - 1000;
     await onMessage(
@@ -266,7 +273,7 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
     expect(upsertArg.bootTime.getTime()).toBe(bootTime);
 
     // state 变更
-    expect(gw.agentSlots.get(ws as any)!.state).toBe('hello_received');
+    expect(gw.agentSlots.get(ws as any).state).toBe('hello_received');
 
     // registry.register 在 hello 阶段调（此时才有 bootTime）
     expect(registry.register).toHaveBeenCalledTimes(1);
@@ -288,23 +295,29 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
 
     const now = Date.now();
     await onMessage(
-      helloFrame({
-        agent_version: '1.0.0',
-        host_name: 'h',
-        os_info: 'Linux',
-        boot_time: now,
-      }, 1),
+      helloFrame(
+        {
+          agent_version: '1.0.0',
+          host_name: 'h',
+          os_info: 'Linux',
+          boot_time: now,
+        },
+        1,
+      ),
     );
     // 清理上一次 send 记录
     ws.send.mockClear();
 
     await onMessage(
-      helloFrame({
-        agent_version: '1.0.0',
-        host_name: 'h',
-        os_info: 'Linux',
-        boot_time: now + 1,
-      }, 2),
+      helloFrame(
+        {
+          agent_version: '1.0.0',
+          host_name: 'h',
+          os_info: 'Linux',
+          boot_time: now + 1,
+        },
+        2,
+      ),
     );
 
     expect(agents.upsertOnline).toHaveBeenCalledTimes(1); // 只第一次生效
@@ -319,12 +332,15 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
     const { onMessage, ws, agents } = await handshakeAndGetMsgHandler();
 
     await onMessage(
-      helloFrame({
-        agent_version: '1.0.0',
-        host_name: 'h',
-        os_info: 'Linux',
-        boot_time: 'not-a-number',
-      }, 9),
+      helloFrame(
+        {
+          agent_version: '1.0.0',
+          host_name: 'h',
+          os_info: 'Linux',
+          boot_time: 'not-a-number',
+        },
+        9,
+      ),
     );
 
     expect(agents.upsertOnline).not.toHaveBeenCalled();
@@ -337,12 +353,15 @@ describe('AgentGateway.handleMessage — agent.hello', () => {
     const { onMessage, ws, agents } = await handshakeAndGetMsgHandler();
 
     await onMessage(
-      helloFrame({
-        agent_version: '1.0.0',
-        host_name: 'h',
-        os_info: 'Linux',
-        boot_time: Date.now() - 11 * 365 * 86_400_000,
-      }, 11),
+      helloFrame(
+        {
+          agent_version: '1.0.0',
+          host_name: 'h',
+          os_info: 'Linux',
+          boot_time: Date.now() - 11 * 365 * 86_400_000,
+        },
+        11,
+      ),
     );
 
     expect(agents.upsertOnline).not.toHaveBeenCalled();
@@ -634,7 +653,12 @@ describe('AgentGateway.handleMessage — misc', () => {
   it('未知 method → -40001 method_not_found', async () => {
     const { onMessage, ws } = await handshake();
     await onMessage(
-      JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'agent.unknown', params: {} }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'agent.unknown',
+        params: {},
+      }),
     );
     const reply = firstSent(ws);
     expect(reply.id).toBe(3);
@@ -649,6 +673,93 @@ describe('AgentGateway.handleMessage — misc', () => {
     expect(reply.error.code).toBe(JsonRpcErrorCode.ParseError); // -32700
     expect(reply.id).toBeNull(); // 解析失败 id 不可知
     expect(ws.close).not.toHaveBeenCalled();
+  });
+
+  it('收到 response（带 id + result，无 method）→ registry.resolvePending 被调，不回包不 close', async () => {
+    // 先正常 hello 让 slot.licenseId 被填充，之后 response 才有 license 上下文
+    const env = createGateway();
+    const ws = createMockWs();
+    await env.gw.handleConnection(ws as any, createMockReq() as any);
+    const onMessage = getMessageHandler(ws);
+    await onMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'agent.hello',
+        params: {
+          agent_version: '1.0.0',
+          host_name: 'h',
+          os_info: 'linux',
+          boot_time: Date.now() - 1000,
+        },
+      }),
+    );
+    // 清掉 hello 的回包
+    (ws.send as jest.Mock).mockClear();
+
+    await onMessage(
+      JSON.stringify({ jsonrpc: '2.0', id: 42, result: { ok: true } }),
+    );
+
+    expect(env.registry.resolvePending).toHaveBeenCalledTimes(1);
+    const call = (env.registry.resolvePending as jest.Mock).mock.calls[0];
+    expect(call[0]).toBe(101); // licenseId from createMockLicenseService
+    expect(call[1]).toBe(42);
+    expect(call[2]).toEqual({ ok: true });
+    expect(call[3]).toBeUndefined();
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(ws.close).not.toHaveBeenCalled();
+  });
+
+  it('收到 response（带 id + error）→ resolvePending 拿到 error 对象', async () => {
+    const env = createGateway();
+    const ws = createMockWs();
+    await env.gw.handleConnection(ws as any, createMockReq() as any);
+    const onMessage = getMessageHandler(ws);
+    await onMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'agent.hello',
+        params: {
+          agent_version: '1.0.0',
+          host_name: 'h',
+          os_info: 'linux',
+          boot_time: Date.now() - 1000,
+        },
+      }),
+    );
+    (ws.send as jest.Mock).mockClear();
+
+    await onMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 99,
+        error: { code: -40001, message: 'applyConfig failed' },
+      }),
+    );
+
+    expect(env.registry.resolvePending).toHaveBeenCalledTimes(1);
+    const call = (env.registry.resolvePending as jest.Mock).mock.calls[0];
+    expect(call[0]).toBe(101);
+    expect(call[1]).toBe(99);
+    expect(call[2]).toBeUndefined();
+    expect(call[3]).toEqual({ code: -40001, message: 'applyConfig failed' });
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('未握手的 ws 收到 response → 忽略，不崩', async () => {
+    // 走 handshake helper 之后但不 hello，slot.licenseId 此时已被 handleConnection 填入
+    // 这里验证的是：即使还没 hello，response 也不应该让 gateway 崩溃——走 resolvePending 即可
+    const { onMessage, ws, registry } = await handshake();
+    (ws.send as jest.Mock).mockClear();
+    await onMessage(
+      JSON.stringify({ jsonrpc: '2.0', id: 5, result: { ok: true } }),
+    );
+    // handshake helper 内部已注册 licenseId=101，所以 resolvePending 仍会被调——主要断言不崩
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(registry.resolvePending).toHaveBeenCalled();
   });
 });
 
