@@ -8,13 +8,6 @@
     nzType="info"
   ></nz-alert>
 
-  <nz-alert
-    class="m-b-16"
-    nzMessage="Bot Runtime 子系统（B3）开发中，暂未部署到生产。「开启机器人」「关闭机器人」按钮当前仅修改期望状态，真实 bot 进程将在 B3 上线后自动按期望状态启停。「最近心跳」字段显示的是 A 版老 bot 容器最后一次心跳记录。"
-    nzShowIcon
-    nzType="warning"
-  ></nz-alert>
-
   <nz-card class="m-b-16 runtime-card" [nzTitle]="botScopeLabel() + '运行状态'">
     <div class="runtime-toolbar">
       <div class="runtime-tags">
@@ -35,7 +28,7 @@
         <button
           nz-button
           nz-tooltip
-          nzTooltipTitle="B3 未上线，点击仅写期望状态，真实 bot 进程不会启动"
+          nzTooltipTitle="开启机器人：写入期望状态后，agent 会按期望状态自动拉起 bot 进程"
           nzType="primary"
           [disabled]="runtime()?.desiredStatus === 'enabled' || !runtime()?.canEnable"
           [nzLoading]="toggling()"
@@ -47,7 +40,7 @@
         <button
           nz-button
           nz-tooltip
-          nzTooltipTitle="B3 未上线，点击仅写期望状态，真实 bot 进程不会停止"
+          nzTooltipTitle="关闭机器人：写入期望状态后，agent 会按期望状态自动停止 bot 进程"
           nzDanger
           [disabled]="runtime()?.desiredStatus === 'disabled'"
           [nzLoading]="toggling()"

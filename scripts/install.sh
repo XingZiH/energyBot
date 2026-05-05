@@ -37,7 +37,7 @@ LOG_FILE="/var/log/energybot-install.log"
 PRECHECK_PATH="/api/v1/license/precheck"
 # SHA-256("") —— 后端 license.public.controller.ts 以空字符串做 body hash。
 EMPTY_BODY_SHA256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-SCRIPT_VERSION="1.0.0-a"
+SCRIPT_VERSION="1.1.0-b3"
 
 # ---------- 日志颜色 ----------
 # NO_COLOR 环境变量（https://no-color.org/）+ 非 TTY 自动降级
@@ -175,6 +175,52 @@ check_root() {
     err "必须以 root 运行（sudo -i 后再粘贴命令）。"
     exit 4
   fi
+}
+
+# ---------- glibc 版本自检（B3：bot 二进制动态链接 cgo 需 glibc ≥ 2.31）----------
+#
+# 客户机 glibc < 2.31（Ubuntu 18.04 / Debian 9/10 / CentOS 7）运行 bot
+# 二进制会 GLIBC_2.31 not found 报错。agent 本身是纯 Go 静态链接无此限制，
+# 因此 glibc 不达标只 warn 并设置 SKIP_BOT_INSTALL=1，让 agent 降级跑
+# （仅心跳，不能管 bot）。用户可升级系统后 --reinstall。
+#
+# 检查方式：ldd --version 输出 "ldd (GNU libc) 2.35" 这样的行。
+check_glibc() {
+  SKIP_BOT_INSTALL=0
+  if ! command -v ldd >/dev/null 2>&1; then
+    warn "未找到 ldd，无法检测 glibc 版本——将跳过 bot 二进制安装。"
+    SKIP_BOT_INSTALL=1
+    return 0
+  fi
+  # ldd --version 第 1 行末尾带版本号；兼容 glibc / musl（Alpine 用 musl，无此行）
+  glibc_line="$(ldd --version 2>/dev/null | head -n 1)"
+  case "$glibc_line" in
+    *glibc*|*GLIBC*|*"GNU libc"*|*"GNU C Library"*)
+      # 提取首个 x.y 形式数字（2.31 / 2.35 等）
+      # 注意：用 head 而非 tail——若行末有 "2.35-0ubuntu3.7"，第二个 3.7 是包版本
+      # 号，不是 libc 主版本；取首个 x.y 才是主版本号。
+      glibc_ver="$(printf '%s' "$glibc_line" | grep -oE '[0-9]+\.[0-9]+' | head -n 1)"
+      if [ -z "$glibc_ver" ]; then
+        warn "无法解析 glibc 版本（行：$glibc_line）——跳过 bot 二进制安装。"
+        SKIP_BOT_INSTALL=1
+        return 0
+      fi
+      major="$(printf '%s' "$glibc_ver" | cut -d. -f1)"
+      minor="$(printf '%s' "$glibc_ver" | cut -d. -f2)"
+      if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 31 ]; }; then
+        warn "glibc $glibc_ver < 2.31（bot 二进制需 Ubuntu 20.04+ / Debian 11+ / CentOS 8+）。"
+        warn "将跳过 bot 二进制安装，agent 仅做心跳上报；升级系统后 --reinstall 可补装。"
+        SKIP_BOT_INSTALL=1
+      else
+        log "glibc $glibc_ver 满足要求（≥ 2.31）"
+      fi
+      ;;
+    *)
+      # musl（Alpine）或其他非 GNU libc
+      warn "检测到非 GNU libc（ldd 首行：$glibc_line）——将跳过 bot 二进制安装。"
+      SKIP_BOT_INSTALL=1
+      ;;
+  esac
 }
 
 check_resources() {
@@ -477,6 +523,27 @@ install_agent() {
   mv "${bin_path}.new" "$bin_path"
   ok "agent 二进制已就位：$bin_path"
 
+  # 2b. B3：下载 bot 二进制到同目录（若 glibc 不达标则跳过）
+  #     bot 进程由 agent supervisor 拉起，路径通过 EBT_BOT_BINARY env 告知 agent
+  bot_bin_path="/opt/energybot-agent/bin/energybot-bot"
+  if [ "$SKIP_BOT_INSTALL" = "1" ]; then
+    log "glibc 检查跳过 bot 安装——agent 将仅做心跳；若已有旧 bot 二进制将被保留不动。"
+    # 不主动 rm 旧 bin——留给用户手工清理或 --uninstall
+  else
+    bot_url="${SERVER_URL}/bin/energybot-bot-linux-${bin_arch}"
+    log "下载 bot 二进制：$bot_url"
+    if ! curl -fsSL --max-time 120 "$bot_url" -o "${bot_bin_path}.new" 2>>"$LOG_FILE"; then
+      # bot 二进制下载失败不中断：agent 仍可只做心跳；warn 提示用户，标记跳过 EBT_BOT_BINARY
+      warn "下载 bot 二进制失败：$bot_url（详见 $LOG_FILE）——agent 将降级仅做心跳。"
+      warn "可能原因：主站尚未发布 bot 二进制 / 网络异常 / 架构未构建。"
+      SKIP_BOT_INSTALL=1
+    else
+      chmod 755 "${bot_bin_path}.new"
+      mv "${bot_bin_path}.new" "$bot_bin_path"
+      ok "bot 二进制已就位：$bot_bin_path"
+    fi
+  fi
+
   # 3. agent.env（与 LicenseFile 分开；agent 服务账号不应能读 /etc/energybot/license.conf）
   # API URL 从 SERVER_URL 推导：https://host → wss://host/agent
   api_url="$(printf '%s' "$SERVER_URL" | sed -E 's#^https?://#wss://#')/agent"
@@ -489,6 +556,14 @@ install_agent() {
     printf 'EBT_LICENSE_SECRET=%s\n' "$LICENSE_SECRET"
     printf 'EBT_API_URL=%s\n' "$api_url"
     printf 'EBT_LOG_LEVEL=info\n'
+    # B3：EBT_BOT_BINARY 开关——agent config.go 读此 env 决定是否启用 supervisor。
+    # 留空时 agent 走 B2 兼容路径（仅心跳，不管 bot）。
+    if [ "$SKIP_BOT_INSTALL" = "1" ]; then
+      printf '# EBT_BOT_BINARY 未设置——glibc 不达标或 bot 二进制下载失败；agent 将仅做心跳。\n'
+      printf 'EBT_BOT_BINARY=\n'
+    else
+      printf 'EBT_BOT_BINARY=%s\n' "$bot_bin_path"
+    fi
   } > "$env_tmp"
   chmod 640 "$env_tmp"
   chown root:energybot-agent "$env_tmp"
@@ -532,7 +607,7 @@ do_uninstall() {
     ok "已停止并 disable energybot-agent.service"
   fi
   # 2. 清文件（保留 /var/log/energybot-agent 用于排障）
-  for f in /etc/systemd/system/energybot-agent.service /etc/energybot-agent/agent.env /opt/energybot-agent/bin/energybot-agent; do
+  for f in /etc/systemd/system/energybot-agent.service /etc/energybot-agent/agent.env /opt/energybot-agent/bin/energybot-agent /opt/energybot-agent/bin/energybot-bot; do
     if [ -e "$f" ]; then
       rm -f "$f"
       ok "已删除 $f"
@@ -574,6 +649,11 @@ print_banner() {
     else
       printf '  Agent       ：%b未运行%b（请检查 journalctl -u energybot-agent）\n' "$C_YELLOW" "$C_RESET"
     fi
+    if [ "$SKIP_BOT_INSTALL" = "1" ]; then
+      printf '  Bot         ：%b未安装%b（glibc < 2.31 或下载失败；agent 仅做心跳）\n' "$C_YELLOW" "$C_RESET"
+    else
+      printf '  Bot         ：%b已安装%b（/opt/energybot-agent/bin/energybot-bot；由 agent supervisor 管理）\n' "$C_GREEN" "$C_RESET"
+    fi
   fi
   printf '\n'
   printf '  %b下一步%b：在控制台 %s 的「我的 Bot」页查看 agent 状态\n' "$C_BOLD" "$C_RESET" "$SERVER_URL"
@@ -588,6 +668,7 @@ main() {
   check_deps
   detect_os
   check_root
+  check_glibc
 
   if [ "$ACTION" = "uninstall" ]; then
     do_uninstall
