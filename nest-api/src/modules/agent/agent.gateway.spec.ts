@@ -453,6 +453,126 @@ describe('AgentGateway.handleMessage — agent.heartbeat', () => {
     expect(reply.error).toBeUndefined();
   });
 
+  // ---- B3-T4：bot 字段解析 ----
+
+  it('B3：heartbeat 无 bot 字段 → updateHeartbeat 第三参数 undefined', async () => {
+    const { onMessage, agents } = await handshakeAndHello();
+    await onMessage(hbFrame(2));
+    expect(agents.updateHeartbeat).toHaveBeenCalledTimes(1);
+    const call = agents.updateHeartbeat.mock.calls[0];
+    expect(call[2]).toBeUndefined();
+  });
+
+  it('B3：heartbeat 带完整 bot 字段 → 透传为 BotRuntime', async () => {
+    const { onMessage, agents } = await handshakeAndHello();
+    const pollAt = '2026-05-05T12:00:00.000Z';
+    await onMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'agent.heartbeat',
+        params: {
+          uptime_seconds: 3600,
+          cpu_percent: 5.5,
+          mem_used_bytes: 1,
+          mem_total_bytes: 2,
+          loadavg_1: 0.5,
+          bot: {
+            status: 'running',
+            pid: 12345,
+            uptime_seconds: 600,
+            config_version: 'cfg-v7',
+            last_tg_poll_at: pollAt,
+            last_error: '',
+          },
+        },
+      }),
+    );
+    expect(agents.updateHeartbeat).toHaveBeenCalledTimes(1);
+    const bot = agents.updateHeartbeat.mock.calls[0][2];
+    expect(bot).toBeDefined();
+    expect(bot.status).toBe('running');
+    expect(bot.pid).toBe(12345);
+    expect(bot.uptimeSeconds).toBe(600);
+    expect(bot.configVersion).toBe('cfg-v7');
+    expect(bot.lastTgPollAt).toEqual(new Date(pollAt));
+    // last_error 空字符串被视为未填，字段省略
+    expect(bot.lastError).toBeUndefined();
+  });
+
+  it('B3：heartbeat bot.pid 非法 → 该字段丢弃，其它字段保留', async () => {
+    const { onMessage, agents } = await handshakeAndHello();
+    await onMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'agent.heartbeat',
+        params: {
+          uptime_seconds: 1,
+          cpu_percent: 1,
+          mem_used_bytes: 1,
+          mem_total_bytes: 2,
+          loadavg_1: 0,
+          bot: {
+            status: 'stopped',
+            pid: 'not-a-number',
+            last_tg_poll_at: 'not-a-date',
+          },
+        },
+      }),
+    );
+    const bot = agents.updateHeartbeat.mock.calls[0][2];
+    expect(bot).toBeDefined();
+    expect(bot.status).toBe('stopped');
+    expect(bot.pid).toBeUndefined();
+    expect(bot.lastTgPollAt).toBeUndefined();
+  });
+
+  it('B3：heartbeat bot 不是对象（string）→ 整个字段降级为 undefined，主心跳不受影响', async () => {
+    const { onMessage, ws, agents } = await handshakeAndHello();
+    await onMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'agent.heartbeat',
+        params: {
+          uptime_seconds: 1,
+          cpu_percent: 1,
+          mem_used_bytes: 1,
+          mem_total_bytes: 2,
+          loadavg_1: 0,
+          bot: 'bogus',
+        },
+      }),
+    );
+    expect(agents.updateHeartbeat).toHaveBeenCalledTimes(1);
+    expect(agents.updateHeartbeat.mock.calls[0][2]).toBeUndefined();
+    // 主心跳仍然返回 success
+    const reply = firstSent(ws);
+    expect(reply.result).toBeDefined();
+    expect(reply.error).toBeUndefined();
+  });
+
+  it('B3：heartbeat bot 为空对象（所有字段缺失）→ updateHeartbeat 第三参数 undefined', async () => {
+    const { onMessage, agents } = await handshakeAndHello();
+    await onMessage(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'agent.heartbeat',
+        params: {
+          uptime_seconds: 1,
+          cpu_percent: 1,
+          mem_used_bytes: 1,
+          mem_total_bytes: 2,
+          loadavg_1: 0,
+          bot: {},
+        },
+      }),
+    );
+    expect(agents.updateHeartbeat.mock.calls[0][2]).toBeUndefined();
+  });
+
   it('heartbeat 时 license 已吊销（findActiveByKey 返 null）→ -40003 + close(4003)', async () => {
     const license = createMockLicenseService();
     const { gw, agents } = createGateway({ license });

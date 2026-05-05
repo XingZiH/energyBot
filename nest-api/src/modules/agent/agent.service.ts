@@ -18,6 +18,23 @@ export interface HeartbeatMetrics {
 }
 
 /**
+ * B3：agent supervisor 上报的 bot 子进程运行时快照。
+ *
+ * 所有字段可选：B2 版 agent 根本不上报 bot 块 → BotRuntime=undefined；
+ * B3 版 agent supervisor 未起 bot 时上报 status='stopped'，其它字段可缺省。
+ *
+ * 字段语义详见 go-agent/internal/botinfo/provider.go。
+ */
+export interface BotRuntime {
+  status?: string; // unknown | stopped | starting | running | error
+  pid?: number;
+  uptimeSeconds?: number;
+  configVersion?: string;
+  lastTgPollAt?: Date;
+  lastError?: string;
+}
+
+/**
  * AgentService —— agents 表的 DB 层。
  *
  * 职责：
@@ -99,29 +116,55 @@ export class AgentService {
       });
   }
 
-  /** 心跳到达：20s 去抖；窗口内直接丢弃不写 DB。 */
-  async updateHeartbeat(licenseId: number, m: HeartbeatMetrics): Promise<void> {
+  /**
+   * 心跳到达：20s 去抖；窗口内直接丢弃不写 DB。
+   *
+   * B3：bot 可选，非空时连同主机 metrics 一起写入 bot_* 列。
+   * 去抖窗口同时覆盖主机 metrics 和 bot 状态——bot 状态的时效性（30s 心跳间隔
+   * 下 20s 去抖）已足够，单独为 bot 开窗会放大 DB 写入。
+   */
+  async updateHeartbeat(
+    licenseId: number,
+    m: HeartbeatMetrics,
+    bot?: BotRuntime,
+  ): Promise<void> {
     const now = Date.now();
     const last = this.lastHbWriteAt.get(licenseId) ?? 0;
     if (now - last < AgentService.HEARTBEAT_DEBOUNCE_MS) return;
     this.lastHbWriteAt.set(licenseId, now);
-    await this.writeHeartbeatToDb(licenseId, m);
+    await this.writeHeartbeatToDb(licenseId, m, bot);
   }
 
   /** 真正落盘心跳字段。drizzle numeric 列要求 string，故 cpu/loadavg 用 toFixed(2)。 */
-  private async writeHeartbeatToDb(licenseId: number, m: HeartbeatMetrics): Promise<void> {
+  private async writeHeartbeatToDb(
+    licenseId: number,
+    m: HeartbeatMetrics,
+    bot?: BotRuntime,
+  ): Promise<void> {
     const now = new Date();
+    // 为避免 "undefined 字段覆盖已有值" 用分支构造 set 对象。
+    // bot 未带上报时，保留 DB 现值（旧 agent 兼容）；
+    // bot 带上报但某字段缺失，仍写入 null 覆盖（表示该字段"现在没值"）。
+    const setValues: Record<string, unknown> = {
+      lastHeartbeatAt: now,
+      uptimeSeconds: m.uptimeSeconds,
+      cpuPercent: m.cpuPercent.toFixed(2),
+      memUsedBytes: m.memUsedBytes,
+      memTotalBytes: m.memTotalBytes,
+      loadavg1: m.loadavg1.toFixed(2),
+      updatedAt: now,
+    };
+    if (bot !== undefined) {
+      setValues.botStatus = bot.status ?? null;
+      setValues.botPid = bot.pid ?? null;
+      setValues.botUptimeSeconds = bot.uptimeSeconds ?? null;
+      setValues.botConfigVersion = bot.configVersion ?? null;
+      setValues.botLastTgPollAt = bot.lastTgPollAt ?? null;
+      setValues.botLastError = bot.lastError ?? null;
+    }
     await this.conn
       .update(agentsTable)
-      .set({
-        lastHeartbeatAt: now,
-        uptimeSeconds: m.uptimeSeconds,
-        cpuPercent: m.cpuPercent.toFixed(2),
-        memUsedBytes: m.memUsedBytes,
-        memTotalBytes: m.memTotalBytes,
-        loadavg1: m.loadavg1.toFixed(2),
-        updatedAt: now,
-      })
+      .set(setValues)
       .where(eq(agentsTable.licenseId, licenseId));
   }
 

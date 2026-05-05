@@ -165,6 +165,79 @@ describe('AgentService', () => {
     expect(setArg.uptimeSeconds).toBe(100);
   });
 
+  // ---- B3-T4：bot 字段落库 ----
+
+  it('B3：updateHeartbeat 不带 bot → DB set 不包含 bot_* 字段（保留 DB 现值）', async () => {
+    const { svc, conn } = createService();
+    await svc.updateHeartbeat(LICENSE_ID, {
+      uptimeSeconds: 100,
+      cpuPercent: 1.5,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      loadavg1: 0.1,
+    });
+    const set = conn._state.updates[0].set;
+    expect(set).not.toHaveProperty('botStatus');
+    expect(set).not.toHaveProperty('botPid');
+    expect(set).not.toHaveProperty('botUptimeSeconds');
+    expect(set).not.toHaveProperty('botConfigVersion');
+    expect(set).not.toHaveProperty('botLastTgPollAt');
+    expect(set).not.toHaveProperty('botLastError');
+  });
+
+  it('B3：updateHeartbeat 带完整 bot → DB set 包含全部 6 个 bot_* 字段', async () => {
+    const { svc, conn } = createService();
+    const pollAt = new Date('2026-05-05T12:00:00.000Z');
+    await svc.updateHeartbeat(
+      LICENSE_ID,
+      {
+        uptimeSeconds: 100,
+        cpuPercent: 1.5,
+        memUsedBytes: 1,
+        memTotalBytes: 2,
+        loadavg1: 0.1,
+      },
+      {
+        status: 'running',
+        pid: 12345,
+        uptimeSeconds: 600,
+        configVersion: 'cfg-v7',
+        lastTgPollAt: pollAt,
+        lastError: 'some err',
+      },
+    );
+    const set = conn._state.updates[0].set;
+    expect(set.botStatus).toBe('running');
+    expect(set.botPid).toBe(12345);
+    expect(set.botUptimeSeconds).toBe(600);
+    expect(set.botConfigVersion).toBe('cfg-v7');
+    expect(set.botLastTgPollAt).toBe(pollAt);
+    expect(set.botLastError).toBe('some err');
+  });
+
+  it('B3：updateHeartbeat 带部分 bot（status 存在、其它缺失）→ 缺失字段写 null（覆盖旧值）', async () => {
+    const { svc, conn } = createService();
+    await svc.updateHeartbeat(
+      LICENSE_ID,
+      {
+        uptimeSeconds: 100,
+        cpuPercent: 1.5,
+        memUsedBytes: 1,
+        memTotalBytes: 2,
+        loadavg1: 0.1,
+      },
+      { status: 'stopped' },
+    );
+    const set = conn._state.updates[0].set;
+    expect(set.botStatus).toBe('stopped');
+    // 语义：bot 对象给了（agent 版本 B3+），该清掉的旧值清掉
+    expect(set.botPid).toBeNull();
+    expect(set.botUptimeSeconds).toBeNull();
+    expect(set.botConfigVersion).toBeNull();
+    expect(set.botLastTgPollAt).toBeNull();
+    expect(set.botLastError).toBeNull();
+  });
+
   it('markOfflineByLicense 置 offline 并清理 debounce map', async () => {
     const { svc, conn } = createService();
     // 先种一次心跳让 debounce map 有条目

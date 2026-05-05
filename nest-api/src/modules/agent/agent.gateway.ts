@@ -5,7 +5,7 @@ import { WebSocket } from 'ws';
 import { LicenseService } from '../license/license.service';
 import { PrecheckErrorCode } from '../license/dto/license.dto';
 import { AgentRegistry } from './agent.registry';
-import { AgentService, HeartbeatMetrics } from './agent.service';
+import { AgentService, BotRuntime, HeartbeatMetrics } from './agent.service';
 import {
   AgentRpcErrorCode,
   JsonRpcErrorCode,
@@ -284,7 +284,10 @@ export class AgentGateway implements OnGatewayConnection {
       loadavg1: this.requireNumber(params.loadavg_1, 'loadavg_1'),
     };
 
-    await this.agentService.updateHeartbeat(slot.licenseId, metrics);
+    // B3：可选 bot 块，宽松解析——格式错误时降级为 undefined 不影响主心跳
+    const bot = this.parseOptionalBot(params.bot);
+
+    await this.agentService.updateHeartbeat(slot.licenseId, metrics, bot);
     this.registry.touchHeartbeat(slot.licenseId);
 
     ws.send(
@@ -351,6 +354,57 @@ export class AgentGateway implements OnGatewayConnection {
       throw new BadRequestError('boot_time out of range');
     }
     return v;
+  }
+
+  /**
+   * B3：解析可选的 params.bot 块。
+   *
+   * 宽松策略：
+   *   - undefined / 非 object → 返 undefined（旧版 agent 无 bot 字段）
+   *   - 任何字段格式不对 → 该字段丢弃（记 debug），其它字段保留
+   *   - 所有字段都挂了 → 返 undefined（等同未上报）
+   *
+   * 为什么不用 requireObject 抛 BadRequestError：
+   *   bot 字段是 B3 新增，格式错误不应中断主机 metrics 写入；
+   *   agent 端若长期上报损坏 bot 块，运维从 debug 日志发现。
+   */
+  private parseOptionalBot(v: unknown): BotRuntime | undefined {
+    if (v == null) return undefined;
+    if (typeof v !== 'object' || Array.isArray(v)) {
+      this.logger.debug(`ignoring bot field: not an object`);
+      return undefined;
+    }
+    const raw = v as Record<string, unknown>;
+    const out: BotRuntime = {};
+
+    // status: unknown | stopped | starting | running | error
+    if (typeof raw.status === 'string' && raw.status.length > 0 && raw.status.length <= 16) {
+      out.status = raw.status;
+    }
+    if (typeof raw.pid === 'number' && Number.isFinite(raw.pid) && raw.pid >= 0) {
+      out.pid = Math.trunc(raw.pid);
+    }
+    if (typeof raw.uptime_seconds === 'number' && Number.isFinite(raw.uptime_seconds) && raw.uptime_seconds >= 0) {
+      out.uptimeSeconds = Math.trunc(raw.uptime_seconds);
+    }
+    if (typeof raw.config_version === 'string' && raw.config_version.length > 0 && raw.config_version.length <= 64) {
+      out.configVersion = raw.config_version;
+    }
+    // last_tg_poll_at: agent 按 RFC3339 字符串上报（go-agent JSON marshal time.Time 默认行为）
+    if (typeof raw.last_tg_poll_at === 'string' && raw.last_tg_poll_at.length > 0) {
+      const d = new Date(raw.last_tg_poll_at);
+      if (!Number.isNaN(d.getTime())) {
+        out.lastTgPollAt = d;
+      }
+    }
+    if (typeof raw.last_error === 'string' && raw.last_error.length > 0) {
+      // 防止超大 error 撑爆 varchar(500)；agent 端已做截断，这里保险再截一刀
+      out.lastError = raw.last_error.length > 500 ? raw.last_error.slice(0, 500) : raw.last_error;
+    }
+
+    // 全部字段都没有 → 视为未上报
+    if (Object.keys(out).length === 0) return undefined;
+    return out;
   }
 
   /**

@@ -433,5 +433,14 @@ export const agentsTable = pgTable('agents', {
   memUsedBytes: bigint('mem_used_bytes', { mode: 'number' }),
   memTotalBytes: bigint('mem_total_bytes', { mode: 'number' }),
   loadavg1: numeric('loadavg_1', { precision: 6, scale: 2 }),
+  // ---- B3：bot 运行时状态（agent supervisor 上报）----
+  // 旧版 agent 不上报这些字段；保持 NULL 即可。
+  // bot_status: unknown | stopped | starting | running | error
+  botStatus: varchar('bot_status', { length: 16 }),
+  botPid: integer('bot_pid'),
+  botUptimeSeconds: bigint('bot_uptime_seconds', { mode: 'number' }),
+  botConfigVersion: varchar('bot_config_version', { length: 64 }),
+  botLastTgPollAt: timestamp('bot_last_tg_poll_at'),
+  botLastError: varchar('bot_last_error', { length: 500 }),
   ...timestamps,
 });
