@@ -187,7 +187,7 @@ export class UiConfigService {
       welcomeText: row.welcomeText ?? '',
       menuConfig: this.parseJsonArray(row.menuConfig),
       messageConfig:
-        this.parseJsonObject(row.messageConfig) ?? this.emptyTemplates(),
+        this.parseMessageConfig(row.messageConfig),
       updatedAt: (row.updatedAt ?? new Date(0)).toISOString(),
     };
   }
@@ -214,14 +214,18 @@ export class UiConfigService {
     expectedUpdatedAt?: string,
   ): Promise<{ updatedAt: string }> {
     const now = new Date();
-    const nextValues = {
+    const nextValues: Record<string, unknown> = {
       welcomeText: dto.welcomeText ?? '',
       menuConfig: dto.menuConfig?.length ? JSON.stringify(dto.menuConfig) : null,
-      messageConfig: dto.messageConfig
-        ? JSON.stringify(dto.messageConfig)
-        : null,
       updatedAt: now,
     };
+    // 只有前端显式传入 messageConfig 时才更新——
+    // 未传（undefined）时保留 DB 原值，避免保存菜单时误清消息模板。
+    if (dto.messageConfig !== undefined) {
+      nextValues['messageConfig'] = dto.messageConfig
+        ? JSON.stringify(dto.messageConfig)
+        : null;
+    }
 
     if (expectedUpdatedAt) {
       // 带乐观锁：UPDATE 附加 WHERE updated_at = expected，affected rows=0 即冲突。
@@ -312,5 +316,26 @@ export class UiConfigService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 解析 messageConfig：先 parseJsonObject，再合并 emptyTemplates() 保证所有字段都是 string。
+   * 防止 DB 存了 `{}` 或部分字段缺失导致前端拿到 undefined 字段后回传触发验证失败。
+   */
+  private parseMessageConfig(val: unknown): MessageTemplatesDto {
+    const parsed = this.parseJsonObject(val);
+    if (!parsed) return this.emptyTemplates();
+    const defaults = this.emptyTemplates();
+    return {
+      welcome: typeof parsed.welcome === 'string' ? parsed.welcome : defaults.welcome,
+      orderCreated: typeof parsed.orderCreated === 'string' ? parsed.orderCreated : defaults.orderCreated,
+      payPending: typeof parsed.payPending === 'string' ? parsed.payPending : defaults.payPending,
+      paySuccess: typeof parsed.paySuccess === 'string' ? parsed.paySuccess : defaults.paySuccess,
+      payFailed: typeof parsed.payFailed === 'string' ? parsed.payFailed : defaults.payFailed,
+      addressInvalid: typeof parsed.addressInvalid === 'string' ? parsed.addressInvalid : defaults.addressInvalid,
+      unknownCommand: typeof parsed.unknownCommand === 'string' ? parsed.unknownCommand : defaults.unknownCommand,
+      packageUnavailable: typeof parsed.packageUnavailable === 'string' ? parsed.packageUnavailable : defaults.packageUnavailable,
+      walletQueryResult: typeof parsed.walletQueryResult === 'string' ? parsed.walletQueryResult : defaults.walletQueryResult,
+    };
   }
 }

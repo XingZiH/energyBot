@@ -269,11 +269,12 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
       welcomeText: patch.welcomeText ?? ui.welcomeText,
       menuConfig: patch.menuConfig ?? ui.menuConfig,
     };
-    // messageConfig 为 null/undefined 时不传——让后端保留原值，
-    // 否则 @ValidateNested 会对 null 报 "must be a string"。
-    const msgCfg = patch.messageConfig ?? ui.messageConfig;
-    if (msgCfg) {
-      payload['messageConfig'] = msgCfg;
+    // 只有调用方显式传入 messageConfig 时才携带——
+    // 保存菜单时不传此字段，后端 @IsOptional() 会跳过验证并保留 DB 原值。
+    // 之前的 bug：fallback 到 ui.messageConfig（可能是 DB 中的空对象 {}，
+    // 所有字段为 undefined）导致 @ValidateNested 对 9 个字段全部报错。
+    if (patch.messageConfig) {
+      payload['messageConfig'] = patch.messageConfig;
     }
     this.saving.set(true);
     this.uiConfigService
