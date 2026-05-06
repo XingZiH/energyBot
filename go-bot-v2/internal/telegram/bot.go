@@ -181,7 +181,8 @@ type inlineKeyboardMarkup struct {
 
 type inlineKeyboardButton struct {
 	Text         string `json:"text"`
-	CallbackData string `json:"callback_data"`
+	URL          string `json:"url,omitempty"`
+	CallbackData string `json:"callback_data,omitempty"`
 }
 
 type replyKeyboardMarkup struct {
@@ -517,10 +518,57 @@ func (b *Bot) sendPackageMenu(ctx context.Context, chatID int64) error {
 		if text == "" {
 			text = packageMenuText(packages, b.orderPaymentTTL)
 		}
+		// 渲染设计器根菜单为 Inline Keyboard
+		keyboard := b.buildRootInlineKeyboard(designerConfig, packages)
+		if keyboard != nil {
+			return b.sendMessage(ctx, chatID, text, keyboard)
+		}
 		return b.sendMessage(ctx, chatID, text, &replyKeyboardRemove{RemoveKeyboard: true})
 	}
 
 	return b.sendMessage(ctx, chatID, packageMenuText(packages, b.orderPaymentTTL), &replyKeyboardRemove{RemoveKeyboard: true})
+}
+
+// buildRootInlineKeyboard 将设计器根菜单的 MenuRows 渲染为 Telegram Inline Keyboard。
+// 每个按钮的 callback_data = "menu:row{i}.btn{j}"，与现有的 callback_query 处理器对齐。
+// URL 类型按钮使用 Telegram 原生 url 字段（点击直接打开链接），其余走 callback_data。
+func (b *Bot) buildRootInlineKeyboard(config BotDesignerConfig, packages []EnergyPackage) *inlineKeyboardMarkup {
+	packageTextByID := make(map[int]string, len(packages))
+	for _, pkg := range packages {
+		packageTextByID[pkg.ID] = packageButtonText(pkg)
+	}
+
+	rows := make([][]inlineKeyboardButton, 0, len(config.MenuRows))
+	for i, menuRow := range config.MenuRows {
+		line := make([]inlineKeyboardButton, 0, len(menuRow.Buttons))
+		for j, button := range menuRow.Buttons {
+			text := designerButtonText(button, packageTextByID)
+			if text == "" {
+				text = "(未命名)"
+			}
+			if button.Action == ActionURL && strings.TrimSpace(button.URL) != "" {
+				// URL 按钮：Telegram 原生 url 字段，点击直接打开
+				line = append(line, inlineKeyboardButton{
+					Text: text,
+					URL:  strings.TrimSpace(button.URL),
+				})
+			} else {
+				// 其他按钮：callback_data 走现有 dispatcher
+				cbData := fmt.Sprintf("menu:row%d.btn%d", i, j)
+				line = append(line, inlineKeyboardButton{
+					Text:         text,
+					CallbackData: cbData,
+				})
+			}
+		}
+		if len(line) > 0 {
+			rows = append(rows, line)
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return &inlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func (b *Bot) handleCustomMenuButton(ctx context.Context, chatID int64, text string) bool {
