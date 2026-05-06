@@ -16,22 +16,30 @@
     </nz-empty>
   } @else if (agents().length === 1) {
     @let a = agents()[0];
-    <div class="host-header">
-      <span class="host-name">{{ a.hostName || '未知主机' }}</span>
-      <nz-tag [nzColor]="statusColor(a.status)" class="ml-8">
-        {{ statusLabel(a.status) }}
-      </nz-tag>
-      <nz-tag [nzColor]="botStatusColor(a.botStatus)" class="ml-8" nz-tooltip [nzTooltipTitle]="a.botLastError || ''">
-        Bot: {{ botStatusLabel(a.botStatus) }}
-      </nz-tag>
 
-      <!-- B3-T5 操作按钮：根据 bot 状态动态启用/禁用 -->
-      <nz-space class="ml-8">
+    <!-- 醒目的 Bot 状态横幅 -->
+    <div class="bot-status-banner" [class]="'bot-status-banner bot-status-banner--' + (a.botStatus || 'unknown')">
+      <div class="bot-status-banner__left">
+        <div class="bot-status-banner__indicator">
+          @if (a.botStatus === 'starting' || isActionInFlight(a.licenseId)) {
+            <nz-icon nzType="loading" class="bot-status-banner__spin"></nz-icon>
+          } @else if (a.botStatus === 'running') {
+            <nz-icon nzType="check-circle" nzTheme="fill"></nz-icon>
+          } @else if (a.botStatus === 'error') {
+            <nz-icon nzType="close-circle" nzTheme="fill"></nz-icon>
+          } @else {
+            <nz-icon nzType="minus-circle" nzTheme="fill"></nz-icon>
+          }
+        </div>
+        <div class="bot-status-banner__text">
+          <div class="bot-status-banner__label">Bot 状态</div>
+          <div class="bot-status-banner__value">{{ botStatusLabel(a.botStatus) }}</div>
+        </div>
+      </div>
+      <div class="bot-status-banner__actions">
         <button
-          *nzSpaceItem
           nz-button
           nzType="primary"
-          nzSize="small"
           [disabled]="!canStart(a)"
           [nzLoading]="isActionInFlight(a.licenseId)"
           (click)="startBot(a)"
@@ -40,10 +48,8 @@
           <span>启动</span>
         </button>
         <button
-          *nzSpaceItem
           nz-button
           nzDanger
-          nzSize="small"
           nz-popconfirm
           nzPopconfirmTitle="确定停止 bot？停止后该主机将不再响应 Telegram 消息。"
           (nzOnConfirm)="stopBot(a)"
@@ -54,9 +60,7 @@
           <span>停止</span>
         </button>
         <button
-          *nzSpaceItem
           nz-button
-          nzSize="small"
           [disabled]="!canReload(a)"
           [nzLoading]="isActionInFlight(a.licenseId)"
           (click)="reloadBot(a)"
@@ -64,7 +68,23 @@
           <nz-icon nzType="reload"></nz-icon>
           <span>重载</span>
         </button>
-      </nz-space>
+      </div>
+    </div>
+
+    @if (a.botLastError) {
+      <nz-alert
+        nzType="error"
+        nzShowIcon
+        [nzMessage]="'最近错误：' + a.botLastError"
+        class="mt-12"
+      ></nz-alert>
+    }
+
+    <div class="host-header mt-16">
+      <span class="host-name">{{ a.hostName || '未知主机' }}</span>
+      <nz-tag [nzColor]="statusColor(a.status)" class="ml-8">
+        {{ statusLabel(a.status) }}
+      </nz-tag>
     </div>
 
     <nz-divider></nz-divider>
@@ -102,22 +122,12 @@
     @if (a.botStatus !== null) {
       <nz-divider nzOrientation="left" nzText="Bot 运行时"></nz-divider>
       <nz-descriptions nzBordered [nzColumn]="2" nzSize="middle">
-        <nz-descriptions-item nzTitle="状态">
-          <nz-tag [nzColor]="botStatusColor(a.botStatus)">{{ botStatusLabel(a.botStatus) }}</nz-tag>
-        </nz-descriptions-item>
         <nz-descriptions-item nzTitle="PID">{{ a.botPid ?? '—' }}</nz-descriptions-item>
         <nz-descriptions-item nzTitle="运行时长">{{ formatUptime(a.botUptimeSeconds) }}</nz-descriptions-item>
         <nz-descriptions-item nzTitle="配置版本">{{ a.botConfigVersion || '—' }}</nz-descriptions-item>
         <nz-descriptions-item nzTitle="最近 TG 拉取">
           @if (a.botLastTgPollAt) {
             {{ a.botLastTgPollAt | date: 'yyyy-MM-dd HH:mm:ss' }}
-          } @else {
-            —
-          }
-        </nz-descriptions-item>
-        <nz-descriptions-item nzTitle="最近错误" [nzSpan]="2">
-          @if (a.botLastError) {
-            <span class="bot-error-msg">{{ a.botLastError }}</span>
           } @else {
             —
           }

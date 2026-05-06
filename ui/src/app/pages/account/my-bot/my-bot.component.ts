@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal 
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, finalize, switchMap, takeWhile } from 'rxjs/operators';
-import { EMPTY, Subscription, of, timer } from 'rxjs';
+import { EMPTY, Subscription, of, timer, interval } from 'rxjs';
 
 import {
   MyBotAgentView,
@@ -104,6 +104,25 @@ export class MyBotComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadAgents();
+    this.startAutoRefresh();
+  }
+
+  /**
+   * 每 30s 静默刷新一次 agent 数据（不显示 loading），确保页面始终展示最新状态。
+   * 如果有 action 正在轮询（actionInFlight 非空），跳过本次静默刷新，避免冲突。
+   */
+  private startAutoRefresh(): void {
+    interval(30_000)
+      .pipe(
+        switchMap(() => {
+          if (this.actionInFlight().size > 0) return EMPTY;
+          return this.dataService.findMine().pipe(catchError(() => EMPTY));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(list => {
+        if (list) this.agents.set(list);
+      });
   }
 
   loadAgents(): void {
