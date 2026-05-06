@@ -16,6 +16,7 @@ import { TableSearchFilterDto } from '../../common/tableSearchDto';
 import { Permission } from '../../decorators/permission.decorator';
 import { AuthGuard } from '../../guards/auth.guard';
 import { JwtGuard } from '../../guards/jwt.guard';
+import { AgentApplyConfigService } from '../agent/agent-apply-config.service';
 import {
   EnergyAddressFiltersDto,
   AgentRechargeOrderFiltersDto,
@@ -39,7 +40,10 @@ import { EnergyRentalService } from './energy-rental.service';
 @ApiTags('能量租赁')
 @Controller('energy-rental')
 export class EnergyRentalController {
-  constructor(private readonly energyRentalService: EnergyRentalService) {}
+  constructor(
+    private readonly energyRentalService: EnergyRentalService,
+    private readonly applyConfigService: AgentApplyConfigService,
+  ) {}
 
   @Get('dashboard')
   @UseGuards(JwtGuard, AuthGuard)
@@ -152,6 +156,10 @@ export class EnergyRentalController {
       req.user?.userId,
       createDto,
     );
+    // 套餐变更后静默推送到 agent SQLite（不阻塞响应）
+    if (req.user?.userId) {
+      this.applyConfigService.applyConfigSilent(req.user.userId);
+    }
     return ResultData.success(data);
   }
 
@@ -166,6 +174,10 @@ export class EnergyRentalController {
       req.user?.userId,
       updateDto,
     );
+    // 套餐变更后静默推送到 agent SQLite（不阻塞响应）
+    if (req.user?.userId) {
+      this.applyConfigService.applyConfigSilent(req.user.userId);
+    }
     return ResultData.success(data);
   }
 
@@ -180,6 +192,10 @@ export class EnergyRentalController {
       ids,
       req.user?.userId,
     );
+    // 套餐变更后静默推送到 agent SQLite（不阻塞响应）
+    if (req.user?.userId) {
+      this.applyConfigService.applyConfigSilent(req.user.userId);
+    }
     return ResultData.success(data);
   }
 

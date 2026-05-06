@@ -42,5 +42,6 @@ import { MyBotController } from './my-bot.controller';
     MyBotActionService,
     AgentApplyConfigService,
   ],
+  exports: [AgentApplyConfigService],
 })
 export class AgentModule {}

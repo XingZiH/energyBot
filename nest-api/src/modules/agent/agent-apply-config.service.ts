@@ -14,6 +14,7 @@ import * as schema from '../../drizzle/schema';
 import {
   agentBotConfigsTable,
   agentProfilesTable,
+  energyPackagesTable,
   energyPlatformConfigTable,
   licensesTable,
   userTable,
@@ -167,7 +168,50 @@ export class AgentApplyConfigService {
       );
     }
 
-    // 7. 组装 params（camelCase，与 go-bot-v2 apply_config.go Params struct 对齐）
+    // 7. packages（该 agent 的 user_package + 关联的 platform_price 基础数据）
+    //    Go bot-v2 本地 SQLite energy_packages 表需要这些数据来展示套餐菜单
+    //    查询逻辑：先取 user_package（属于此 agent），再 LEFT JOIN platform_price
+    //    拿到基础的 energy_amount/duration_hours（与 Go bot listPackages 查询对齐）
+    const pkgRows = await this.conn
+      .select({
+        id: energyPackagesTable.id,
+        platformPackageId: energyPackagesTable.platformPackageId,
+        packageKind: energyPackagesTable.packageKind,
+        packageName: energyPackagesTable.packageName,
+        energyAmount: energyPackagesTable.energyAmount,
+        durationHours: energyPackagesTable.durationHours,
+        priceSun: energyPackagesTable.priceSun,
+        idlePriceSun: energyPackagesTable.idlePriceSun,
+        busyPriceSun: energyPackagesTable.busyPriceSun,
+        status: energyPackagesTable.status,
+        sortOrder: energyPackagesTable.sortOrder,
+        description: energyPackagesTable.description,
+      })
+      .from(energyPackagesTable)
+      .where(
+        and(
+          eq(energyPackagesTable.agentId, agentProfileId),
+          eq(energyPackagesTable.packageKind, 'user_package'),
+          isNull(energyPackagesTable.deletedAt),
+        ),
+      );
+
+    const packages = pkgRows.map((p) => ({
+      id: p.id,
+      platformPackageId: p.platformPackageId,
+      packageKind: p.packageKind,
+      packageName: p.packageName,
+      energyAmount: p.energyAmount,
+      durationHours: p.durationHours,
+      priceSun: String(p.priceSun ?? '0'),
+      idlePriceSun: String(p.idlePriceSun ?? p.priceSun ?? '0'),
+      busyPriceSun: String(p.busyPriceSun ?? p.priceSun ?? '0'),
+      status: p.status,
+      sortOrder: p.sortOrder ?? 0,
+      description: p.description ?? '',
+    }));
+
+    // 8. 组装 params（camelCase，与 go-bot-v2 apply_config.go Params struct 对齐）
     const params = {
       databaseUrl: '/var/lib/energybot-agent/bot.db',
       platform: {
@@ -194,9 +238,10 @@ export class AgentApplyConfigService {
         menuConfig: botCfg.menuConfig ?? '',
         messageConfig: botCfg.messageConfig ?? '',
       },
+      packages,
     };
 
-    // 8. 下发 agent.applyConfig request，等待 agent 回 result
+    // 9. 下发 agent.applyConfig request，等待 agent 回 result
     //    T11.10 升级：由 notification 改为 JSON-RPC request，避免 bot.start
     //    与 agent.applyConfig 并发 goroutine 在 bot 进程冷启时争抢 SQLite 锁
     //    超时 15s：apply-config 子进程 cold start + migration + UPSERT 一般 < 2s，
@@ -221,5 +266,41 @@ export class AgentApplyConfigService {
     this.logger.log(
       `applyConfig license=${licenseId} user=${userId} 已下发`,
     );
+  }
+
+  /**
+   * 按 userId 查找 license 并触发 applyConfig。
+   * 用于套餐增删改后静默推送最新 packages 到 agent SQLite。
+   *
+   * 失败时只 warn 不抛异常——不阻塞主业务流程（套餐 CRUD 已成功入库）。
+   */
+  async applyConfigSilent(userId: number): Promise<void> {
+    try {
+      // 1. user → customerId
+      const userRows = await this.conn
+        .select({ customerId: userTable.customerId })
+        .from(userTable)
+        .where(eq(userTable.id, userId))
+        .limit(1);
+      if (userRows.length === 0 || userRows[0].customerId == null) return;
+
+      // 2. customerId → licenseId（取第一个未 revoke 的）
+      const licRows = await this.conn
+        .select({ id: licensesTable.id })
+        .from(licensesTable)
+        .where(
+          and(
+            eq(licensesTable.customerId, userRows[0].customerId),
+            isNull(licensesTable.revokedAt),
+          ),
+        )
+        .limit(1);
+      if (licRows.length === 0) return;
+
+      await this.applyConfig(userId, licRows[0].id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`applyConfigSilent user=${userId} 失败（非阻塞）：${msg}`);
+    }
   }
 }

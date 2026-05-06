@@ -28,9 +28,6 @@ import (
 // 与 nest-api `agent.applyConfig` notification 的 params 完全对齐——nest-api
 // 那边用 typescript interface AgentApplyConfigParams，键名 camelCase。这里也
 // 用 camelCase 匹配 jsonrpc 默认风格。
-//
-// MVP 字段集（不含 bitcart——nest-api 还没把 bitcart 配置放进 agent push 流；
-// 后续 T12 会补）。已 push 但 bot 现在不依赖的字段先收下不用，预留向前兼容。
 type applyConfigInput struct {
 	// DatabaseURL 通常和 agent 启动时的 DATABASE_URL env 一致——但显式带上
 	// 让 apply-config 子命令可独立测试，不依赖 env。
@@ -38,6 +35,7 @@ type applyConfigInput struct {
 
 	Platform platformConfigInput `json:"platform"`
 	Bot      botConfigInput      `json:"bot"`
+	Packages []packageInput      `json:"packages"`
 }
 
 type platformConfigInput struct {
@@ -64,6 +62,23 @@ type botConfigInput struct {
 	WelcomeText   string `json:"welcomeText"`
 	MenuConfig    string `json:"menuConfig"`    // 整个 JSON 字符串原样存
 	MessageConfig string `json:"messageConfig"` // 整个 JSON 字符串原样存
+}
+
+// packageInput 对应 nest-api 下发的 energy_packages 行数据（单 agent 的 user_package）。
+// 字段与 SQLite energy_packages 表列名对齐（camelCase → snake_case 在 SQL 里转）。
+type packageInput struct {
+	ID                int    `json:"id"`
+	PlatformPackageID *int   `json:"platformPackageId"`
+	PackageKind       string `json:"packageKind"`
+	PackageName       string `json:"packageName"`
+	EnergyAmount      int    `json:"energyAmount"`
+	DurationHours     int    `json:"durationHours"`
+	PriceSun          string `json:"priceSun"`
+	IdlePriceSun      string `json:"idlePriceSun"`
+	BusyPriceSun      string `json:"busyPriceSun"`
+	Status            string `json:"status"`
+	SortOrder         int    `json:"sortOrder"`
+	Description       string `json:"description"`
 }
 
 // applyConfigFromFile 读 JSON 文件并 apply 到 SQLite。
@@ -95,6 +110,9 @@ func applyConfigFromFile(jsonPath string) error {
 	}
 	if err := upsertBotConfig(db, input.Bot); err != nil {
 		return fmt.Errorf("upsert bot_config: %w", err)
+	}
+	if err := upsertPackages(db, input.Packages); err != nil {
+		return fmt.Errorf("upsert packages: %w", err)
 	}
 	return nil
 }
@@ -181,6 +199,67 @@ WHERE id = 1`
 		b.MessageConfig,
 	)
 	return err
+}
+
+// upsertPackages 全量替换 energy_packages 表内容。
+//
+// 策略：DELETE ALL → INSERT fresh。与 platform/bot 的单例 UPDATE 不同，packages
+// 是多行场景；全量替换保证幂等——nest-api 每次都下发完整列表，不需要增量 diff。
+// 放在一个事务里确保原子性：bot 不会看到半写状态。
+func upsertPackages(db *sql.DB, packages []packageInput) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 清空现有数据（硬删——本地 SQLite 不需要保留历史，主站 PG 是 source of truth）
+	if _, err := tx.Exec("DELETE FROM energy_packages"); err != nil {
+		return fmt.Errorf("delete existing: %w", err)
+	}
+
+	if len(packages) == 0 {
+		return tx.Commit()
+	}
+
+	const insertSQL = `
+INSERT INTO energy_packages (
+  id, platform_package_id, package_kind, package_name,
+  energy_amount, duration_hours, price_sun, idle_price_sun, busy_price_sun,
+  status, sort_order, description, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
+
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		return fmt.Errorf("prepare insert: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, p := range packages {
+		var platPkgID interface{}
+		if p.PlatformPackageID != nil {
+			platPkgID = *p.PlatformPackageID
+		}
+		_, err := stmt.Exec(
+			p.ID,
+			platPkgID,
+			coalesceDefault(p.PackageKind, "user_package"),
+			p.PackageName,
+			p.EnergyAmount,
+			p.DurationHours,
+			coalesceDefault(p.PriceSun, "0"),
+			coalesceDefault(p.IdlePriceSun, p.PriceSun),
+			coalesceDefault(p.BusyPriceSun, p.PriceSun),
+			coalesceDefault(p.Status, "active"),
+			p.SortOrder,
+			p.Description,
+		)
+		if err != nil {
+			return fmt.Errorf("insert package id=%d: %w", p.ID, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 func coalesceDefault(v, fallback string) string {
