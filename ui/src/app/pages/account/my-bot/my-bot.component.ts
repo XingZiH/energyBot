@@ -340,14 +340,11 @@ export class MyBotComponent implements OnInit {
    * 1. 取消该 license 的旧轮询（若有）
    * 2. 标记 actionInFlight + 乐观更新本地 botStatus → UI 立刻进入「启动中/已停止」反馈
    * 3. POST 下发 action
-   * 4. +2s 起每 2s 轮询 findMine()，最多 10 次（合计 22s 窗口）
+   * 4. +2s 起每 2s 轮询 findMine()，最多 15 次（合计 32s 窗口，覆盖 30s 心跳间隔）
    *    - 命中 terminalStatuses（running / stopped / error）→ 立即停止轮询
    *    - 超时仍未稳定 → 停止轮询（可能 agent 离线，状态保持当前最新值）
+   *    - 轮询期间若 API 返回非终态（如 stopped），保持本地乐观值不被覆盖
    * 5. 轮询结束 → 移除 actionInFlight + 清理 trackedPolls
-   *
-   * 为什么不直接乐观置终态：bot.start 的真实路径是 stopped → starting → running，
-   * 中间可能因 token 错误停在 error。直接置 running 会误导用户；置 starting
-   * 既给即时反馈又不假装最终成功。
    */
   private dispatchAction(opts: {
     licenseId: number;
@@ -374,8 +371,8 @@ export class MyBotComponent implements OnInit {
         next: () => {
           // 4. 开始轮询直到状态稳定或超时
           const poll$ = timer(2000, 2000).pipe(
-            // 最多 11 个 tick = ~22s（覆盖最长一次 30s 心跳间隔下的两次心跳）
-            takeWhile((_, idx) => idx < 11),
+            // 最多 15 个 tick = ~30s（覆盖一次完整心跳间隔 30s）
+            takeWhile((_, idx) => idx < 15),
             switchMap(() =>
               this.dataService.findMine().pipe(
                 catchError(() => of(null)), // 单次拉取失败不中断轮询
@@ -399,7 +396,22 @@ export class MyBotComponent implements OnInit {
             .subscribe({
               next: list => {
                 if (list) {
-                  this.agents.set(list);
+                  // 关键：如果 API 返回的状态还不是终态（例如仍为 stopped），
+                  // 保持乐观的 starting 不被覆盖 —— 避免 UI 抖回 "已停止"
+                  const found = list.find(x => x.licenseId === licenseId);
+                  if (found && !terminalStatuses.includes(found.botStatus as any)) {
+                    // 保持 optimistic 状态不变，只更新其他字段
+                    this.agents.set(
+                      list.map(a =>
+                        a.licenseId === licenseId
+                          ? { ...a, botStatus: optimisticStatus }
+                          : a,
+                      ),
+                    );
+                  } else {
+                    // 已到终态 → 直接使用 API 返回的真实数据
+                    this.agents.set(list);
+                  }
                 }
               },
               error: () => { /* 忽略：finalize 兜底 */ },
