@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormBuilder, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import { catchError, finalize } from 'rxjs/operators';
 import { of } from 'rxjs';
@@ -22,12 +22,10 @@ import { NzFormModule } from 'ng-zorro-antd/form';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzInputModule } from 'ng-zorro-antd/input';
 import { NzRadioModule } from 'ng-zorro-antd/radio';
-import { NzSelectModule } from 'ng-zorro-antd/select';
 import { NzSpinModule } from 'ng-zorro-antd/spin';
 import { NzSwitchModule } from 'ng-zorro-antd/switch';
 import { NzTabsModule } from 'ng-zorro-antd/tabs';
 import { NzTagModule } from 'ng-zorro-antd/tag';
-import { NzTooltipModule } from 'ng-zorro-antd/tooltip';
 
 /**
  * 机器人配置页面（v2 顶层容器）。
@@ -68,12 +66,10 @@ import { NzTooltipModule } from 'ng-zorro-antd/tooltip';
     NzIconModule,
     NzInputModule,
     NzRadioModule,
-    NzSelectModule,
     NzSpinModule,
     NzSwitchModule,
     NzTabsModule,
-    NzTagModule,
-    NzTooltipModule
+    NzTagModule
   ]
 })
 export class EnergyRentalAgentBotConfigComponent implements OnInit {
@@ -85,7 +81,6 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
 
   readonly loading = signal(false);
   readonly saving = signal(false);
-  readonly toggling = signal(false);
 
   // Bot 基础层状态
   readonly config = signal<AgentBotConfig | null>(null);
@@ -100,13 +95,7 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
   /** getUiConfig 是否加载失败，用于菜单设计 tab 的降级 UI */
   readonly uiConfigLoadError = signal(false);
 
-  readonly botStatusOptions = [
-    { label: '启用', value: 'enabled' },
-    { label: '停用', value: 'disabled' }
-  ];
-
   readonly form = inject(FormBuilder).nonNullable.group({
-    botStatus: ['disabled', [Validators.required]],
     telegramBotToken: [''],
     telegramBotUsername: [''],
     remark: ['']
@@ -218,7 +207,6 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
         this.initialMenu.set(ui?.menuConfig ?? []);
         this.initialWelcomeText.set(ui?.welcomeText ?? '');
         this.form.patchValue({
-          botStatus: config.botStatus || 'disabled',
           telegramBotToken: '',
           telegramBotUsername: config.telegramBotUsername || '',
           remark: config.remark || ''
@@ -227,10 +215,13 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
   }
 
   /**
-   * 保存 bot 基础层字段（token / status / username / remark）。
+   * 保存 bot 基础层字段（token / username / remark）。
    *
    * 故意不传 menuConfig / messageConfig / welcomeText——这些属于 UiConfigService 的管辖范围，
    * 由 onMenuChange 单独保存，避免同一请求里两个端点的数据字段交叉污染。
+   *
+   * 不再传 botStatus：bot 启停统一由「我的 Bot」页面的 start/stop 触发，
+   * 后端 bot_status 字段仅作为 agent 期望状态记录，不在本页编辑。
    */
   onSaveBot(): void {
     if (!fnCheckForm(this.form)) {
@@ -240,7 +231,6 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
     this.saving.set(true);
     this.dataService
       .updateAgentBotConfig({
-        botStatus: raw.botStatus,
         telegramBotToken: raw.telegramBotToken,
         telegramBotUsername: raw.telegramBotUsername,
         remark: raw.remark
@@ -250,20 +240,6 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
         takeUntilDestroyed(this.destroyRef)
       )
       .subscribe(() => this.loadAll());
-  }
-
-  toggleRuntime(botStatus: 'enabled' | 'disabled'): void {
-    this.toggling.set(true);
-    this.dataService
-      .updateBotRuntimeStatus({ botStatus })
-      .pipe(
-        finalize(() => this.toggling.set(false)),
-        takeUntilDestroyed(this.destroyRef)
-      )
-      .subscribe(() => {
-        this.form.controls.botStatus.setValue(botStatus);
-        this.loadAll();
-      });
   }
 
   /**

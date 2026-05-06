@@ -132,7 +132,6 @@ describe('EnergyRentalAgentBotConfigComponent', () => {
   it('加载成功后 form.patchValue 正确（token 清空、其他字段来自 bot config）', () => {
     component.ngOnInit();
     const raw = component.form.getRawValue();
-    expect(raw.botStatus).toBe('enabled');
     expect(raw.telegramBotToken).toBe(''); // Token 加载后始终留空
     expect(raw.telegramBotUsername).toBe('@my_bot');
     expect(raw.remark).toBe('note');
@@ -167,10 +166,9 @@ describe('EnergyRentalAgentBotConfigComponent', () => {
     expect(component.loading()).toBe(false);
   });
 
-  it('onSaveBot 调用 updateAgentBotConfig，且不传 menuConfig / messageConfig / welcomeText', () => {
+  it('onSaveBot 调用 updateAgentBotConfig，且不传 menuConfig / messageConfig / welcomeText / botStatus', () => {
     component.ngOnInit();
     component.form.patchValue({
-      botStatus: 'disabled',
       telegramBotToken: 'new-token',
       telegramBotUsername: '@new_bot',
       remark: 'new note'
@@ -179,11 +177,11 @@ describe('EnergyRentalAgentBotConfigComponent', () => {
     expect(dataService.updateAgentBotConfig).toHaveBeenCalledTimes(1);
     const payload = dataService.updateAgentBotConfig.calls.mostRecent().args[0];
     expect(payload).toEqual({
-      botStatus: 'disabled',
       telegramBotToken: 'new-token',
       telegramBotUsername: '@new_bot',
       remark: 'new note'
     });
+    expect(payload).not.toEqual(jasmine.objectContaining({ botStatus: jasmine.anything() }));
     expect(payload).not.toEqual(jasmine.objectContaining({ menuConfig: jasmine.anything() }));
     expect(payload).not.toEqual(jasmine.objectContaining({ messageConfig: jasmine.anything() }));
     expect(payload).not.toEqual(jasmine.objectContaining({ welcomeText: jasmine.anything() }));
@@ -247,10 +245,9 @@ describe('EnergyRentalAgentBotConfigComponent', () => {
     expect(uiConfigService.saveUiConfig).not.toHaveBeenCalled();
   });
 
-  it('toggleRuntime 调用 updateBotRuntimeStatus 并刷新数据', () => {
-    component.ngOnInit();
-    component.toggleRuntime('disabled');
-    expect(dataService.updateBotRuntimeStatus).toHaveBeenCalledWith({ botStatus: 'disabled' });
+  it('toggleRuntime 方法已下线：组件不再暴露该方法（启停由「我的 Bot」页负责）', () => {
+    expect((component as unknown as { toggleRuntime?: unknown }).toggleRuntime).toBeUndefined();
+    expect(dataService.updateBotRuntimeStatus).not.toHaveBeenCalled();
   });
 
   it('loading 信号：加载开始为 true，结束为 false', () => {

@@ -24,37 +24,14 @@
           Token {{ statusText(runtime()?.telegramBotTokenConfigured) }}
         </nz-tag>
       </div>
-      <div class="runtime-actions">
-        <button
-          nz-button
-          nz-tooltip
-          nzTooltipTitle="开启机器人：写入期望状态后，agent 会按期望状态自动拉起 bot 进程"
-          nzType="primary"
-          [disabled]="runtime()?.desiredStatus === 'enabled' || !runtime()?.canEnable"
-          [nzLoading]="toggling()"
-          (click)="toggleRuntime('enabled')"
-        >
-          <i nz-icon nzType="poweroff"></i>
-          开启机器人
-        </button>
-        <button
-          nz-button
-          nz-tooltip
-          nzTooltipTitle="关闭机器人：写入期望状态后，agent 会按期望状态自动停止 bot 进程"
-          nzDanger
-          [disabled]="runtime()?.desiredStatus === 'disabled'"
-          [nzLoading]="toggling()"
-          (click)="toggleRuntime('disabled')"
-        >
-          <i nz-icon nzType="pause-circle"></i>
-          关闭机器人
-        </button>
-      </div>
     </div>
 
-    @if (runtime()?.desiredStatus !== 'enabled' && !runtime()?.canEnable) {
-      <nz-alert class="m-b-16" nzMessage="开启前请先保存 Telegram Bot Token。" nzShowIcon nzType="warning"></nz-alert>
-    }
+    <nz-alert
+      class="m-b-16"
+      nzType="info"
+      nzShowIcon
+      nzMessage="启动 / 停止 / 重载 Bot 请到「我的 Bot」页面操作。本页只负责配置 Token、菜单和消息模板。"
+    ></nz-alert>
 
     <nz-descriptions nzSize="small" [nzColumn]="{ xxl: 3, xl: 3, lg: 2, md: 2, sm: 1, xs: 1 }">
       <nz-descriptions-item nzTitle="期望状态">{{ runtime()?.desiredStatusLabel || '-' }}</nz-descriptions-item>
@@ -71,17 +48,6 @@
       <nz-tab nzTitle="基础设置">
         <form nz-form [formGroup]="form">
           <div class="tab-panel">
-            <nz-form-item>
-              <nz-form-label nzRequired>机器人状态</nz-form-label>
-              <nz-form-control>
-                <nz-select formControlName="botStatus">
-                  @for (item of botStatusOptions; track item.value) {
-                    <nz-option [nzLabel]="item.label" [nzValue]="item.value"></nz-option>
-                  }
-                </nz-select>
-              </nz-form-control>
-            </nz-form-item>
-
             <nz-form-item>
               <nz-form-label>Telegram Bot Token</nz-form-label>
               <nz-form-control>
