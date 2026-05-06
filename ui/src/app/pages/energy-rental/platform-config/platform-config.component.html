@@ -31,48 +31,10 @@
 
         <div nz-col [nzLg]="12" [nzXs]="24">
           <nz-form-item>
-            <nz-form-label>JustLend 平台付款私钥</nz-form-label>
-            <nz-form-control>
-              <nz-input-group [nzSuffix]="payerKeyStatus">
-                <input
-                  type="password"
-                  formControlName="justlendPayerPrivateKey"
-                  nz-input
-                  placeholder="JustLend 模式下用于押金、租赁、归还的钱包私钥；留空不修改"
-                />
-              </nz-input-group>
-              <ng-template #payerKeyStatus>
-                <nz-tag [nzColor]="statusColor(config()?.justlendPayerPrivateKeyConfigured)">
-                  {{ statusText(config()?.justlendPayerPrivateKeyConfigured) }}
-                </nz-tag>
-              </ng-template>
-              <div class="field-help">
-                JustLend 模式专用，用于向 JustLend 合约充值和链上付款；必须填写可签名钱包的原始私钥（64 位 hex 或 0x 开头）。
-              </div>
-            </nz-form-control>
-          </nz-form-item>
-        </div>
-
-        <div nz-col [nzLg]="12" [nzXs]="24">
-          <nz-form-item>
-            <nz-form-label>CatFee 平台收款私钥</nz-form-label>
-            <nz-form-control>
-              <nz-input-group [nzSuffix]="catfeePayerKeyStatus">
-                <input
-                  type="password"
-                  formControlName="catfeePayerPrivateKey"
-                  nz-input
-                  placeholder="CatFee 模式下平台收款地址的派生私钥；留空不修改"
-                />
-              </nz-input-group>
-              <ng-template #catfeePayerKeyStatus>
-                <nz-tag [nzColor]="statusColor(config()?.catfeePayerPrivateKeyConfigured)">
-                  {{ statusText(config()?.catfeePayerPrivateKeyConfigured) }}
-                </nz-tag>
-              </ng-template>
-              <div class="field-help">
-                CatFee 模式专用，用于派生「平台收款地址」（用户向此地址打款 TRX/USDT 兑换能量）；必须填写可签名钱包的原始私钥（64 位 hex 或 0x 开头）。
-              </div>
+            <nz-form-label nzRequired>平台统一收款地址</nz-form-label>
+            <nz-form-control nzErrorTip="必须为 TRON Base58 地址（T 开头共 34 位）">
+              <input formControlName="platformReceiveAddress" nz-input placeholder="例如 TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX（T 开头 34 位）" />
+              <div class="field-help"> 所有客户向此地址付款；运营从冷钱包对账，bot 端不持私钥。修改后 30 秒内 agent 会下发到所有 bot。 </div>
             </nz-form-control>
           </nz-form-item>
         </div>
@@ -162,182 +124,135 @@
       </div>
     </nz-card>
 
-    <nz-card class="m-b-16 provider-config-card" nzTitle="服务商配置">
-      <div class="provider-switch-grid">
-        @for (item of providerOptions; track item.value) {
-          <button type="button" class="provider-switch-card" [class.is-active]="activeProvider() === item.value" (click)="selectProvider(item.value)">
-            <span class="provider-switch-icon"><i nz-icon [nzType]="item.icon"></i></span>
-            <span class="provider-switch-main">
-              <span class="provider-switch-title">{{ item.label }}</span>
-              <span class="provider-switch-desc">{{ item.desc }}</span>
-            </span>
-            <nz-tag class="provider-switch-status" [nzColor]="activeProvider() === item.value ? 'blue' : 'default'">
-              {{ activeProvider() === item.value ? '当前使用' : '点击切换' }}
-            </nz-tag>
-          </button>
-        }
-      </div>
+    <nz-card class="m-b-16 provider-config-card" nzTitle="CatFee 服务商配置">
+      <div class="provider-panel">
+        <div class="provider-panel-title">
+          <i nz-icon nzType="api"></i>
+          <span>CatFee API 参数</span>
+        </div>
 
-      @if (activeProvider() === 'justlend') {
-        <div class="provider-panel">
-          <div class="provider-panel-title">
-            <i nz-icon nzType="deployment-unit"></i>
-            <span>JustLend 合约参数</span>
+        <div nz-row [nzGutter]="16">
+          <div nz-col [nzLg]="8" [nzMd]="12" [nzXs]="24">
+            <nz-form-item>
+              <nz-form-label nzRequired>自动激活未激活地址</nz-form-label>
+              <nz-form-control>
+                <nz-select formControlName="catfeeAutoActivate">
+                  @for (item of yesNoOptions; track item.value) {
+                    <nz-option [nzLabel]="item.label" [nzValue]="item.value"></nz-option>
+                  }
+                </nz-select>
+              </nz-form-control>
+            </nz-form-item>
           </div>
+        </div>
 
+        <div class="provider-env-grid">
+          @for (item of catFeeEnvironmentOptions; track item.value) {
+            <button class="provider-switch-card env-card" type="button" [class.is-active]="activeCatFeeEnvironment() === item.value" (click)="selectCatFeeEnvironment(item.value)">
+              <span class="provider-switch-icon"><i nz-icon [nzType]="item.icon"></i></span>
+              <span class="provider-switch-main">
+                <span class="provider-switch-title">{{ item.label }}</span>
+                <span class="provider-switch-desc">{{ item.desc }}</span>
+              </span>
+              <nz-tag class="provider-switch-status" [nzColor]="activeCatFeeEnvironment() === item.value ? 'blue' : 'default'">
+                {{ activeCatFeeEnvironment() === item.value ? '当前环境' : '点击切换' }}
+              </nz-tag>
+            </button>
+          }
+        </div>
+
+        <nz-alert class="m-b-16" nzMessage="CatFee 生产环境和 Nile 测试环境的账号、API Key、API Secret 不互通；测试时先选择 Nile 环境，上线前再切换生产环境。" nzShowIcon nzType="warning"></nz-alert>
+
+        @if (activeCatFeeEnvironment() === 'prod') {
           <div nz-row [nzGutter]="16">
             <div nz-col [nzLg]="12" [nzXs]="24">
               <nz-form-item>
-                <nz-form-label nzRequired>JustLend 合约地址</nz-form-label>
+                <nz-form-label nzRequired>生产 API Base URL</nz-form-label>
                 <nz-form-control>
-                  <input formControlName="justlendContractAddress" nz-input placeholder="能量租赁合约地址" />
+                  <input formControlName="catfeeProdApiBaseUrl" nz-input placeholder="https://api.catfee.io" />
                 </nz-form-control>
               </nz-form-item>
             </div>
-          </div>
-        </div>
-      }
 
-      @if (activeProvider() === 'catfee') {
-        <div class="provider-panel">
-          <div class="provider-panel-title">
-            <i nz-icon nzType="api"></i>
-            <span>CatFee API 参数</span>
-          </div>
-
-          <div nz-row [nzGutter]="16">
-            <div nz-col [nzLg]="8" [nzMd]="12" [nzXs]="24">
+            <div nz-col [nzLg]="12" [nzXs]="24">
               <nz-form-item>
-                <nz-form-label nzRequired>自动激活未激活地址</nz-form-label>
+                <nz-form-label>生产 API Key</nz-form-label>
                 <nz-form-control>
-                  <nz-select formControlName="catfeeAutoActivate">
-                    @for (item of yesNoOptions; track item.value) {
-                      <nz-option [nzLabel]="item.label" [nzValue]="item.value"></nz-option>
-                    }
-                  </nz-select>
+                  <nz-input-group [nzSuffix]="catfeeProdKeyStatus">
+                    <input type="password" formControlName="catfeeProdApiKey" nz-input placeholder="留空不修改生产 API Key" />
+                  </nz-input-group>
+                  <ng-template #catfeeProdKeyStatus>
+                    <nz-tag [nzColor]="statusColor(config()?.catfeeProdApiKeyConfigured)">
+                      {{ statusText(config()?.catfeeProdApiKeyConfigured) }}
+                    </nz-tag>
+                  </ng-template>
+                </nz-form-control>
+              </nz-form-item>
+            </div>
+
+            <div nz-col [nzXs]="24">
+              <nz-form-item>
+                <nz-form-label>生产 API Secret</nz-form-label>
+                <nz-form-control>
+                  <nz-input-group [nzSuffix]="catfeeProdSecretStatus">
+                    <input type="password" formControlName="catfeeProdApiSecret" nz-input placeholder="留空不修改生产 API Secret" />
+                  </nz-input-group>
+                  <ng-template #catfeeProdSecretStatus>
+                    <nz-tag [nzColor]="statusColor(config()?.catfeeProdApiSecretConfigured)">
+                      {{ statusText(config()?.catfeeProdApiSecretConfigured) }}
+                    </nz-tag>
+                  </ng-template>
                 </nz-form-control>
               </nz-form-item>
             </div>
           </div>
+        }
 
-          <div class="provider-env-grid">
-            @for (item of catFeeEnvironmentOptions; track item.value) {
-              <button
-                type="button"
-                class="provider-switch-card env-card"
-                [class.is-active]="activeCatFeeEnvironment() === item.value"
-                (click)="selectCatFeeEnvironment(item.value)"
-              >
-                <span class="provider-switch-icon"><i nz-icon [nzType]="item.icon"></i></span>
-                <span class="provider-switch-main">
-                  <span class="provider-switch-title">{{ item.label }}</span>
-                  <span class="provider-switch-desc">{{ item.desc }}</span>
-                </span>
-                <nz-tag class="provider-switch-status" [nzColor]="activeCatFeeEnvironment() === item.value ? 'blue' : 'default'">
-                  {{ activeCatFeeEnvironment() === item.value ? '当前环境' : '点击切换' }}
-                </nz-tag>
-              </button>
-            }
+        @if (activeCatFeeEnvironment() === 'nile') {
+          <div nz-row [nzGutter]="16">
+            <div nz-col [nzLg]="12" [nzXs]="24">
+              <nz-form-item>
+                <nz-form-label nzRequired>Nile API Base URL</nz-form-label>
+                <nz-form-control>
+                  <input formControlName="catfeeNileApiBaseUrl" nz-input placeholder="https://nile.catfee.io" />
+                </nz-form-control>
+              </nz-form-item>
+            </div>
+
+            <div nz-col [nzLg]="12" [nzXs]="24">
+              <nz-form-item>
+                <nz-form-label>Nile API Key</nz-form-label>
+                <nz-form-control>
+                  <nz-input-group [nzSuffix]="catfeeNileKeyStatus">
+                    <input type="password" formControlName="catfeeNileApiKey" nz-input placeholder="留空不修改 Nile API Key" />
+                  </nz-input-group>
+                  <ng-template #catfeeNileKeyStatus>
+                    <nz-tag [nzColor]="statusColor(config()?.catfeeNileApiKeyConfigured)">
+                      {{ statusText(config()?.catfeeNileApiKeyConfigured) }}
+                    </nz-tag>
+                  </ng-template>
+                </nz-form-control>
+              </nz-form-item>
+            </div>
+
+            <div nz-col [nzXs]="24">
+              <nz-form-item>
+                <nz-form-label>Nile API Secret</nz-form-label>
+                <nz-form-control>
+                  <nz-input-group [nzSuffix]="catfeeNileSecretStatus">
+                    <input type="password" formControlName="catfeeNileApiSecret" nz-input placeholder="留空不修改 Nile API Secret" />
+                  </nz-input-group>
+                  <ng-template #catfeeNileSecretStatus>
+                    <nz-tag [nzColor]="statusColor(config()?.catfeeNileApiSecretConfigured)">
+                      {{ statusText(config()?.catfeeNileApiSecretConfigured) }}
+                    </nz-tag>
+                  </ng-template>
+                </nz-form-control>
+              </nz-form-item>
+            </div>
           </div>
-
-          <nz-alert
-            class="m-b-16"
-            nzMessage="CatFee 生产环境和 Nile 测试环境的账号、API Key、API Secret 不互通；测试时先选择 Nile 环境，上线前再切换生产环境。"
-            nzShowIcon
-            nzType="warning"
-          ></nz-alert>
-
-          @if (activeCatFeeEnvironment() === 'prod') {
-            <div nz-row [nzGutter]="16">
-              <div nz-col [nzLg]="12" [nzXs]="24">
-                <nz-form-item>
-                  <nz-form-label nzRequired>生产 API Base URL</nz-form-label>
-                  <nz-form-control>
-                    <input formControlName="catfeeProdApiBaseUrl" nz-input placeholder="https://api.catfee.io" />
-                  </nz-form-control>
-                </nz-form-item>
-              </div>
-
-              <div nz-col [nzLg]="12" [nzXs]="24">
-                <nz-form-item>
-                  <nz-form-label>生产 API Key</nz-form-label>
-                  <nz-form-control>
-                    <nz-input-group [nzSuffix]="catfeeProdKeyStatus">
-                      <input type="password" formControlName="catfeeProdApiKey" nz-input placeholder="留空不修改生产 API Key" />
-                    </nz-input-group>
-                    <ng-template #catfeeProdKeyStatus>
-                      <nz-tag [nzColor]="statusColor(config()?.catfeeProdApiKeyConfigured)">
-                        {{ statusText(config()?.catfeeProdApiKeyConfigured) }}
-                      </nz-tag>
-                    </ng-template>
-                  </nz-form-control>
-                </nz-form-item>
-              </div>
-
-              <div nz-col [nzXs]="24">
-                <nz-form-item>
-                  <nz-form-label>生产 API Secret</nz-form-label>
-                  <nz-form-control>
-                    <nz-input-group [nzSuffix]="catfeeProdSecretStatus">
-                      <input type="password" formControlName="catfeeProdApiSecret" nz-input placeholder="留空不修改生产 API Secret" />
-                    </nz-input-group>
-                    <ng-template #catfeeProdSecretStatus>
-                      <nz-tag [nzColor]="statusColor(config()?.catfeeProdApiSecretConfigured)">
-                        {{ statusText(config()?.catfeeProdApiSecretConfigured) }}
-                      </nz-tag>
-                    </ng-template>
-                  </nz-form-control>
-                </nz-form-item>
-              </div>
-            </div>
-          }
-
-          @if (activeCatFeeEnvironment() === 'nile') {
-            <div nz-row [nzGutter]="16">
-              <div nz-col [nzLg]="12" [nzXs]="24">
-                <nz-form-item>
-                  <nz-form-label nzRequired>Nile API Base URL</nz-form-label>
-                  <nz-form-control>
-                    <input formControlName="catfeeNileApiBaseUrl" nz-input placeholder="https://nile.catfee.io" />
-                  </nz-form-control>
-                </nz-form-item>
-              </div>
-
-              <div nz-col [nzLg]="12" [nzXs]="24">
-                <nz-form-item>
-                  <nz-form-label>Nile API Key</nz-form-label>
-                  <nz-form-control>
-                    <nz-input-group [nzSuffix]="catfeeNileKeyStatus">
-                      <input type="password" formControlName="catfeeNileApiKey" nz-input placeholder="留空不修改 Nile API Key" />
-                    </nz-input-group>
-                    <ng-template #catfeeNileKeyStatus>
-                      <nz-tag [nzColor]="statusColor(config()?.catfeeNileApiKeyConfigured)">
-                        {{ statusText(config()?.catfeeNileApiKeyConfigured) }}
-                      </nz-tag>
-                    </ng-template>
-                  </nz-form-control>
-                </nz-form-item>
-              </div>
-
-              <div nz-col [nzXs]="24">
-                <nz-form-item>
-                  <nz-form-label>Nile API Secret</nz-form-label>
-                  <nz-form-control>
-                    <nz-input-group [nzSuffix]="catfeeNileSecretStatus">
-                      <input type="password" formControlName="catfeeNileApiSecret" nz-input placeholder="留空不修改 Nile API Secret" />
-                    </nz-input-group>
-                    <ng-template #catfeeNileSecretStatus>
-                      <nz-tag [nzColor]="statusColor(config()?.catfeeNileApiSecretConfigured)">
-                        {{ statusText(config()?.catfeeNileApiSecretConfigured) }}
-                      </nz-tag>
-                    </ng-template>
-                  </nz-form-control>
-                </nz-form-item>
-              </div>
-            </div>
-          }
-        </div>
-      }
+        }
+      </div>
     </nz-card>
 
     <nz-card class="m-b-16" nzTitle="订单与任务参数">

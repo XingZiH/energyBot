@@ -34,7 +34,6 @@ type Bot struct {
 	receiveAddress     string
 	tronAPIBaseURL     string
 	tronAPIKey         string
-	energyProvider     string
 	selectedPackageIDs map[int64]int
 	pendingAddressOps  map[int64]pendingAddressOperation
 	dispatcher         *actions.Dispatcher
@@ -243,7 +242,6 @@ func newBot(cfg config.Config, db *sql.DB, logger *log.Logger, agentID int, toke
 		receiveAddress:     cfg.PlatformReceiveAddress,
 		tronAPIBaseURL:     strings.TrimSpace(cfg.TronAPIBaseURL),
 		tronAPIKey:         strings.TrimSpace(cfg.TronAPIKey),
-		energyProvider:     strings.TrimSpace(cfg.EnergyProvider),
 		selectedPackageIDs: map[int64]int{},
 		pendingAddressOps:  map[int64]pendingAddressOperation{},
 	}
@@ -1025,7 +1023,7 @@ insert into energy_orders (
   order_no, package_id, package_name, buyer_address, receiver_address,
   energy_amount, duration_hours, payment_amount_sun, payment_expires_at,
   status, return_status, energy_provider, remark, created_at, updated_at
-) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', 'none', ?10, ?11, ?12, ?12)`,
+) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', 'none', 'catfee', ?10, ?11, ?11)`,
 		orderNo,
 		pkg.ID,
 		pkg.PackageName,
@@ -1035,7 +1033,6 @@ insert into energy_orders (
 		pkg.DurationHours,
 		pkg.PriceSun,
 		expiresAt,
-		b.energyProvider,
 		fmt.Sprintf("telegram_chat_id=%d", chatID),
 		now,
 	)

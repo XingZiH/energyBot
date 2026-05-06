@@ -25,8 +25,6 @@ import {
   EnergyOrderFiltersDto,
   EnergyPackageFiltersDto,
   EstimateEnergyPackageDto,
-  PreviewProviderRechargeDto,
-  RechargeProviderBalanceDto,
   RunLinkTestDto,
   ReturnTaskFiltersDto,
   UpdateEnergyOrderDto,
@@ -132,7 +130,6 @@ interface ConfirmAgentRechargePaymentInput {
 const platformConfigDefaults = {
   botStatus: 'disabled',
   tronApiBaseUrl: 'https://api.trongrid.io',
-  energyProvider: 'justlend',
   catfeeEnvironment: 'nile',
   catfeeProdApiBaseUrl: 'https://api.catfee.io',
   catfeeNileApiBaseUrl: 'https://nile.catfee.io',
@@ -146,15 +143,12 @@ const platformConfigDefaults = {
   bitcartCurrency: 'TRX',
 };
 
-const MIN_PACKAGE_ENERGY_AMOUNT = 1;
 const MIN_CATFEE_ENERGY_AMOUNT = 65000;
-const MIN_JUSTLEND_ENERGY_AMOUNT = 100000;
 const MIN_PROVIDER_BALANCE_RESERVE_SUN = 10_000_000;
 const LINK_TEST_DEFAULT_ENERGY_AMOUNT = MIN_CATFEE_ENERGY_AMOUNT;
 const LINK_TEST_ORDER_POLL_ATTEMPTS = 6;
 const LINK_TEST_ORDER_POLL_INTERVAL_MS = 3_000;
 const CATFEE_GET_RETRY_ATTEMPTS = 2;
-const JUSTLEND_DASHBOARD_URL = 'https://labc.ablesdxd.link/strx/dashboard';
 const MAX_ACTIVE_PENDING_RECHARGE_ORDERS_PER_AGENT = 3;
 const MAX_BITCART_PAYABLE_AMOUNT_OFFSET_SUN = 999;
 const BOT_RUNTIME_HEARTBEAT_STALE_MS = 90_000;
@@ -339,56 +333,12 @@ export class EnergyRentalService {
     }
 
     const config = await this.findPlatformConfigRow();
-    const provider = normalizeProvider(config?.energyProvider);
-    this.assertPackageAmount(energyAmount, provider);
-    if (provider === 'catfee') {
-      return this.estimateCatFeePackage(config, {
-        energyAmount,
-        durationHours,
-        salePriceTrx,
-      });
-    }
-
-    const dashboard = await this.fetchJustLendDashboard();
-    const energyRentPerTrx = positiveNumber(
-      dashboard.energyRentPerTrx,
-      'energyRentPerTrx',
-    );
-    const energyStakePerTrx = positiveNumber(
-      dashboard.energyStakePerTrx,
-      'energyStakePerTrx',
-    );
-    const rentFeeTrx = (energyAmount / energyRentPerTrx) * (durationHours / 24);
-    const securityDepositTrx = energyAmount / energyRentPerTrx;
-    const delegatedTrx = energyAmount / energyStakePerTrx;
-    const liquidationReserveTrx = Math.max(delegatedTrx * 0.00008, 20);
-    const platformCapitalTrx = securityDepositTrx + liquidationReserveTrx;
-    const totalPrepayTrx = rentFeeTrx + platformCapitalTrx;
-    const profitTrx = salePriceTrx - rentFeeTrx;
-
-    return {
+    this.assertPackageAmount(energyAmount);
+    return this.estimateCatFeePackage(config, {
       energyAmount,
       durationHours,
-      minEnergyAmount: MIN_JUSTLEND_ENERGY_AMOUNT,
-      energyRentPerTrx: roundTrx(energyRentPerTrx),
-      energyStakePerTrx: roundTrx(energyStakePerTrx),
-      unitDailyPriceTrx: roundTrx(MIN_JUSTLEND_ENERGY_AMOUNT / energyRentPerTrx),
-      rentFeeTrx: roundTrx(rentFeeTrx),
-      securityDepositTrx: roundTrx(securityDepositTrx),
-      liquidationReserveTrx: roundTrx(liquidationReserveTrx),
-      totalPrepayTrx: roundTrx(totalPrepayTrx),
-      platformCapitalTrx: roundTrx(platformCapitalTrx),
-      delegatedTrx: roundTrx(delegatedTrx),
-      salePriceTrx: roundTrx(salePriceTrx),
-      profitTrx: roundTrx(profitTrx),
-      profitRate:
-        salePriceTrx > 0 ? roundTrx((profitTrx / salePriceTrx) * 100) : 0,
-      provider: 'justlend',
-      providerLabel: 'JustLend',
-      trxPriceUsd: numberOrNull(dashboard.trxPrice),
-      source: JUSTLEND_DASHBOARD_URL,
-      estimatedAt: new Date().toISOString(),
-    };
+      salePriceTrx,
+    });
   }
 
   async createPackage(
@@ -410,11 +360,7 @@ export class EnergyRentalService {
   }
 
   async createPlatformPrice(data: CreateEnergyPackageDto) {
-    const config = await this.findPlatformConfigRow();
-    this.assertPackageAmount(
-      data.energyAmount,
-      normalizeProvider(config?.energyProvider),
-    );
+    this.assertPackageAmount(data.energyAmount);
     await (this.conn as any)
       .insert(energyPackagesTable)
       .values({
@@ -455,11 +401,7 @@ export class EnergyRentalService {
       throw new BadRequestException('平台价格不存在或无权编辑');
     }
     if (obj.energyAmount !== undefined && obj.energyAmount !== null) {
-      const config = await this.findPlatformConfigRow();
-      this.assertPackageAmount(
-        obj.energyAmount,
-        normalizeProvider(config?.energyProvider),
-      );
+      this.assertPackageAmount(obj.energyAmount);
     }
     await this.conn
       .update(energyPackagesTable)
@@ -661,13 +603,7 @@ export class EnergyRentalService {
         row?.tronApiBaseUrl ?? platformConfigDefaults.tronApiBaseUrl,
       tronApiKey: '',
       tronApiKeyConfigured: hasValue(row?.tronApiKey),
-      justlendContractAddress: row?.justlendContractAddress ?? '',
-      justlendPayerPrivateKey: '',
-      justlendPayerPrivateKeyConfigured: hasValue(row?.justlendPayerPrivateKey),
-      catfeePayerPrivateKey: '',
-      catfeePayerPrivateKeyConfigured: hasValue(row?.catfeePayerPrivateKey),
-      energyProvider:
-        row?.energyProvider ?? platformConfigDefaults.energyProvider,
+      platformReceiveAddress: row?.platformReceiveAddress ?? '',
       catfeeEnvironment:
         row?.catfeeEnvironment ?? platformConfigDefaults.catfeeEnvironment,
       catfeeProdApiBaseUrl:
@@ -1536,7 +1472,7 @@ export class EnergyRentalService {
       data.energyAmount ?? LINK_TEST_DEFAULT_ENERGY_AMOUNT,
     );
     const durationHours = Number(data.durationHours ?? 1);
-    this.assertPackageAmount(energyAmount, 'catfee');
+    this.assertPackageAmount(energyAmount);
     if (durationHours !== 1) {
       throw new BadRequestException('链路测试仅支持 CatFee 1 小时租赁参数');
     }
@@ -1560,7 +1496,7 @@ export class EnergyRentalService {
         : 'Nile API Key 或 Secret 未配置',
       details: {
         apiBaseUrl: catFee.apiBaseUrl,
-        activeProvider: normalizeProvider(config?.energyProvider),
+        activeProvider: 'catfee',
         activeEnvironment: normalizeCatFeeEnvironment(config?.catfeeEnvironment),
         keyConfigured: hasValue(catFee.apiKey),
         secretConfigured: hasValue(catFee.apiSecret),
@@ -1790,180 +1726,6 @@ export class EnergyRentalService {
     return latestOrder;
   }
 
-  async rechargeProviderBalance(data: RechargeProviderBalanceDto) {
-    const context = await this.buildProviderRechargeContext(data);
-    const fee = await this.estimateTrxTransferFee({
-      ...context,
-      toAddress: context.rechargeAddress,
-    });
-    const estimatedTotalSun = context.amountSun + fee.estimatedFeeSun;
-    if (fee.walletBalanceSun !== null && fee.walletBalanceSun < estimatedTotalSun) {
-      throw new BadRequestException(
-        `平台钱包余额不足，预计需要 ${roundTrx(estimatedTotalSun / 1_000_000)} TRX，当前余额 ${roundTrx(fee.walletBalanceSun / 1_000_000)} TRX`,
-      );
-    }
-
-    const transfer = await this.sendTrxTransfer({
-      privateKey: context.privateKey,
-      fromAddress: context.fromAddress,
-      toAddress: context.rechargeAddress,
-      amountSun: context.amountSun,
-      tronApiBaseUrl: context.tronApiBaseUrl,
-      tronApiKey: context.tronApiKey,
-    });
-
-    await (this.conn as any).insert(energyWalletTransactionsTable).values({
-      txHash: transfer.txHash,
-      walletAddress: transfer.fromAddress,
-      direction: 'out',
-      transactionType: 'provider_recharge',
-      amountSun: String(context.amountSun),
-      status: 'confirmed',
-      confirmedAt: new Date(),
-      remark: `CatFee 生产环境充值 ${roundTrx(context.amountSun / 1_000_000)} TRX，预计手续费 ${fee.estimatedFeeTrx} TRX，充值地址 ${context.rechargeAddress}`,
-    });
-
-    return {
-      provider: 'catfee',
-      providerLabel: 'CatFee',
-      channel: 'prod',
-      channelLabel: catFeeChannelLabel('prod'),
-      amountSun: context.amountSun,
-      amountTrx: roundTrx(context.amountSun / 1_000_000),
-      estimatedFeeSun: fee.estimatedFeeSun,
-      estimatedFeeTrx: fee.estimatedFeeTrx,
-      estimatedTotalSun,
-      estimatedTotalTrx: roundTrx(estimatedTotalSun / 1_000_000),
-      walletBalanceSun: fee.walletBalanceSun,
-      walletBalanceTrx:
-        fee.walletBalanceSun === null
-          ? null
-          : roundTrx(fee.walletBalanceSun / 1_000_000),
-      hasEnoughBalance: fee.hasEnoughBalance,
-      bandwidthBytes: fee.bandwidthBytes,
-      availableBandwidth: fee.availableBandwidth,
-      bandwidthPriceSun: fee.bandwidthPriceSun,
-      accountCreateFeeSun: fee.accountCreateFeeSun,
-      fromAddress: transfer.fromAddress,
-      rechargeAddress: context.rechargeAddress,
-      txHash: transfer.txHash,
-      status: 'submitted',
-      submittedAt: new Date().toISOString(),
-    };
-  }
-
-  async previewProviderRecharge(data: PreviewProviderRechargeDto) {
-    const context = await this.buildProviderRechargeContext(data);
-    const fee = await this.estimateTrxTransferFee({
-      ...context,
-      toAddress: context.rechargeAddress,
-    });
-    const estimatedTotalSun = context.amountSun + fee.estimatedFeeSun;
-
-    return {
-      provider: 'catfee',
-      providerLabel: 'CatFee',
-      channel: 'prod',
-      channelLabel: catFeeChannelLabel('prod'),
-      amountSun: context.amountSun,
-      amountTrx: roundTrx(context.amountSun / 1_000_000),
-      estimatedFeeSun: fee.estimatedFeeSun,
-      estimatedFeeTrx: fee.estimatedFeeTrx,
-      estimatedTotalSun,
-      estimatedTotalTrx: roundTrx(estimatedTotalSun / 1_000_000),
-      walletBalanceSun: fee.walletBalanceSun,
-      walletBalanceTrx:
-        fee.walletBalanceSun === null
-          ? null
-          : roundTrx(fee.walletBalanceSun / 1_000_000),
-      hasEnoughBalance: fee.hasEnoughBalance,
-      bandwidthBytes: fee.bandwidthBytes,
-      availableBandwidth: fee.availableBandwidth,
-      bandwidthPriceSun: fee.bandwidthPriceSun,
-      accountCreateFeeSun: fee.accountCreateFeeSun,
-      fromAddress: context.fromAddress,
-      rechargeAddress: context.rechargeAddress,
-      feeNote: '手续费为按当前 TRON 带宽和链上参数预估，最终扣费以链上交易结果为准。',
-      previewedAt: new Date().toISOString(),
-    };
-  }
-
-  private async buildProviderRechargeContext(data: RechargeProviderBalanceDto) {
-    const provider = normalizeProvider(data.provider ?? 'catfee');
-    if (provider !== 'catfee') {
-      throw new BadRequestException('当前仅支持 CatFee 服务商充值');
-    }
-
-    const amountSun = trxToSun(data.amountTrx);
-    if (amountSun <= 0) {
-      throw new BadRequestException('充值金额必须大于 0 TRX');
-    }
-
-    const config = await this.findPlatformConfigRow();
-    const catFee = catFeeConfigFor(config, 'prod');
-    if (!hasValue(catFee.apiKey) || !hasValue(catFee.apiSecret)) {
-      throw new BadRequestException('CatFee 生产环境 API Key / Secret 未配置');
-    }
-
-    const account = sanitizeCatFeeAccount(
-      await this.fetchCatFeeData<Row>(catFee, 'GET', '/v1/account'),
-    );
-    if (!hasValue(account.rechargeAddress)) {
-      throw new BadRequestException('CatFee 生产环境充值地址为空');
-    }
-
-    const rawPrivateKey = String(config?.justlendPayerPrivateKey ?? '').trim();
-    if (!hasValue(rawPrivateKey)) {
-      throw new BadRequestException('平台付款私钥未配置');
-    }
-    const privateKey = normalizeTronPrivateKey(rawPrivateKey);
-    const tronApiBaseUrl =
-      config?.tronApiBaseUrl ?? platformConfigDefaults.tronApiBaseUrl;
-    const tronApiKey = String(config?.tronApiKey ?? '').trim();
-    const fromAddress = await this.deriveTronAddressFromPrivateKey({
-      privateKey,
-      tronApiBaseUrl,
-      tronApiKey,
-    });
-
-    return {
-      privateKey,
-      fromAddress,
-      rechargeAddress: account.rechargeAddress,
-      amountSun,
-      tronApiBaseUrl,
-      tronApiKey,
-    };
-  }
-
-  private async deriveTronAddressFromPrivateKey({
-    privateKey,
-    tronApiBaseUrl,
-    tronApiKey,
-  }: {
-    privateKey: string;
-    tronApiBaseUrl: string;
-    tronApiKey?: string;
-  }) {
-    try {
-      const normalizedPrivateKey = normalizeTronPrivateKey(privateKey);
-      const tronWeb = await this.createTronWeb({
-        tronApiBaseUrl,
-        tronApiKey,
-        privateKey: normalizedPrivateKey,
-      });
-      const address = tronWeb.address.fromPrivateKey(normalizedPrivateKey);
-      if (!tronWeb.isAddress(address)) {
-        throw new Error('invalid derived address');
-      }
-      return String(address);
-    } catch {
-      throw new BadRequestException(
-        '平台付款私钥格式不正确，请填写 64 位十六进制私钥，不要填写助记词、钱包地址或 TRON API Key',
-      );
-    }
-  }
-
   private async findById(table: unknown, id: number) {
     const rows = await this.getRows<Row>(table);
     return rows.find((item) => Number(item.id) === id) ?? null;
@@ -2163,11 +1925,7 @@ export class EnergyRentalService {
   private async getProviderBalanceMonitors(
     config: Row | null,
   ): Promise<ProviderBalanceMonitor[]> {
-    const monitors: ProviderBalanceMonitor[] = [];
-    if (normalizeProvider(config?.energyProvider) === 'catfee') {
-      monitors.push(await this.getCatFeeBalanceMonitor(config));
-    }
-    return monitors;
+    return [await this.getCatFeeBalanceMonitor(config)];
   }
 
   private async getCatFeeBalanceMonitor(
@@ -2228,219 +1986,13 @@ export class EnergyRentalService {
     }
   }
 
-  private async estimateTrxTransferFee({
-    privateKey,
-    fromAddress,
-    toAddress,
-    amountSun,
-    tronApiBaseUrl,
-    tronApiKey,
-  }: {
-    privateKey?: string;
-    fromAddress: string;
-    toAddress: string;
-    amountSun: number;
-    tronApiBaseUrl: string;
-    tronApiKey?: string;
-  }) {
-    const tronWeb = await this.createTronWeb({
-      tronApiBaseUrl,
-      tronApiKey,
-    });
-    if (!tronWeb.isAddress(fromAddress)) {
-      throw new BadRequestException('平台付款钱包地址不是有效 TRON 地址');
-    }
-    if (hasValue(privateKey)) {
-      const normalizedPrivateKey = normalizeTronPrivateKey(privateKey);
-      let derivedAddress = '';
-      try {
-        derivedAddress = tronWeb.address.fromPrivateKey(normalizedPrivateKey);
-      } catch {
-        throw new BadRequestException(
-          '平台付款私钥格式不正确，请填写 64 位十六进制私钥',
-        );
-      }
-      if (String(derivedAddress) !== fromAddress) {
-        throw new BadRequestException('付款钱包地址校验失败');
-      }
-    }
-    if (!tronWeb.isAddress(toAddress)) {
-      throw new BadRequestException('CatFee 充值地址不是有效 TRON 地址');
-    }
-    if (amountSun <= 0) {
-      throw new BadRequestException('充值金额必须大于 0 TRX');
-    }
-
-    const [resources, chainParameters, toAccount, walletBalanceRaw] = await Promise.all([
-      tronWeb.trx.getAccountResources(fromAddress).catch(() => ({})),
-      tronWeb.trx.getChainParameters().catch(() => []),
-      tronWeb.trx.getAccount(toAddress).catch(() => null),
-      tronWeb.trx.getBalance(fromAddress).catch(() => null),
-    ]);
-    const bandwidthBytes = 350;
-    const freeNetRemaining = Math.max(
-      0,
-      Number(resources?.freeNetLimit ?? 0) - Number(resources?.freeNetUsed ?? 0),
-    );
-    const paidNetRemaining = Math.max(
-      0,
-      Number(resources?.NetLimit ?? 0) - Number(resources?.NetUsed ?? 0),
-    );
-    const availableBandwidth = Math.floor(freeNetRemaining + paidNetRemaining);
-    const bandwidthPriceSun = chainParameterValue(
-      chainParameters,
-      'getTransactionFee',
-      1000,
-    );
-    const accountCreateFeeSun = toAccount?.address
-      ? 0
-      : chainParameterValue(
-          chainParameters,
-          'getCreateNewAccountFeeInSystemContract',
-          1_000_000,
-        );
-    const bandwidthFeeSun =
-      Math.max(0, bandwidthBytes - availableBandwidth) * bandwidthPriceSun;
-    const estimatedFeeSun = Math.max(
-      0,
-      Math.ceil(bandwidthFeeSun + accountCreateFeeSun),
-    );
-    const walletBalanceSun = normalizeNullableSun(walletBalanceRaw);
-    const estimatedTotalSun = amountSun + estimatedFeeSun;
-
-    return {
-      estimatedFeeSun,
-      estimatedFeeTrx: roundTrx(estimatedFeeSun / 1_000_000),
-      walletBalanceSun,
-      hasEnoughBalance:
-        walletBalanceSun === null ? null : walletBalanceSun >= estimatedTotalSun,
-      bandwidthBytes,
-      availableBandwidth,
-      bandwidthPriceSun,
-      accountCreateFeeSun,
-    };
-  }
-
-  private async createTronWeb({
-    tronApiBaseUrl,
-    tronApiKey,
-    privateKey,
-  }: {
-    tronApiBaseUrl: string;
-    tronApiKey?: string;
-    privateKey?: string;
-  }) {
-    const normalizedPrivateKey = hasValue(privateKey)
-      ? normalizeTronPrivateKey(privateKey)
-      : undefined;
-    const tronWebModule = await import('tronweb');
-    const TronWebCtor =
-      (tronWebModule as any).TronWeb ??
-      (tronWebModule as any).default ??
-      tronWebModule;
-    return new TronWebCtor({
-      fullHost: trimTrailingSlash(tronApiBaseUrl),
-      headers: hasValue(tronApiKey)
-        ? { 'TRON-PRO-API-KEY': String(tronApiKey).trim() }
-        : undefined,
-      privateKey: normalizedPrivateKey,
-    });
-  }
-
-  private async sendTrxTransfer({
-    privateKey,
-    fromAddress,
-    toAddress,
-    amountSun,
-    tronApiBaseUrl,
-    tronApiKey,
-  }: {
-    privateKey: string;
-    fromAddress: string;
-    toAddress: string;
-    amountSun: number;
-    tronApiBaseUrl: string;
-    tronApiKey?: string;
-  }): Promise<{ txHash: string; fromAddress: string }> {
-    const normalizedPrivateKey = normalizeTronPrivateKey(privateKey);
-    const tronWeb = await this.createTronWeb({
-      tronApiBaseUrl,
-      tronApiKey,
-      privateKey: normalizedPrivateKey,
-    });
-
-    if (!tronWeb.isAddress(toAddress)) {
-      throw new BadRequestException('CatFee 充值地址不是有效 TRON 地址');
-    }
-
-    let derivedAddress = '';
-    try {
-      derivedAddress = tronWeb.address.fromPrivateKey(normalizedPrivateKey);
-    } catch {
-      throw new BadRequestException(
-        '平台付款私钥格式不正确，请填写 64 位十六进制私钥',
-      );
-    }
-    if (String(derivedAddress) !== fromAddress) {
-      throw new BadRequestException('付款钱包地址校验失败');
-    }
-
-    const result = await tronWeb.trx.sendTransaction(
-      toAddress,
-      amountSun,
-      normalizedPrivateKey,
-    );
-    if (!result?.result) {
-      throw new BadRequestException(
-        result?.message
-          ? `TRON 转账失败：${String(result.message)}`
-          : 'TRON 转账失败',
-      );
-    }
-
-    const txHash = result.txid ?? result.transaction?.txID;
-    if (!hasValue(txHash)) {
-      throw new BadRequestException('TRON 转账未返回交易哈希');
-    }
-
-    return {
-      txHash: String(txHash),
-      fromAddress,
-    };
-  }
-
-  private assertPackageAmount(energyAmount?: number, provider = 'justlend'): void {
+  private assertPackageAmount(energyAmount?: number): void {
     const value = Number(energyAmount);
-    const normalizedProvider = normalizeProvider(provider);
-    const minEnergyAmount =
-      normalizedProvider === 'justlend'
-        ? MIN_JUSTLEND_ENERGY_AMOUNT
-        : normalizedProvider === 'catfee'
-          ? MIN_CATFEE_ENERGY_AMOUNT
-          : MIN_PACKAGE_ENERGY_AMOUNT;
-    if (!Number.isFinite(value) || value < minEnergyAmount) {
-      const providerLabel =
-        normalizedProvider === 'justlend'
-          ? 'JustLend'
-          : normalizedProvider === 'catfee'
-            ? 'CatFee'
-            : '当前服务商';
+    if (!Number.isFinite(value) || value < MIN_CATFEE_ENERGY_AMOUNT) {
       throw new BadRequestException(
-        `${providerLabel} 套餐能量不能低于 ${minEnergyAmount}`,
+        `CatFee 套餐能量不能低于 ${MIN_CATFEE_ENERGY_AMOUNT}`,
       );
     }
-  }
-
-  private async fetchJustLendDashboard(): Promise<Row> {
-    const response = await fetch(JUSTLEND_DASHBOARD_URL);
-    if (!response.ok) {
-      throw new BadRequestException('JustLend 实时参数获取失败');
-    }
-    const body = (await response.json()) as Row;
-    if (Number(body?.code) !== 0 || !body?.data) {
-      throw new BadRequestException('JustLend 实时参数返回异常');
-    }
-    return body.data as Row;
   }
 
   private async estimateCatFeePackage(
@@ -2572,8 +2124,7 @@ export class EnergyRentalService {
 
     setTrimmed(values, 'botStatus', data.botStatus);
     setTrimmed(values, 'tronApiBaseUrl', data.tronApiBaseUrl);
-    setTrimmed(values, 'justlendContractAddress', data.justlendContractAddress);
-    setTrimmed(values, 'energyProvider', data.energyProvider);
+    setTrimmed(values, 'platformReceiveAddress', data.platformReceiveAddress);
     setTrimmed(values, 'catfeeEnvironment', data.catfeeEnvironment);
     setTrimmed(values, 'catfeeProdApiBaseUrl', data.catfeeProdApiBaseUrl);
     setTrimmed(values, 'catfeeNileApiBaseUrl', data.catfeeNileApiBaseUrl);
@@ -2594,8 +2145,6 @@ export class EnergyRentalService {
 
     setSecret(values, 'telegramBotToken', data.telegramBotToken);
     setSecret(values, 'tronApiKey', data.tronApiKey);
-    setSecret(values, 'justlendPayerPrivateKey', data.justlendPayerPrivateKey);
-    setSecret(values, 'catfeePayerPrivateKey', data.catfeePayerPrivateKey);
     setSecret(values, 'catfeeProdApiKey', data.catfeeProdApiKey);
     setSecret(values, 'catfeeProdApiSecret', data.catfeeProdApiSecret);
     setSecret(values, 'catfeeNileApiKey', data.catfeeNileApiKey);
@@ -2626,11 +2175,7 @@ export class EnergyRentalService {
   }
 
   private async createAdminPackage(data: CreateEnergyPackageDto) {
-    const config = await this.findPlatformConfigRow();
-    this.assertPackageAmount(
-      data.energyAmount,
-      normalizeProvider(config?.energyProvider),
-    );
+    this.assertPackageAmount(data.energyAmount);
     await (this.conn as any).insert(energyPackagesTable).values({
       packageKind: PACKAGE_KIND_ADMIN_PACKAGE,
       agentId: null,
@@ -2650,11 +2195,7 @@ export class EnergyRentalService {
       throw new BadRequestException('套餐不存在或无权编辑');
     }
     if (data.energyAmount !== undefined && data.energyAmount !== null) {
-      const config = await this.findPlatformConfigRow();
-      this.assertPackageAmount(
-        data.energyAmount,
-        normalizeProvider(config?.energyProvider),
-      );
+      this.assertPackageAmount(data.energyAmount);
     }
     await this.conn
       .update(energyPackagesTable)
@@ -3237,7 +2778,6 @@ function sanitizeOrderForScope(row: Row, scope: AccessScope) {
     return row;
   }
   const {
-    energyProvider,
     externalOrderId,
     externalProviderEnvironment,
     externalStatus,
@@ -3414,33 +2954,9 @@ function safeEqual(a: string, b: string) {
   return timingSafeEqual(left, right);
 }
 
-function normalizeTronPrivateKey(value: unknown) {
-  const key = String(value ?? '').replace(/\s+/g, '');
-  const normalized = key.replace(/^0x/i, '');
-  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
-    throw new BadRequestException(
-      '平台付款私钥格式不正确，请填写 64 位十六进制私钥，不要填写助记词、钱包地址或 TRON API Key',
-    );
-  }
-  return normalized;
-}
-
 function numberOrDefault(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function numberOrNull(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function positiveNumber(value: unknown, fieldName: string) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new BadRequestException(`JustLend 参数异常：${fieldName}`);
-  }
-  return parsed;
 }
 
 function positivePriceText(value: unknown, fieldName: string) {
@@ -3450,11 +2966,6 @@ function positivePriceText(value: unknown, fieldName: string) {
     throw new BadRequestException(`${fieldName}必须大于 0`);
   }
   return text;
-}
-
-function normalizeProvider(value: unknown) {
-  const provider = String(value ?? '').trim().toLowerCase();
-  return provider || platformConfigDefaults.energyProvider;
 }
 
 function normalizeCatFeeEnvironment(value: unknown) {
@@ -3476,23 +2987,6 @@ function nonNegativeNumber(value: unknown) {
 
 function providerBalanceReserveSun(value: unknown) {
   return Math.max(nonNegativeNumber(value), MIN_PROVIDER_BALANCE_RESERVE_SUN);
-}
-
-function normalizeNullableSun(value: unknown) {
-  if (value === null || value === undefined) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function chainParameterValue(
-  parameters: unknown,
-  key: string,
-  fallback: number,
-) {
-  const items = Array.isArray(parameters) ? parameters : [];
-  const found = items.find((item: Row) => item?.key === key);
-  const parsed = Number(found?.value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function activeCatFeeConfig(row: Row | null) {

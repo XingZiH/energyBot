@@ -25,8 +25,6 @@ import {
   EnergyPackageFiltersDto,
   EstimateEnergyPackageDto,
   CreateEnergyPackageDto,
-  PreviewProviderRechargeDto,
-  RechargeProviderBalanceDto,
   RunLinkTestDto,
   ReturnTaskFiltersDto,
   UpdateBotRuntimeStatusDto,
@@ -278,24 +276,6 @@ export class EnergyRentalController {
   @Permission('default:energy-rental:link-test')
   async runLinkTest(@Body() runDto: RunLinkTestDto) {
     const data = await this.energyRentalService.runLinkTest(runDto);
-    return ResultData.success(data);
-  }
-
-  @Post('provider-recharge/preview')
-  @UseGuards(JwtGuard, AuthGuard)
-  @Permission('default:energy-rental:platform-config')
-  async previewProviderRecharge(@Body() previewDto: PreviewProviderRechargeDto) {
-    const data =
-      await this.energyRentalService.previewProviderRecharge(previewDto);
-    return ResultData.success(data);
-  }
-
-  @Post('provider-recharge')
-  @UseGuards(JwtGuard, AuthGuard)
-  @Permission('default:energy-rental:platform-config:edit')
-  async rechargeProviderBalance(@Body() rechargeDto: RechargeProviderBalanceDto) {
-    const data =
-      await this.energyRentalService.rechargeProviderBalance(rechargeDto);
     return ResultData.success(data);
   }
 

@@ -29,9 +29,6 @@ function createReadConn(rowsByTable: Map<unknown, unknown[]>) {
 }
 
 describe('EnergyRentalService', () => {
-  const validPrivateKey =
-    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-
   afterEach(() => {
     jest.restoreAllMocks();
   });
@@ -114,7 +111,13 @@ describe('EnergyRentalService', () => {
       totalRevenueSun: 7000000,
       walletExpenseSun: 2000000,
       walletIncomeSun: 12000000,
-      providerBalanceMonitors: [],
+      providerBalanceMonitors: [
+        expect.objectContaining({
+          provider: 'catfee',
+          providerLabel: 'CatFee',
+          status: 'unconfigured',
+        }),
+      ],
     });
   });
 
@@ -144,7 +147,6 @@ describe('EnergyRentalService', () => {
           [
             {
               id: 1,
-              energyProvider: 'catfee',
               catfeeEnvironment: 'prod',
               catfeeProdApiBaseUrl: 'https://api.catfee.io',
               catfeeProdApiKey: 'prod-key',
@@ -213,7 +215,6 @@ describe('EnergyRentalService', () => {
           [
             {
               id: 1,
-              energyProvider: 'catfee',
               catfeeEnvironment: 'nile',
               catfeeProdApiBaseUrl: 'https://api.catfee.io',
               catfeeProdApiKey: 'prod-key',
@@ -289,7 +290,6 @@ describe('EnergyRentalService', () => {
           [
             {
               id: 1,
-              energyProvider: 'catfee',
               catfeeEnvironment: 'prod',
               catfeeProdApiBaseUrl: 'https://api.catfee.io',
               catfeeProdApiKey: 'prod-key',
@@ -338,7 +338,6 @@ describe('EnergyRentalService', () => {
           [
             {
               id: 1,
-              energyProvider: 'catfee',
               catfeeEnvironment: 'prod',
               catfeeProdApiBaseUrl: 'https://api.catfee.io',
               catfeeProdApiKey: 'prod-key',
@@ -367,304 +366,6 @@ describe('EnergyRentalService', () => {
       'socket hang up',
     );
     fetchMock.mockRestore();
-  });
-
-  it('recharges CatFee production balance from platform wallet and records outflow', async () => {
-    const fetchMock = jest.spyOn(global, 'fetch' as never).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        code: 0,
-        data: {
-          wallet: 'TProdWallet',
-          recharge_address: 'TProdRecharge',
-          balance: 99_000_000,
-        },
-      }),
-    } as never);
-    const values = jest.fn().mockResolvedValue(null);
-    const insert = jest.fn(() => ({ values }));
-    const conn = {
-      ...createReadConn(
-        new Map<unknown, unknown[]>([
-          [
-            energyPlatformConfigTable,
-            [
-              {
-                id: 1,
-                energyProvider: 'catfee',
-                tronApiBaseUrl: 'https://api.trongrid.io',
-                tronApiKey: 'tron-key',
-                justlendPayerPrivateKey: validPrivateKey,
-                catfeeEnvironment: 'nile',
-                catfeeProdApiBaseUrl: 'https://api.catfee.io',
-                catfeeProdApiKey: 'prod-key',
-                catfeeProdApiSecret: 'prod-secret',
-                catfeeNileApiBaseUrl: 'https://nile.catfee.io',
-                catfeeNileApiKey: 'nile-key',
-                catfeeNileApiSecret: 'nile-secret',
-              },
-            ],
-          ],
-        ]),
-      ),
-      insert,
-    };
-    const service = new EnergyRentalService(conn as never);
-    const deriveSpy = jest
-      .spyOn(service as never, 'deriveTronAddressFromPrivateKey' as never)
-      .mockResolvedValue('TPayerWallet' as never);
-    const sendSpy = jest
-      .spyOn(service as never, 'sendTrxTransfer' as never)
-      .mockResolvedValue({
-        txHash: 'tx-provider-recharge',
-        fromAddress: 'TPayerWallet',
-      } as never);
-    const feeSpy = jest
-      .spyOn(service as never, 'estimateTrxTransferFee' as never)
-      .mockResolvedValue({
-        estimatedFeeSun: 350_000,
-        estimatedFeeTrx: 0.35,
-        walletBalanceSun: 50_000_000,
-        hasEnoughBalance: true,
-        bandwidthBytes: 350,
-        availableBandwidth: 0,
-        bandwidthPriceSun: 1000,
-        accountCreateFeeSun: 0,
-      } as never);
-
-    const result = await service.rechargeProviderBalance({
-      provider: 'catfee',
-      amountTrx: 12.5,
-    });
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        provider: 'catfee',
-        channel: 'prod',
-        amountSun: 12_500_000,
-        amountTrx: 12.5,
-        estimatedFeeSun: 350_000,
-        estimatedFeeTrx: 0.35,
-        estimatedTotalSun: 12_850_000,
-        estimatedTotalTrx: 12.85,
-        walletBalanceSun: 50_000_000,
-        walletBalanceTrx: 50,
-        hasEnoughBalance: true,
-        fromAddress: 'TPayerWallet',
-        rechargeAddress: 'TProdRecharge',
-        txHash: 'tx-provider-recharge',
-      }),
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.catfee.io/v1/account',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          'CF-ACCESS-KEY': 'prod-key',
-        }),
-      }),
-    );
-    expect(sendSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        privateKey: validPrivateKey,
-        fromAddress: 'TPayerWallet',
-        toAddress: 'TProdRecharge',
-        amountSun: 12_500_000,
-        tronApiBaseUrl: 'https://api.trongrid.io',
-        tronApiKey: 'tron-key',
-      }),
-    );
-    expect(insert).toHaveBeenCalledWith(energyWalletTransactionsTable);
-    expect(values).toHaveBeenCalledWith(
-      expect.objectContaining({
-        txHash: 'tx-provider-recharge',
-        walletAddress: 'TPayerWallet',
-        direction: 'out',
-        transactionType: 'provider_recharge',
-        amountSun: '12500000',
-        status: 'confirmed',
-      }),
-    );
-    fetchMock.mockRestore();
-    deriveSpy.mockRestore();
-    sendSpy.mockRestore();
-    feeSpy.mockRestore();
-  });
-
-  it('rejects CatFee recharge when platform wallet cannot cover amount and fee', async () => {
-    const fetchMock = jest.spyOn(global, 'fetch' as never).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        code: 0,
-        data: {
-          wallet: 'TProdWallet',
-          recharge_address: 'TProdRecharge',
-          balance: 0,
-        },
-      }),
-    } as never);
-    const conn = createReadConn(
-      new Map<unknown, unknown[]>([
-        [
-          energyPlatformConfigTable,
-          [
-            {
-              id: 1,
-              energyProvider: 'catfee',
-              tronApiBaseUrl: 'https://api.trongrid.io',
-              tronApiKey: 'tron-key',
-              justlendPayerPrivateKey: validPrivateKey,
-              catfeeProdApiBaseUrl: 'https://api.catfee.io',
-              catfeeProdApiKey: 'prod-key',
-              catfeeProdApiSecret: 'prod-secret',
-            },
-          ],
-        ],
-      ]),
-    );
-    const service = new EnergyRentalService(conn as never);
-    const deriveSpy = jest
-      .spyOn(service as never, 'deriveTronAddressFromPrivateKey' as never)
-      .mockResolvedValue('TPayerWallet' as never);
-    const sendSpy = jest.spyOn(service as never, 'sendTrxTransfer' as never);
-    const feeSpy = jest
-      .spyOn(service as never, 'estimateTrxTransferFee' as never)
-      .mockResolvedValue({
-        estimatedFeeSun: 500_000,
-        estimatedFeeTrx: 0.5,
-        walletBalanceSun: 1_000_000,
-        hasEnoughBalance: false,
-        bandwidthBytes: 500,
-        availableBandwidth: 0,
-        bandwidthPriceSun: 1000,
-        accountCreateFeeSun: 0,
-      } as never);
-
-    await expect(
-      service.rechargeProviderBalance({
-        provider: 'catfee',
-        amountTrx: 10,
-      }),
-    ).rejects.toThrow('平台钱包余额不足');
-    expect(sendSpy).not.toHaveBeenCalled();
-
-    fetchMock.mockRestore();
-    deriveSpy.mockRestore();
-    sendSpy.mockRestore();
-    feeSpy.mockRestore();
-  });
-
-  it('previews CatFee provider recharge fee and total debit', async () => {
-    const fetchMock = jest.spyOn(global, 'fetch' as never).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        code: 0,
-        data: {
-          wallet: 'TProdWallet',
-          recharge_address: 'TProdRecharge',
-          balance: 0,
-        },
-      }),
-    } as never);
-    const conn = createReadConn(
-      new Map<unknown, unknown[]>([
-        [
-          energyPlatformConfigTable,
-          [
-            {
-              id: 1,
-              energyProvider: 'catfee',
-              tronApiBaseUrl: 'https://api.trongrid.io',
-              tronApiKey: 'tron-key',
-              justlendPayerPrivateKey: validPrivateKey,
-              catfeeProdApiBaseUrl: 'https://api.catfee.io',
-              catfeeProdApiKey: 'prod-key',
-              catfeeProdApiSecret: 'prod-secret',
-            },
-          ],
-        ],
-      ]),
-    );
-    const service = new EnergyRentalService(conn as never);
-    const deriveSpy = jest
-      .spyOn(service as never, 'deriveTronAddressFromPrivateKey' as never)
-      .mockResolvedValue('TPayerWallet' as never);
-    const feeSpy = jest
-      .spyOn(service as never, 'estimateTrxTransferFee' as never)
-      .mockResolvedValue({
-        estimatedFeeSun: 500_000,
-        estimatedFeeTrx: 0.5,
-        walletBalanceSun: 50_000_000,
-        hasEnoughBalance: true,
-        bandwidthBytes: 500,
-        availableBandwidth: 0,
-        bandwidthPriceSun: 1000,
-        accountCreateFeeSun: 0,
-      } as never);
-
-    const result = await service.previewProviderRecharge({
-      provider: 'catfee',
-      amountTrx: 10,
-    });
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        provider: 'catfee',
-        channel: 'prod',
-        amountSun: 10_000_000,
-        amountTrx: 10,
-        estimatedFeeSun: 500_000,
-        estimatedFeeTrx: 0.5,
-        estimatedTotalSun: 10_500_000,
-        estimatedTotalTrx: 10.5,
-        walletBalanceSun: 50_000_000,
-        walletBalanceTrx: 50,
-        hasEnoughBalance: true,
-        fromAddress: 'TPayerWallet',
-        rechargeAddress: 'TProdRecharge',
-      }),
-    );
-    expect(feeSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        fromAddress: 'TPayerWallet',
-        toAddress: 'TProdRecharge',
-        amountSun: 10_000_000,
-      }),
-    );
-    fetchMock.mockRestore();
-    deriveSpy.mockRestore();
-    feeSpy.mockRestore();
-  });
-
-  it('normalizes 0x-prefixed TRON private keys before deriving payer address', async () => {
-    const service = new EnergyRentalService({} as never);
-    const fromPrivateKey = jest.fn(() => 'TPayerWallet');
-    const isAddress = jest.fn(() => true);
-    const createSpy = jest
-      .spyOn(service as never, 'createTronWeb' as never)
-      .mockResolvedValue({
-        address: { fromPrivateKey },
-        isAddress,
-      } as never);
-
-    const result = await (service as any).deriveTronAddressFromPrivateKey({
-      privateKey:
-        '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      tronApiBaseUrl: 'https://api.trongrid.io',
-      tronApiKey: 'tron-key',
-    });
-
-    expect(result).toBe('TPayerWallet');
-    expect(createSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        privateKey:
-          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      }),
-    );
-    expect(fromPrivateKey).toHaveBeenCalledWith(
-      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-    );
-
-    createSpy.mockRestore();
   });
 
   it('filters and paginates orders list', async () => {
@@ -865,34 +566,13 @@ describe('EnergyRentalService', () => {
     );
   });
 
-  it('rejects packages below JustLend minimum energy amount', async () => {
-    const values = jest.fn().mockResolvedValue(null);
-    const insert = jest.fn(() => ({ values }));
-    const conn = {
-      ...createReadConn(new Map<unknown, unknown[]>([[energyPlatformConfigTable, []]])),
-      insert,
-    };
-    const service = new EnergyRentalService(conn as never);
-
-    await expect(
-      (service as any).createPlatformPrice({
-        packageName: '低能量测试',
-        energyAmount: 99999,
-        durationHours: 1,
-        priceSun: 1000000,
-      }),
-    ).rejects.toThrow('套餐能量不能低于 100000');
-
-    expect(insert).not.toHaveBeenCalled();
-  });
-
-  it('allows CatFee packages below JustLend minimum energy amount', async () => {
+  it('allows CatFee packages at minimum energy amount (65000)', async () => {
     const values = jest.fn().mockResolvedValue(null);
     const insert = jest.fn(() => ({ values }));
     const conn = {
       ...createReadConn(
         new Map<unknown, unknown[]>([
-          [energyPlatformConfigTable, [{ id: 1, energyProvider: 'catfee' }]],
+          [energyPlatformConfigTable, [{ id: 1 }]],
         ]),
       ),
       insert,
@@ -922,7 +602,7 @@ describe('EnergyRentalService', () => {
     const conn = {
       ...createReadConn(
         new Map<unknown, unknown[]>([
-          [energyPlatformConfigTable, [{ id: 1, energyProvider: 'catfee' }]],
+          [energyPlatformConfigTable, [{ id: 1 }]],
         ]),
       ),
       insert,
@@ -939,47 +619,6 @@ describe('EnergyRentalService', () => {
     ).rejects.toThrow('CatFee 套餐能量不能低于 65000');
 
     expect(insert).not.toHaveBeenCalled();
-  });
-
-  it('estimates package JustLend cost, prepay and profit from dashboard data', async () => {
-    const fetchMock = jest.spyOn(global, 'fetch' as never).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        code: 0,
-        data: {
-          energyRentPerTrx: '20000',
-          energyStakePerTrx: '10',
-          trxPrice: '0.3',
-        },
-      }),
-    } as never);
-    const service = new EnergyRentalService(
-      createReadConn(new Map<unknown, unknown[]>([[energyPlatformConfigTable, []]])) as never,
-    );
-
-    await expect(
-      service.estimatePackage({
-        energyAmount: 100000,
-        durationHours: 24,
-        priceTrx: 12,
-      }),
-    ).resolves.toEqual(
-      expect.objectContaining({
-        energyAmount: 100000,
-        durationHours: 24,
-        minEnergyAmount: 100000,
-        rentFeeTrx: 5,
-        securityDepositTrx: 5,
-        liquidationReserveTrx: 20,
-        totalPrepayTrx: 30,
-        platformCapitalTrx: 25,
-        delegatedTrx: 10000,
-        salePriceTrx: 12,
-        profitTrx: 7,
-      }),
-    );
-
-    fetchMock.mockRestore();
   });
 
   it('deletes selected energy rental packages', async () => {
@@ -1027,10 +666,7 @@ describe('EnergyRentalService', () => {
               telegramBotToken: '123456:secret',
               tronApiBaseUrl: 'https://api.trongrid.io',
               tronApiKey: 'tron-secret',
-            justlendContractAddress: 'TJustLend',
-            justlendPayerPrivateKey: 'private-key',
-            catfeePayerPrivateKey: 'catfee-private-key',
-            energyProvider: 'catfee',
+            platformReceiveAddress: 'TPlatformReceiveAddressBase58XXXXX',
             catfeeEnvironment: 'nile',
             catfeeProdApiBaseUrl: 'https://api.catfee.io',
             catfeeProdApiKey: 'prod-key',
@@ -1065,12 +701,7 @@ describe('EnergyRentalService', () => {
       tronApiBaseUrl: 'https://api.trongrid.io',
       tronApiKey: '',
       tronApiKeyConfigured: true,
-      justlendContractAddress: 'TJustLend',
-      justlendPayerPrivateKey: '',
-      justlendPayerPrivateKeyConfigured: true,
-      catfeePayerPrivateKey: '',
-      catfeePayerPrivateKeyConfigured: true,
-      energyProvider: 'catfee',
+      platformReceiveAddress: 'TPlatformReceiveAddressBase58XXXXX',
       catfeeEnvironment: 'nile',
       catfeeProdApiBaseUrl: 'https://api.catfee.io',
       catfeeProdApiKey: '',
@@ -1108,7 +739,6 @@ describe('EnergyRentalService', () => {
             id: 1,
             telegramBotToken: 'old-token',
             tronApiKey: 'old-api-key',
-            justlendPayerPrivateKey: 'old-private-key',
             catfeeProdApiKey: 'old-prod-key',
             catfeeProdApiSecret: 'old-prod-secret',
             catfeeNileApiKey: 'old-nile-key',
@@ -1129,7 +759,7 @@ describe('EnergyRentalService', () => {
         telegramBotToken: '',
         tronApiBaseUrl: 'https://nile.trongrid.io',
         tronApiKey: ' new-api-key ',
-        energyProvider: 'catfee',
+        platformReceiveAddress: 'TNewPlatformReceiveAddrBase58XXXX',
         catfeeEnvironment: 'nile',
         catfeeProdApiBaseUrl: 'https://api.catfee.io',
         catfeeProdApiKey: '',
@@ -1138,8 +768,6 @@ describe('EnergyRentalService', () => {
         catfeeNileApiKey: ' new-nile-key ',
         catfeeNileApiSecret: '',
         catfeeAutoActivate: true,
-        justlendPayerPrivateKey: '',
-        catfeePayerPrivateKey: ' new-catfee-pk ',
         orderPaymentTtlMinutes: 10,
       }),
     ).resolves.toBeNull();
@@ -1150,12 +778,11 @@ describe('EnergyRentalService', () => {
         botStatus: 'enabled',
         tronApiBaseUrl: 'https://nile.trongrid.io',
         tronApiKey: 'new-api-key',
-        energyProvider: 'catfee',
+        platformReceiveAddress: 'TNewPlatformReceiveAddrBase58XXXX',
         catfeeEnvironment: 'nile',
         catfeeProdApiBaseUrl: 'https://api.catfee.io',
         catfeeNileApiBaseUrl: 'https://nile.catfee.io',
         catfeeNileApiKey: 'new-nile-key',
-        catfeePayerPrivateKey: 'new-catfee-pk',
         catfeeAutoActivate: true,
         orderPaymentTtlMinutes: 10,
       }),
@@ -1168,7 +795,6 @@ describe('EnergyRentalService', () => {
     expect(set).not.toHaveBeenCalledWith(
       expect.objectContaining({
         telegramBotToken: expect.anything(),
-        justlendPayerPrivateKey: expect.anything(),
         catfeeProdApiKey: expect.anything(),
         catfeeProdApiSecret: expect.anything(),
         catfeeNileApiSecret: expect.anything(),
@@ -1191,7 +817,6 @@ describe('EnergyRentalService', () => {
           [
             {
               id: 1,
-              energyProvider: 'catfee',
               catfeeEnvironment: 'nile',
               catfeeNileApiBaseUrl: 'https://nile.catfee.io',
               catfeeNileApiKey: 'nile-key',
@@ -1267,7 +892,6 @@ describe('EnergyRentalService', () => {
           [
             {
               id: 1,
-              energyProvider: 'justlend',
               catfeeEnvironment: 'prod',
               catfeeNileApiBaseUrl: 'https://nile.catfee.io',
               catfeeNileApiKey: 'nile-key',
@@ -1374,7 +998,6 @@ describe('EnergyRentalService', () => {
           [
             {
               id: 1,
-              energyProvider: 'catfee',
               catfeeEnvironment: 'nile',
               catfeeNileApiBaseUrl: 'https://nile.catfee.io',
               catfeeNileApiKey: 'nile-key',
@@ -1499,7 +1122,7 @@ describe('EnergyRentalService', () => {
         [energyReturnTasksTable, []],
         [
           energyPlatformConfigTable,
-          [{ id: 1, energyProvider: 'catfee', catfeeProdApiKey: 'secret-key' }],
+          [{ id: 1, catfeeProdApiKey: 'secret-key' }],
         ],
       ]),
     );
@@ -1557,6 +1180,9 @@ describe('EnergyRentalService', () => {
       telegramBotTokenConfigured: true,
       telegramBotUsername: 'agent_a_bot',
       remark: '用户 A',
+      welcomeText: '',
+      menuConfig: '',
+      messageConfig: '',
     });
   });
 
@@ -1588,6 +1214,9 @@ describe('EnergyRentalService', () => {
       telegramBotTokenConfigured: true,
       telegramBotUsername: '',
       remark: '',
+      welcomeText: '',
+      menuConfig: '',
+      messageConfig: '',
     });
   });
 
@@ -1957,7 +1586,7 @@ describe('EnergyRentalService', () => {
               },
             ],
           ],
-          [energyPlatformConfigTable, [{ id: 1, energyProvider: 'catfee' }]],
+          [energyPlatformConfigTable, [{ id: 1 }]],
         ]),
       ),
       insert,

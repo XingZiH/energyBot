@@ -44,9 +44,6 @@ type platformConfigInput struct {
 	TronAPIBaseURL          string `json:"tronApiBaseUrl"`
 	TronAPIKey              string `json:"tronApiKey"`
 	PlatformReceiveAddress  string `json:"platformReceiveAddress"`
-	JustLendContractAddress string `json:"justlendContractAddress"`
-	JustLendPayerPrivateKey string `json:"justlendPayerPrivateKey"`
-	EnergyProvider          string `json:"energyProvider"`
 	CatFeeEnvironment       string `json:"catfeeEnvironment"`
 	CatFeeProdAPIBaseURL    string `json:"catfeeProdApiBaseUrl"`
 	CatFeeProdAPIKey        string `json:"catfeeProdApiKey"`
@@ -116,9 +113,6 @@ UPDATE energy_platform_config SET
   tron_api_base_url = ?,
   tron_api_key = ?,
   platform_receive_address = ?,
-  justlend_contract_address = ?,
-  justlend_payer_private_key = ?,
-  energy_provider = ?,
   catfee_environment = ?,
   catfee_prod_api_base_url = ?,
   catfee_prod_api_key = ?,
@@ -138,9 +132,6 @@ WHERE id = 1`
 		coalesceDefault(p.TronAPIBaseURL, "https://api.trongrid.io"),
 		p.TronAPIKey,
 		p.PlatformReceiveAddress,
-		p.JustLendContractAddress,
-		p.JustLendPayerPrivateKey,
-		coalesceDefault(p.EnergyProvider, "justlend"),
 		coalesceDefault(p.CatFeeEnvironment, "nile"),
 		coalesceDefault(p.CatFeeProdAPIBaseURL, "https://api.catfee.io"),
 		p.CatFeeProdAPIKey,

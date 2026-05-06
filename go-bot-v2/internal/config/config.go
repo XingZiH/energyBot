@@ -15,7 +15,6 @@ const (
 	defaultEnergyRentalTTL         = time.Hour
 	defaultTelegramPollingInterval = 2 * time.Second
 	defaultWorkerInterval          = time.Minute
-	defaultEnergyProvider          = "justlend"
 	defaultCatFeeEnvironment       = "nile"
 	defaultCatFeeProdAPIBaseURL    = "https://api.catfee.io"
 	defaultCatFeeNileAPIBaseURL    = "https://nile.catfee.io"
@@ -27,8 +26,6 @@ var requiredKeys = []string{
 	"TRON_API_BASE_URL",
 	"TRON_API_KEY",
 	"PLATFORM_RECEIVE_ADDRESS",
-	"JUSTLEND_CONTRACT_ADDRESS",
-	"JUSTLEND_PAYER_PRIVATE_KEY",
 }
 
 type EnvMap map[string]string
@@ -40,14 +37,11 @@ type Config struct {
 	TronAPIBaseURL          string
 	TronAPIKey              string
 	PlatformReceiveAddress  string
-	JustLendContractAddress string
-	JustLendPayerPrivateKey string
 	OrderPaymentTTL         time.Duration
 	EnergyRentalTTL         time.Duration
 	TelegramPollingInterval time.Duration
 	WorkerInterval          time.Duration
 	MinTRXReserveSun        string
-	EnergyProvider          string
 	CatFeeEnvironment       string
 	CatFeeProdAPIBaseURL    string
 	CatFeeProdAPIKey        string
@@ -120,14 +114,11 @@ func Load(env EnvMap) (Config, error) {
 		TronAPIBaseURL:          strings.TrimSpace(env["TRON_API_BASE_URL"]),
 		TronAPIKey:              strings.TrimSpace(env["TRON_API_KEY"]),
 		PlatformReceiveAddress:  strings.TrimSpace(env["PLATFORM_RECEIVE_ADDRESS"]),
-		JustLendContractAddress: strings.TrimSpace(env["JUSTLEND_CONTRACT_ADDRESS"]),
-		JustLendPayerPrivateKey: strings.TrimSpace(env["JUSTLEND_PAYER_PRIVATE_KEY"]),
 		OrderPaymentTTL:         orderPaymentTTL,
 		EnergyRentalTTL:         energyRentalTTL,
 		TelegramPollingInterval: pollingInterval,
 		WorkerInterval:          workerInterval,
 		MinTRXReserveSun:        envOrDefault(env, "MIN_TRX_RESERVE_SUN", "0"),
-		EnergyProvider:          envOrDefault(env, "ENERGY_PROVIDER", defaultEnergyProvider),
 		CatFeeEnvironment:       envOrDefault(env, "CATFEE_ENVIRONMENT", defaultCatFeeEnvironment),
 		CatFeeProdAPIBaseURL:    envOrDefault(env, "CATFEE_PROD_API_BASE_URL", defaultCatFeeProdAPIBaseURL),
 		CatFeeProdAPIKey:        strings.TrimSpace(env["CATFEE_PROD_API_KEY"]),
@@ -145,16 +136,21 @@ func Load(env EnvMap) (Config, error) {
 // B3 schema 改造说明（T11.3c）：
 //   - 旧 B1 主站 schema 把 bot_status / telegram_bot_token / platform_receive_address
 //     都放在 energy_platform_config 单表。B3 单租户拆开了：
-//     - platform_receive_address 仍在 platform_config（由 0002 migration 补上）
-//     - telegram_bot_token 转移到 bot_config.encrypted_token（BLOB，加密 by AES-GCM）
-//     - bot_status 不再持久化——由 agent supervisor 内存管理
+//   - platform_receive_address 仍在 platform_config（由 0002 migration 补上）
+//   - telegram_bot_token 转移到 bot_config.encrypted_token（BLOB，加密 by AES-GCM）
+//   - bot_status 不再持久化——由 agent supervisor 内存管理
+//
+// T12 改造说明：
+//   - JustLend / energy_provider 字段从查询中删除——catfee 是唯一 provider。
+//   - SQLite schema 中相关列保留（不 DROP），只是 SELECT 不再读取。
 //
 // MVP token 解密策略：
 //   - encrypted_token_nonce IS NULL → 视为明文 BLOB，直接 string(bytes)
 //   - encrypted_token_nonce 非 NULL → AES-GCM 解密（T11.6 实现，当前版本返 err）
 //
-// BotStatus 字段：LoadFromDatabase 总是返 "enabled"——既然 agent 决定了跑 bot
-// 进程才会调到这里。validateRuntimeConfig 的 BotStatus 检查保留兼容旧测试。
+// BotStatus 字段：LoadFromDatabase 根据 token 是否解出来推断——
+// 有 token → enabled；空 token → disabled。
+// validateRuntimeConfig 的 BotStatus 检查保留兼容旧测试。
 func LoadFromDatabase(ctx context.Context, env EnvMap, store QueryRower) (Config, error) {
 	if env == nil {
 		env = EnvMap{}
@@ -173,13 +169,10 @@ SELECT
   COALESCE(p.tron_api_base_url, 'https://api.trongrid.io'),
   COALESCE(p.tron_api_key, ''),
   COALESCE(p.platform_receive_address, ''),
-  COALESCE(p.justlend_contract_address, ''),
-  COALESCE(p.justlend_payer_private_key, ''),
   COALESCE(p.order_payment_ttl_minutes, 10),
   COALESCE(p.telegram_polling_interval_seconds, 2),
   COALESCE(p.worker_interval_seconds, 60),
   COALESCE(p.min_trx_reserve_sun, '0'),
-  COALESCE(p.energy_provider, 'justlend'),
   COALESCE(p.catfee_environment, 'nile'),
   COALESCE(p.catfee_prod_api_base_url, 'https://api.catfee.io'),
   COALESCE(p.catfee_prod_api_key, ''),
@@ -195,24 +188,21 @@ LEFT JOIN bot_config b ON b.id = 1
 WHERE p.id = 1`
 
 	var (
-		cfg                            Config
-		orderPaymentTTLMinutes         int32
-		telegramPollingIntervalSecond  int32
-		workerIntervalSeconds          int32
-		encryptedToken                 []byte
-		encryptedTokenNonce            []byte
+		cfg                           Config
+		orderPaymentTTLMinutes        int32
+		telegramPollingIntervalSecond int32
+		workerIntervalSeconds         int32
+		encryptedToken                []byte
+		encryptedTokenNonce           []byte
 	)
 	err := store.QueryRow(ctx, query).Scan(
 		&cfg.TronAPIBaseURL,
 		&cfg.TronAPIKey,
 		&cfg.PlatformReceiveAddress,
-		&cfg.JustLendContractAddress,
-		&cfg.JustLendPayerPrivateKey,
 		&orderPaymentTTLMinutes,
 		&telegramPollingIntervalSecond,
 		&workerIntervalSeconds,
 		&cfg.MinTRXReserveSun,
-		&cfg.EnergyProvider,
 		&cfg.CatFeeEnvironment,
 		&cfg.CatFeeProdAPIBaseURL,
 		&cfg.CatFeeProdAPIKey,
@@ -247,10 +237,7 @@ WHERE p.id = 1`
 	cfg.TronAPIBaseURL = strings.TrimSpace(cfg.TronAPIBaseURL)
 	cfg.TronAPIKey = strings.TrimSpace(cfg.TronAPIKey)
 	cfg.PlatformReceiveAddress = strings.TrimSpace(cfg.PlatformReceiveAddress)
-	cfg.JustLendContractAddress = strings.TrimSpace(cfg.JustLendContractAddress)
-	cfg.JustLendPayerPrivateKey = strings.TrimSpace(cfg.JustLendPayerPrivateKey)
 	cfg.MinTRXReserveSun = strings.TrimSpace(cfg.MinTRXReserveSun)
-	cfg.EnergyProvider = normalizeProvider(cfg.EnergyProvider)
 	cfg.CatFeeEnvironment = normalizeCatFeeEnvironment(cfg.CatFeeEnvironment)
 	cfg.CatFeeProdAPIBaseURL = strings.TrimRight(strings.TrimSpace(envOrDefault(EnvMap{"v": cfg.CatFeeProdAPIBaseURL}, "v", defaultCatFeeProdAPIBaseURL)), "/")
 	cfg.CatFeeProdAPIKey = strings.TrimSpace(cfg.CatFeeProdAPIKey)
@@ -306,6 +293,8 @@ func normalizeDatabaseURL(value string) string {
 	return parsed.String()
 }
 
+// validateRuntimeConfig：T12 之后 catfee 是唯一 provider，强一致校验
+// PLATFORM_RECEIVE_ADDRESS / TRON_* / CATFEE_* 都必须非空。
 func validateRuntimeConfig(cfg Config) error {
 	var missing []string
 	for key, value := range map[string]string{
@@ -326,28 +315,14 @@ func validateRuntimeConfig(cfg Config) error {
 	if cfg.BotStatus == "enabled" && strings.TrimSpace(cfg.TelegramBotToken) == "" {
 		missing = append(missing, "TELEGRAM_BOT_TOKEN")
 	}
-	switch normalizeProvider(cfg.EnergyProvider) {
-	case "justlend":
-		for key, value := range map[string]string{
-			"JUSTLEND_CONTRACT_ADDRESS":  cfg.JustLendContractAddress,
-			"JUSTLEND_PAYER_PRIVATE_KEY": cfg.JustLendPayerPrivateKey,
-		} {
-			if strings.TrimSpace(value) == "" {
-				missing = append(missing, key)
-			}
+	for key, value := range map[string]string{
+		"CATFEE_API_BASE_URL": cfg.CatFeeAPIBaseURL(),
+		"CATFEE_API_KEY":      cfg.CatFeeAPIKey(),
+		"CATFEE_API_SECRET":   cfg.CatFeeAPISecret(),
+	} {
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, key)
 		}
-	case "catfee":
-		for key, value := range map[string]string{
-			"CATFEE_API_BASE_URL": cfg.CatFeeAPIBaseURL(),
-			"CATFEE_API_KEY":      cfg.CatFeeAPIKey(),
-			"CATFEE_API_SECRET":   cfg.CatFeeAPISecret(),
-		} {
-			if strings.TrimSpace(value) == "" {
-				missing = append(missing, key)
-			}
-		}
-	default:
-		return fmt.Errorf("invalid energy_provider: %s", cfg.EnergyProvider)
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required platform config: %s", strings.Join(missing, ", "))
@@ -356,14 +331,6 @@ func validateRuntimeConfig(cfg Config) error {
 		return errors.New("invalid min_trx_reserve_sun: must be set")
 	}
 	return nil
-}
-
-func (c Config) UsesJustLend() bool {
-	return normalizeProvider(c.EnergyProvider) == "justlend"
-}
-
-func (c Config) UsesCatFee() bool {
-	return normalizeProvider(c.EnergyProvider) == "catfee"
 }
 
 func (c Config) CatFeeAPIBaseURL() string {
@@ -408,14 +375,6 @@ func (c Config) catFeeEnvironmentFor(environment string) string {
 		return normalizeCatFeeEnvironment(c.CatFeeEnvironment)
 	}
 	return normalizeCatFeeEnvironment(environment)
-}
-
-func normalizeProvider(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return defaultEnergyProvider
-	}
-	return value
 }
 
 func normalizeCatFeeEnvironment(value string) string {

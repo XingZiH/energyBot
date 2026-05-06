@@ -102,7 +102,7 @@ export class EnergyRentalPackagesComponent implements OnInit {
   readonly providerPriceEstimate = signal<EnergyPackageEstimate | null>(null);
   readonly providerPriceLoading = signal(false);
   readonly providerPriceError = signal('');
-  readonly activeEnergyProvider = signal('justlend');
+  readonly activeEnergyProvider = signal('catfee');
   readonly packageScopeLoaded = signal(false);
   readonly isAgentScope = signal(false);
   readonly adminPackageView = signal<AdminPackageView>('platform-prices');
@@ -372,15 +372,12 @@ export class EnergyRentalPackagesComponent implements OnInit {
     return `${this.formatEnergyAmount(request.energyAmount)} 能量 / ${request.durationHours} 小时 / 一笔订单`;
   }
 
-  providerPriceExtraLabel(estimate: EnergyPackageEstimate): string {
-    return estimate.provider === 'catfee' ? '扣费环境' : '下单占用';
+  providerPriceExtraLabel(_estimate: EnergyPackageEstimate): string {
+    return '扣费环境';
   }
 
   providerPriceExtraValue(estimate: EnergyPackageEstimate): string {
-    if (estimate.provider === 'catfee') {
-      return estimate.catfeeEnvironment === 'prod' ? '生产环境' : 'Nile 环境';
-    }
-    return this.trx(estimate.totalPrepayTrx);
+    return estimate.catfeeEnvironment === 'prod' ? '生产环境' : 'Nile 环境';
   }
 
   isPlatformPriceMode(): boolean {
@@ -537,7 +534,7 @@ export class EnergyRentalPackagesComponent implements OnInit {
           this.loadPlatformPackageOptions();
         } else {
           this.loadPlatformPackageOptions();
-          this.loadActiveEnergyProvider();
+          this.initActiveEnergyProvider();
         }
         this.getDataList({ pageIndex: 1 });
       });
@@ -578,16 +575,12 @@ export class EnergyRentalPackagesComponent implements OnInit {
       .subscribe(data => this.platformPackageOptions.set(data || []));
   }
 
-  private loadActiveEnergyProvider(): void {
-    this.dataService
-      .getPlatformConfig()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(config => {
-        this.activeEnergyProvider.set(normalizeEnergyProvider(config.energyProvider || 'catfee'));
-        this.applyEnergyAmountValidator();
-        this.refreshProviderPrice();
-        this.refreshEstimate();
-      });
+  private initActiveEnergyProvider(): void {
+    // T12：catfee 是唯一 provider，不再需要拉平台配置判断 activeProvider
+    this.activeEnergyProvider.set(normalizeEnergyProvider('catfee'));
+    this.applyEnergyAmountValidator();
+    this.refreshProviderPrice();
+    this.refreshEstimate();
   }
 
   private applyEnergyAmountValidator(): void {

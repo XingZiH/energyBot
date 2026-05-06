@@ -19,18 +19,16 @@ import {
   userTable,
 } from '../../drizzle/schema';
 import { AgentRegistry } from './agent.registry';
-import { deriveTronAddress } from './util/tron-address.util';
 
 /**
- * applyConfig 服务（B3-T11.4）：给 agent 下发完整运行配置。
+ * applyConfig 服务（B3-T11.4，T12 架构更新）：给 agent 下发完整运行配置。
  *
  * 职责：
  * - 根据 licenseId 汇总 user → customer → license ownership 校验（防越权）
  * - 从 energy_platform_config（单例）+ agent_bot_configs（agentProfileId 绑定）读全量字段
- * - 动态派生 platform_receive_address：
- *     - justlend 模式 = justlendPayerPrivateKey 对应钱包地址
- *     - catfee 模式   = catfeePayerPrivateKey 对应钱包地址（T11.11 引入）
- *   两种模式 bot 端都需要此地址做用户付款收款（bot.go:243 / executor.go:345）
+ * - 下发平台统一收款地址（platform_receive_address，运营手填的 TRON Base58）
+ *   bot 端 go-bot-v2/internal/telegram/bot.go:243、executor.go:345
+ *   用此地址查 TronGrid incoming transfers / 作为收款地址展示
  * - 组装 camelCase JSON → AgentRegistry.sendToAgent('agent.applyConfig', params)
  *
  * 与 MyBotActionService 的关系：
@@ -45,23 +43,10 @@ import { deriveTronAddress } from './util/tron-address.util';
  *   不接受 sqlite:// scheme）—— agent main 已 mkdir 此目录
  * - token MVP 明文：这里 params.bot.token 是明文；go-bot-v2 的 apply_config.go
  *   会按 "nonce=NULL 明文" 路径 UPSERT bot_config.encrypted_token
- *   T11.6 加密版本完成后这里改传 base64(nonce+ciphertext) 并标 encryption=aes-gcm
- * - `deriveTronAddressFn` 是测试钩：不注入则走真实 tronweb 派生
  */
 @Injectable()
 export class AgentApplyConfigService {
   private readonly logger = new Logger(AgentApplyConfigService.name);
-
-  /**
-   * 测试钩：jest 注入 fake 派生函数绕过 tronweb 真实调用
-   * 生产路径走默认 deriveTronAddress util
-   */
-  private deriveTronAddressFn: (
-    privateKey: string,
-    tronApiBaseUrl: string,
-    tronApiKey?: string,
-  ) => Promise<string> = (privateKey, tronApiBaseUrl, tronApiKey) =>
-    deriveTronAddress({ privateKey, tronApiBaseUrl, tronApiKey });
 
   constructor(
     @Inject(DrizzleAsyncProvider)
@@ -75,7 +60,7 @@ export class AgentApplyConfigService {
    * 失败路径：
    * - user / license / agent_profile / bot_config 任何一环找不到 → 拒绝
    *   （注意 platform_config 缺失是系统级错误不是客户错误 → 500）
-   * - justlend 模式下派生地址失败 → 500（私钥格式坏，系统级异常客户无法处理）
+   * - platformReceiveAddress 未配置 → 500（系统级错误，不能下发空地址让 bot 死循环）
    * - agent 离线 → 503
    */
   async applyConfig(userId: number, licenseId: number): Promise<void> {
@@ -143,13 +128,7 @@ export class AgentApplyConfigService {
       .select({
         tronApiBaseUrl: energyPlatformConfigTable.tronApiBaseUrl,
         tronApiKey: energyPlatformConfigTable.tronApiKey,
-        justlendContractAddress:
-          energyPlatformConfigTable.justlendContractAddress,
-        justlendPayerPrivateKey:
-          energyPlatformConfigTable.justlendPayerPrivateKey,
-        catfeePayerPrivateKey:
-          energyPlatformConfigTable.catfeePayerPrivateKey,
-        energyProvider: energyPlatformConfigTable.energyProvider,
+        platformReceiveAddress: energyPlatformConfigTable.platformReceiveAddress,
         catfeeEnvironment: energyPlatformConfigTable.catfeeEnvironment,
         catfeeProdApiBaseUrl: energyPlatformConfigTable.catfeeProdApiBaseUrl,
         catfeeProdApiKey: energyPlatformConfigTable.catfeeProdApiKey,
@@ -172,49 +151,19 @@ export class AgentApplyConfigService {
     }
     const plat = platRows[0];
 
-    // 6. 派生 platformReceiveAddress
-    //    两种 provider 都需要：用户打款的 TRX/USDT 平台收款地址
-    //      - justlend: 从 justlendPayerPrivateKey 派生（也兼任归还给 justlend 池的地址）
-    //      - catfee:   从 catfeePayerPrivateKey 派生（T11.11 起引入对称字段）
+    // 6. 平台统一收款地址（T12：运营手填，不再派生）
     //    bot 端 go-bot-v2/internal/telegram/bot.go:243、executor.go:345
-    //    两种模式都会用此地址查 TronGrid incoming transfers / 作为收款地址展示
-    let platformReceiveAddress = '';
-    let receivePrivateKey: string | null = null;
-    let receiveSource = '';
-    if (plat.energyProvider === 'justlend') {
-      receivePrivateKey = plat.justlendPayerPrivateKey;
-      receiveSource = 'justlend_payer_private_key';
-    } else if (plat.energyProvider === 'catfee') {
-      receivePrivateKey = plat.catfeePayerPrivateKey;
-      receiveSource = 'catfee_payer_private_key';
-    } else {
-      // 其他未知 provider 不下发非空地址；由 bot 端 required 校验报错
-      // （保底路径，日常配置校验应在 platformConfig 保存时拦截）
-    }
-
-    if (!receivePrivateKey || !receivePrivateKey.trim()) {
-      // 私钥缺失是系统配置错误，不是客户操作可修复
-      // 拒绝下发避免 bot 启动后因 PLATFORM_RECEIVE_ADDRESS required 死循环 exit 1
+    //    用此地址查 TronGrid incoming transfers / 作为收款地址展示
+    const platformReceiveAddress = String(
+      plat.platformReceiveAddress ?? '',
+    ).trim();
+    if (!platformReceiveAddress) {
+      // 未配置是系统级错误，不能下发空地址让 bot 因 PLATFORM_RECEIVE_ADDRESS required 死循环 exit 1
       this.logger.error(
-        `平台收款私钥未配置 license=${licenseId} provider=${plat.energyProvider} source=${receiveSource}`,
+        `平台统一收款地址未配置 license=${licenseId}`,
       );
       throw new InternalServerErrorException(
-        `平台收款私钥（${receiveSource}）未配置，无法派生收款地址`,
-      );
-    }
-
-    try {
-      platformReceiveAddress = await this.deriveTronAddressFn(
-        receivePrivateKey,
-        plat.tronApiBaseUrl,
-        plat.tronApiKey ?? undefined,
-      );
-    } catch (err) {
-      this.logger.error(
-        `派生 TRON 地址失败 license=${licenseId} source=${receiveSource}: ${(err as Error).message}`,
-      );
-      throw new InternalServerErrorException(
-        '平台付款私钥无法派生钱包地址，请检查配置',
+        '平台统一收款地址（platform_receive_address）未配置，请在管理台录入后重试',
       );
     }
 
@@ -225,10 +174,6 @@ export class AgentApplyConfigService {
         tronApiBaseUrl: plat.tronApiBaseUrl,
         tronApiKey: plat.tronApiKey ?? '',
         platformReceiveAddress,
-        justlendContractAddress: plat.justlendContractAddress ?? '',
-        justlendPayerPrivateKey: plat.justlendPayerPrivateKey ?? '',
-        catfeePayerPrivateKey: plat.catfeePayerPrivateKey ?? '',
-        energyProvider: plat.energyProvider,
         catfeeEnvironment: plat.catfeeEnvironment,
         catfeeProdApiBaseUrl: plat.catfeeProdApiBaseUrl,
         catfeeProdApiKey: plat.catfeeProdApiKey ?? '',
@@ -274,7 +219,7 @@ export class AgentApplyConfigService {
       throw new ServiceUnavailableException('agent 配置下发失败，请稍后重试');
     }
     this.logger.log(
-      `applyConfig license=${licenseId} user=${userId} 已下发 (provider=${plat.energyProvider})`,
+      `applyConfig license=${licenseId} user=${userId} 已下发`,
     );
   }
 }

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches } from 'class-validator';
 
 export class EnergyPackageFiltersDto {
   @ApiProperty({ required: false })
@@ -110,19 +110,6 @@ export class RunLinkTestDto {
   @IsString()
   clientOrderId?: string;
 }
-
-export class RechargeProviderBalanceDto {
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  provider?: string;
-
-  @ApiProperty()
-  @IsNumber()
-  amountTrx: number;
-}
-
-export class PreviewProviderRechargeDto extends RechargeProviderBalanceDto {}
 
 export class EnergyOrderFiltersDto {
   @ApiProperty({ required: false })
@@ -291,30 +278,18 @@ export class UpdatePlatformConfigDto {
   @IsString()
   tronApiKey?: string;
 
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  justlendContractAddress?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  justlendPayerPrivateKey?: string;
-
   /**
-   * catfee 模式下平台收款地址的派生私钥（T11.11 起新增）。
-   * 与 justlendPayerPrivateKey 对称：nest-api 加密存储；agent 端从该私钥
-   * 派生 platform_receive_address 用于用户付款收款。
+   * T12：平台统一收款地址（TRON Base58 格式，T 开头 + 33 位 Base58）。
+   * 运营在管理台手填；nest-api 加密存储；下发给 agent/bot 用于
+   * go-bot-v2 validateRuntimeConfig 与对账。不再支持私钥派生。
    */
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
-  catfeePayerPrivateKey?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  energyProvider?: string;
+  @Matches(/^T[A-Za-z0-9]{33}$/, {
+    message: 'platformReceiveAddress 必须为 TRON Base58 地址（T 开头 34 位）',
+  })
+  platformReceiveAddress?: string;
 
   @ApiProperty({ required: false })
   @IsOptional()

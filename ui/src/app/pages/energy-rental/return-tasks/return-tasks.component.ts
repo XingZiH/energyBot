@@ -56,7 +56,7 @@ export class EnergyRentalReturnTasksComponent implements OnInit {
   readonly pageHeaderInfo: Partial<PageHeaderType> = {
     title: '归还任务',
     breadcrumb: ['首页', '机器人控制', '归还任务'],
-    desc: '监控 JustLend 到期归还任务；CatFee 订单由服务商自动回收。'
+    desc: 'CatFee 订单由服务商自动回收；归还任务仅保留历史遗留数据，不会新增。'
   };
   readonly statusOptions = [
     { label: '待处理', value: 'pending' },

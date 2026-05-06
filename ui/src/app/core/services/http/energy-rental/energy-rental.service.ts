@@ -39,36 +39,6 @@ export interface ProviderBalanceMonitor {
   checkedAt: string;
 }
 
-export interface ProviderRechargeResult {
-  provider: string;
-  providerLabel: string;
-  channel: string;
-  channelLabel: string;
-  amountSun: number;
-  amountTrx: number;
-  estimatedFeeSun: number;
-  estimatedFeeTrx: number;
-  estimatedTotalSun: number;
-  estimatedTotalTrx: number;
-  walletBalanceSun: number | null;
-  walletBalanceTrx: number | null;
-  hasEnoughBalance: boolean | null;
-  bandwidthBytes: number;
-  availableBandwidth: number;
-  bandwidthPriceSun: number;
-  accountCreateFeeSun: number;
-  fromAddress: string;
-  rechargeAddress: string;
-  txHash: string;
-  status: string;
-  submittedAt: string;
-}
-
-export interface ProviderRechargePreview extends Omit<ProviderRechargeResult, 'txHash' | 'status' | 'submittedAt'> {
-  feeNote: string;
-  previewedAt: string;
-}
-
 export interface EnergyRentalPackage {
   id: number;
   agentId?: number | null;
@@ -275,12 +245,7 @@ export interface EnergyPlatformConfig {
   tronApiBaseUrl: string;
   tronApiKey: string;
   tronApiKeyConfigured: boolean;
-  justlendContractAddress: string;
-  justlendPayerPrivateKey: string;
-  justlendPayerPrivateKeyConfigured: boolean;
-  catfeePayerPrivateKey: string;
-  catfeePayerPrivateKeyConfigured: boolean;
-  energyProvider: string;
+  platformReceiveAddress: string;
   catfeeEnvironment: string;
   catfeeProdApiBaseUrl: string;
   catfeeProdApiKey: string;
@@ -497,13 +462,5 @@ export class EnergyRentalService {
     clientOrderId?: string;
   }): Observable<EnergyLinkTestResult> {
     return this.http.post('/energy-rental/link-test/run', param);
-  }
-
-  previewProviderRecharge(param: { provider: string; amountTrx: number }): Observable<ProviderRechargePreview> {
-    return this.http.post('/energy-rental/provider-recharge/preview', param);
-  }
-
-  rechargeProviderBalance(param: { provider: string; amountTrx: number }): Observable<ProviderRechargeResult> {
-    return this.http.post('/energy-rental/provider-recharge', param, { needSuccessInfo: true });
   }
 }

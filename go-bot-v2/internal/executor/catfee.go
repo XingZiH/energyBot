@@ -210,7 +210,6 @@ select id, order_no, coalesce(external_order_id, ''),
        coalesce(remark, '')
 from energy_orders
 where status = 'renting'
-  and coalesce(energy_provider, 'justlend') = 'catfee'
   and coalesce(external_order_id, '') <> ''
   and deleted_at is null
 order by id asc`)
@@ -487,12 +486,4 @@ func catFeeTransactionID(detail catFeeOrderDetail) string {
 		return strings.TrimSpace(detail.DelegateHash)
 	}
 	return "catfee:" + strings.TrimSpace(detail.ID)
-}
-
-func normalizeProviderName(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return "justlend"
-	}
-	return value
 }

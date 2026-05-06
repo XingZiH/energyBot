@@ -234,7 +234,7 @@
                   <div class="package-estimate-value profit-value" [class.is-negative]="estimate.profitTrx < 0">{{ percent(estimate.profitRate) }}</div>
                 </div>
                 <div nz-col [nzSm]="12" [nzXs]="24">
-                  <div class="package-estimate-label">{{ estimate.provider === 'catfee' ? '服务商扣费' : '下单前至少准备' }}</div>
+                  <div class="package-estimate-label">服务商扣费</div>
                   <div class="package-estimate-value">{{ trx(estimate.totalPrepayTrx) }}</div>
                 </div>
               </div>
@@ -246,7 +246,7 @@
                     <div class="package-estimate-small-value">{{ trx(estimate.rentFeeTrx) }}</div>
                   </div>
                   <div nz-col [nzSm]="8" [nzXs]="24">
-                    <div class="package-estimate-label">{{ estimate.provider === 'catfee' ? '保证金占用' : '保证金占用' }}</div>
+                    <div class="package-estimate-label">保证金占用</div>
                     <div class="package-estimate-small-value">{{ trx(estimate.securityDepositTrx) }}</div>
                   </div>
                   <div nz-col [nzSm]="8" [nzXs]="24">
@@ -256,28 +256,24 @@
                 </div>
               </div>
               <div class="package-estimate-section">
-                <div class="package-estimate-section-title">{{ estimate.provider === 'catfee' ? 'CatFee 参考参数' : 'JustLend 参考参数' }}</div>
+                <div class="package-estimate-section-title">CatFee 参考参数</div>
                 <div nz-row class="package-estimate-meta-row" [nzGutter]="[12, 8]">
                   <div nz-col [nzSm]="8" [nzXs]="24">
-                    <span class="package-estimate-label">{{ estimate.provider === 'catfee' ? '当前环境：' : '10 万能量日租：' }}</span>
-                    <span>{{ estimate.provider === 'catfee' ? estimate.catfeeEnvironment : trx(estimate.unitDailyPriceTrx) }}</span>
+                    <span class="package-estimate-label">当前环境：</span>
+                    <span>{{ estimate.catfeeEnvironment }}</span>
                   </div>
                   <div nz-col [nzSm]="8" [nzXs]="24">
-                    <span class="package-estimate-label">{{ estimate.provider === 'catfee' ? '账户余额扣费：' : '资金占用：' }}</span>
+                    <span class="package-estimate-label">账户余额扣费：</span>
                     <span>{{ trx(estimate.platformCapitalTrx) }}</span>
                   </div>
                   <div nz-col [nzSm]="8" [nzXs]="24">
-                    <span class="package-estimate-label">{{ estimate.provider === 'catfee' ? '自动激活：' : '委托等值 TRX：' }}</span>
-                    <span>{{ estimate.provider === 'catfee' ? (estimate.catfeeAutoActivate ? '启用' : '停用') : trx(estimate.delegatedTrx) }}</span>
+                    <span class="package-estimate-label">自动激活：</span>
+                    <span>{{ estimate.catfeeAutoActivate ? '启用' : '停用' }}</span>
                   </div>
                 </div>
               </div>
               <div class="package-estimate-note">
-                {{
-                  estimate.provider === 'catfee'
-                    ? '结论：每单毛利 = 用户支付 - CatFee 预估扣费。若自动激活未激活地址，实际订单可能额外产生激活费用，以订单回传金额为准。'
-                    : '结论：每单毛利 = 用户支付 - 实际消耗成本。保证金和清算预留是平台下单时需要先垫进去的资金，正常按时归还后会退回。'
-                }}
+                结论：每单毛利 = 用户支付 - CatFee 预估扣费。若自动激活未激活地址，实际订单可能额外产生激活费用，以订单回传金额为准。
               </div>
             </div>
           }

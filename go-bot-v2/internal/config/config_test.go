@@ -21,8 +21,6 @@ func TestLoadEnvReportsMissingRequiredValues(t *testing.T) {
 		"TRON_API_BASE_URL",
 		"TRON_API_KEY",
 		"PLATFORM_RECEIVE_ADDRESS",
-		"JUSTLEND_CONTRACT_ADDRESS",
-		"JUSTLEND_PAYER_PRIVATE_KEY",
 	} {
 		if !strings.Contains(message, key) {
 			t.Fatalf("expected error to mention %s, got %q", key, message)
@@ -53,12 +51,6 @@ func TestLoadEnvLoadsValidValues(t *testing.T) {
 	}
 	if cfg.PlatformReceiveAddress != "TReceiveAddress" {
 		t.Fatalf("unexpected receive address: %s", cfg.PlatformReceiveAddress)
-	}
-	if cfg.JustLendContractAddress != "TJustLendContract" {
-		t.Fatalf("unexpected JustLend contract address: %s", cfg.JustLendContractAddress)
-	}
-	if cfg.JustLendPayerPrivateKey != "private-key-placeholder" {
-		t.Fatalf("unexpected payer private key: %s", cfg.JustLendPayerPrivateKey)
 	}
 	if cfg.OrderPaymentTTL != 30*time.Minute {
 		t.Fatalf("unexpected order payment ttl: %s", cfg.OrderPaymentTTL)
@@ -124,23 +116,20 @@ func TestLoadFromDatabaseLoadsAdminPlatformConfig(t *testing.T) {
 		"https://api.trongrid.io",
 		"tron-api-key",
 		"TReceiveAddress",
-		"TJustLendContract",
-		"private-key-placeholder",
 		int32(10),
 		int32(2),
 		int32(60),
 		"1000000",
-		"justlend",
 		"nile",
 		"https://api.catfee.io",
 		"",
 		"",
 		"https://nile.catfee.io",
-		"",
-		"",
+		"nile-key",
+		"nile-secret",
 		true,
 		[]byte("telegram-token"), // encrypted_token，MVP 明文
-		[]byte(nil),               // encrypted_token_nonce NULL
+		[]byte(nil),              // encrypted_token_nonce NULL
 	}}})
 	if err != nil {
 		t.Fatalf("expected valid database config, got error: %v", err)
@@ -188,20 +177,17 @@ func TestLoadFromDatabaseRequiresPlatformSecrets(t *testing.T) {
 		"https://api.trongrid.io",
 		"tron-api-key",
 		"", // PlatformReceiveAddress 缺失
-		"TJustLendContract",
-		"private-key-placeholder",
 		int32(10),
 		int32(2),
 		int32(60),
 		"0",
-		"justlend",
 		"nile",
 		"https://api.catfee.io",
 		"",
 		"",
 		"https://nile.catfee.io",
-		"",
-		"",
+		"nile-key",
+		"nile-secret",
 		true,
 		[]byte("telegram-token"),
 		[]byte(nil),
@@ -221,20 +207,17 @@ func TestLoadFromDatabaseAllowsDisabledPlatformBotWithoutTelegramToken(t *testin
 		"https://api.trongrid.io",
 		"tron-api-key",
 		"TReceiveAddress",
-		"TJustLendContract",
-		"private-key-placeholder",
 		int32(10),
 		int32(2),
 		int32(60),
 		"0",
-		"justlend",
 		"nile",
 		"https://api.catfee.io",
 		"",
 		"",
 		"https://nile.catfee.io",
-		"",
-		"",
+		"nile-key",
+		"nile-secret",
 		true,
 		[]byte(nil), // token NULL
 		[]byte(nil),
@@ -247,20 +230,19 @@ func TestLoadFromDatabaseAllowsDisabledPlatformBotWithoutTelegramToken(t *testin
 	}
 }
 
-func TestLoadFromDatabaseAllowsCatFeeNileWithoutJustLendSecrets(t *testing.T) {
+// TestLoadFromDatabaseLoadsCatFeeNileConfig：T12 后 catfee 是唯一 provider，
+// 校验只关心 catfee 凭证齐全。
+func TestLoadFromDatabaseLoadsCatFeeNileConfig(t *testing.T) {
 	cfg, err := LoadFromDatabase(context.Background(), EnvMap{
 		"DATABASE_URL": "postgres://bot:pass@localhost:5432/app",
 	}, fakeStore{row: fakeRow{values: []any{
 		"https://api.trongrid.io",
 		"tron-api-key",
 		"TReceiveAddress",
-		"",
-		"",
 		int32(10),
 		int32(2),
 		int32(60),
 		"0",
-		"catfee",
 		"nile",
 		"https://api.catfee.io",
 		"",
@@ -273,12 +255,9 @@ func TestLoadFromDatabaseAllowsCatFeeNileWithoutJustLendSecrets(t *testing.T) {
 		[]byte(nil),
 	}}})
 	if err != nil {
-		t.Fatalf("expected CatFee config to load without JustLend secrets, got %v", err)
+		t.Fatalf("expected CatFee config to load, got %v", err)
 	}
 
-	if cfg.EnergyProvider != "catfee" {
-		t.Fatalf("unexpected provider: %s", cfg.EnergyProvider)
-	}
 	if cfg.CatFeeAPIBaseURL() != "https://nile.catfee.io" {
 		t.Fatalf("unexpected active CatFee base url: %s", cfg.CatFeeAPIBaseURL())
 	}
@@ -299,20 +278,17 @@ func TestLoadFromDatabase_RejectsEncryptedTokenWithoutDecoder(t *testing.T) {
 		"https://api.trongrid.io",
 		"tron-api-key",
 		"TReceiveAddress",
-		"TJustLendContract",
-		"private-key-placeholder",
 		int32(10),
 		int32(2),
 		int32(60),
 		"0",
-		"justlend",
 		"nile",
 		"https://api.catfee.io",
 		"",
 		"",
 		"https://nile.catfee.io",
-		"",
-		"",
+		"nile-key",
+		"nile-secret",
 		true,
 		[]byte("ciphertext"),
 		[]byte("nonce-12-bytes"),
@@ -352,17 +328,15 @@ func TestCatFeeCredentialsCanBeSelectedByOrderEnvironment(t *testing.T) {
 
 func validEnv() EnvMap {
 	return EnvMap{
-		"DATABASE_URL":               "postgres://bot:pass@localhost:5432/app",
-		"TELEGRAM_BOT_TOKEN":         "telegram-token",
-		"TRON_API_BASE_URL":          "https://api.trongrid.io",
-		"TRON_API_KEY":               "tron-api-key",
-		"PLATFORM_RECEIVE_ADDRESS":   "TReceiveAddress",
-		"JUSTLEND_CONTRACT_ADDRESS":  "TJustLendContract",
-		"JUSTLEND_PAYER_PRIVATE_KEY": "private-key-placeholder",
-		"ORDER_PAYMENT_TTL":          "30m",
-		"ENERGY_RENTAL_TTL":          "1h",
-		"TELEGRAM_POLLING_INTERVAL":  "3s",
-		"WORKER_INTERVAL":            "2m",
+		"DATABASE_URL":              "postgres://bot:pass@localhost:5432/app",
+		"TELEGRAM_BOT_TOKEN":        "telegram-token",
+		"TRON_API_BASE_URL":         "https://api.trongrid.io",
+		"TRON_API_KEY":              "tron-api-key",
+		"PLATFORM_RECEIVE_ADDRESS":  "TReceiveAddress",
+		"ORDER_PAYMENT_TTL":         "30m",
+		"ENERGY_RENTAL_TTL":         "1h",
+		"TELEGRAM_POLLING_INTERVAL": "3s",
+		"WORKER_INTERVAL":           "2m",
 	}
 }
 

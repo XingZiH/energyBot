@@ -16,13 +16,13 @@ import { AgentApplyConfigService } from './agent-apply-config.service';
  * - applyConfig 路径：buildParams 成功后 registry.sendToAgent('agent.applyConfig', params)
  *   返 false 抛 ServiceUnavailable
  *
- * 不关注：
- * - tronWeb 派生地址实际逻辑——通过 mock deriveTronAddress 注入
- *
  * mock 策略：
  * - 把 conn 替换成 fakeConn，select() 链返回固定 row 数组
  * - registry mock sendToAgent
- * - deriveTronAddress 通过 `(svc as any).deriveTronAddressOverride` 注入测试钩
+ *
+ * T12 架构：platform_receive_address 由运营在 UI 直接填 TRON Base58 地址，
+ * service 不再从私钥派生，provider 区分字段（energyProvider / justlend* /
+ * catfeePayerPrivateKey）整体删除，统一走 catfee。
  */
 describe('AgentApplyConfigService', () => {
   /** fakeConn：select.from.where.limit() 链返回固定 fixture 集 */
@@ -40,10 +40,7 @@ describe('AgentApplyConfigService', () => {
     platformConfig?: Array<{
       tronApiBaseUrl: string;
       tronApiKey: string | null;
-      justlendContractAddress: string | null;
-      justlendPayerPrivateKey: string | null;
-      catfeePayerPrivateKey: string | null;
-      energyProvider: string;
+      platformReceiveAddress: string;
       catfeeEnvironment: string;
       catfeeProdApiBaseUrl: string;
       catfeeProdApiKey: string | null;
@@ -98,15 +95,7 @@ describe('AgentApplyConfigService', () => {
     } as unknown as jest.Mocked<Pick<AgentRegistry, 'callAgent'>>;
   }
 
-  async function buildSvc(
-    conn: unknown,
-    registry: unknown,
-    deriveAddr?: (
-      privateKey: string,
-      tronApiBaseUrl: string,
-      tronApiKey?: string,
-    ) => Promise<string>,
-  ) {
+  async function buildSvc(conn: unknown, registry: unknown) {
     const moduleRef = await Test.createTestingModule({
       providers: [
         AgentApplyConfigService,
@@ -115,12 +104,6 @@ describe('AgentApplyConfigService', () => {
       ],
     }).compile();
     const svc = moduleRef.get(AgentApplyConfigService);
-    if (deriveAddr) {
-      // 测试时绕过真实 tronweb，注入派生函数
-      (
-        svc as unknown as { deriveTronAddressFn: typeof deriveAddr }
-      ).deriveTronAddressFn = deriveAddr;
-    }
     return svc;
   }
 
@@ -142,11 +125,7 @@ describe('AgentApplyConfigService', () => {
         {
           tronApiBaseUrl: 'https://api.trongrid.io',
           tronApiKey: 'tron-key',
-          justlendContractAddress: 'TCONTRACT',
-          justlendPayerPrivateKey:
-            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          catfeePayerPrivateKey: null,
-          energyProvider: 'justlend',
+          platformReceiveAddress: 'TPlatformAddr123456789012345678901234',
           catfeeEnvironment: 'nile',
           catfeeProdApiBaseUrl: 'https://api.catfee.io',
           catfeeProdApiKey: '',
@@ -163,9 +142,7 @@ describe('AgentApplyConfigService', () => {
       ],
     });
     const registry = makeRegistry();
-    const svc = await buildSvc(conn, registry, () =>
-      Promise.resolve('TDERIVED12345'),
-    );
+    const svc = await buildSvc(conn, registry);
 
     await svc.applyConfig(50, 4); // userId=50, licenseId=4
 
@@ -181,13 +158,21 @@ describe('AgentApplyConfigService', () => {
     expect(p.platform).toMatchObject({
       tronApiBaseUrl: 'https://api.trongrid.io',
       tronApiKey: 'tron-key',
-      platformReceiveAddress: 'TDERIVED12345',
-      energyProvider: 'justlend',
+      platformReceiveAddress: 'TPlatformAddr123456789012345678901234',
     });
-    // 私钥透传，长度 64 hex
+    // T12：provider 区分字段及私钥字段彻底移除
     expect(
       (p.platform as Record<string, unknown>).justlendPayerPrivateKey,
-    ).toHaveLength(64);
+    ).toBeUndefined();
+    expect(
+      (p.platform as Record<string, unknown>).catfeePayerPrivateKey,
+    ).toBeUndefined();
+    expect(
+      (p.platform as Record<string, unknown>).energyProvider,
+    ).toBeUndefined();
+    expect(
+      (p.platform as Record<string, unknown>).justlendContractAddress,
+    ).toBeUndefined();
     expect(p.bot).toMatchObject({
       token: '123:ABC',
       username: 'mybot',
@@ -215,11 +200,7 @@ describe('AgentApplyConfigService', () => {
         {
           tronApiBaseUrl: 'https://api.trongrid.io',
           tronApiKey: '',
-          justlendContractAddress: '',
-          justlendPayerPrivateKey: '',
-          catfeePayerPrivateKey:
-            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-          energyProvider: 'catfee',
+          platformReceiveAddress: 'TPlatformAddr123456789012345678901234',
           catfeeEnvironment: 'nile',
           catfeeProdApiBaseUrl: 'https://api.catfee.io',
           catfeeProdApiKey: '',
@@ -239,7 +220,7 @@ describe('AgentApplyConfigService', () => {
     registry.callAgent.mockRejectedValue(
       new ServiceUnavailableException('agent license=4 未在线'),
     );
-    const svc = await buildSvc(conn, registry, () => Promise.resolve('X'));
+    const svc = await buildSvc(conn, registry);
 
     await expect(svc.applyConfig(50, 4)).rejects.toBeInstanceOf(
       ServiceUnavailableException,
@@ -264,11 +245,7 @@ describe('AgentApplyConfigService', () => {
         {
           tronApiBaseUrl: 'https://api.trongrid.io',
           tronApiKey: '',
-          justlendContractAddress: '',
-          justlendPayerPrivateKey: '',
-          catfeePayerPrivateKey:
-            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-          energyProvider: 'catfee',
+          platformReceiveAddress: 'TPlatformAddr123456789012345678901234',
           catfeeEnvironment: 'nile',
           catfeeProdApiBaseUrl: 'https://api.catfee.io',
           catfeeProdApiKey: '',
@@ -288,7 +265,7 @@ describe('AgentApplyConfigService', () => {
     registry.callAgent.mockRejectedValue(
       new Error('agent error code=-40001 message=apply-config 进程退出'),
     );
-    const svc = await buildSvc(conn, registry, () => Promise.resolve('X'));
+    const svc = await buildSvc(conn, registry);
 
     // service 把任意 callAgent 错误归一为 503，避免业务调用方区分网络/逻辑错
     await expect(svc.applyConfig(50, 4)).rejects.toBeInstanceOf(
@@ -296,23 +273,7 @@ describe('AgentApplyConfigService', () => {
     );
   });
 
-  // ============================================================
-  // T11.11：catfee 模式下也必须派生 platformReceiveAddress 下发
-  //
-  // 根因背景：
-  //   原代码只在 energyProvider==='justlend' 时派生地址，catfee 模式下
-  //   platformReceiveAddress='' 透传，触发 go-bot-v2 validateRuntimeConfig
-  //   PLATFORM_RECEIVE_ADDRESS required 校验失败，bot exit 1。
-  //
-  // 修复：catfee 模式从 catfeePayerPrivateKey 派生地址，与 justlend 对称。
-  // ============================================================
-
-  it('catfee 模式：从 catfeePayerPrivateKey 派生 platformReceiveAddress 并下发', async () => {
-    const derivedAddr = 'TCATFEEDERIVED777';
-    const catfeePk =
-      'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
-    const callsTo: Array<{ pk: string; baseUrl: string; key?: string }> = [];
-
+  it('T12：使用 platformReceiveAddress 字段直接下发，不再派生地址', async () => {
     const conn = makeFakeConn({
       user: [{ customerId: 100 }],
       license: [{ id: 4 }],
@@ -330,10 +291,7 @@ describe('AgentApplyConfigService', () => {
         {
           tronApiBaseUrl: 'https://api.trongrid.io',
           tronApiKey: 'tron-key',
-          justlendContractAddress: '',
-          justlendPayerPrivateKey: '',
-          catfeePayerPrivateKey: catfeePk,
-          energyProvider: 'catfee',
+          platformReceiveAddress: 'TPlatformAddr123456789012345678901234',
           catfeeEnvironment: 'nile',
           catfeeProdApiBaseUrl: 'https://api.catfee.io',
           catfeeProdApiKey: '',
@@ -350,37 +308,22 @@ describe('AgentApplyConfigService', () => {
       ],
     });
     const registry = makeRegistry();
-    const svc = await buildSvc(conn, registry, async (pk, baseUrl, key) => {
-      callsTo.push({ pk, baseUrl, key });
-      return derivedAddr;
-    });
+    const svc = await buildSvc(conn, registry);
 
     await svc.applyConfig(50, 4);
 
-    // 1. 派生函数被调用：使用 catfee 私钥（不是 justlend 的空字符串）
-    expect(callsTo).toHaveLength(1);
-    expect(callsTo[0].pk).toBe(catfeePk);
-    expect(callsTo[0].baseUrl).toBe('https://api.trongrid.io');
-    expect(callsTo[0].key).toBe('tron-key');
-
-    // 2. 下发的 platformReceiveAddress 是派生地址而非空串
     expect(registry.callAgent).toHaveBeenCalledTimes(1);
-    const params = registry.callAgent.mock.calls[0][2] as Record<
-      string,
-      unknown
-    >;
+    const params = registry.callAgent.mock.calls[0][2] as Record<string, unknown>;
     const platform = params.platform as Record<string, unknown>;
-    expect(platform.platformReceiveAddress).toBe(derivedAddr);
-    expect(platform.energyProvider).toBe('catfee');
-
-    // 3. catfee 私钥透传（agent 端可能用于内部签名 / 后续扩展）
-    expect(platform.catfeePayerPrivateKey).toBe(catfeePk);
-
-    // 4. justlend 字段保持为空字符串（catfee 模式下不需要）
-    expect(platform.justlendPayerPrivateKey).toBe('');
+    expect(platform.platformReceiveAddress).toBe('TPlatformAddr123456789012345678901234');
+    // T12：不再下发任何 provider 区分字段
+    expect(platform.energyProvider).toBeUndefined();
+    expect(platform.justlendPayerPrivateKey).toBeUndefined();
+    expect(platform.justlendContractAddress).toBeUndefined();
+    expect(platform.catfeePayerPrivateKey).toBeUndefined();
   });
 
-  it('catfee 模式但 catfeePayerPrivateKey 缺失 → 500（配置错误，不能下发空地址）', async () => {
+  it('T12：platformReceiveAddress 空时抛 500（不能下发空地址让 bot 死循环）', async () => {
     const conn = makeFakeConn({
       user: [{ customerId: 100 }],
       license: [{ id: 4 }],
@@ -398,10 +341,7 @@ describe('AgentApplyConfigService', () => {
         {
           tronApiBaseUrl: 'https://api.trongrid.io',
           tronApiKey: '',
-          justlendContractAddress: '',
-          justlendPayerPrivateKey: '',
-          catfeePayerPrivateKey: null, // ← 缺失
-          energyProvider: 'catfee',
+          platformReceiveAddress: '', // 空地址
           catfeeEnvironment: 'nile',
           catfeeProdApiBaseUrl: 'https://api.catfee.io',
           catfeeProdApiKey: '',
@@ -418,16 +358,11 @@ describe('AgentApplyConfigService', () => {
       ],
     });
     const registry = makeRegistry();
-    const svc = await buildSvc(conn, registry, () =>
-      Promise.resolve('SHOULD_NOT_BE_CALLED'),
-    );
+    const svc = await buildSvc(conn, registry);
 
-    // 与 justlend 私钥派生失败一致：500（系统级配置错误）
     await expect(svc.applyConfig(50, 4)).rejects.toBeInstanceOf(
       InternalServerErrorException,
     );
-
-    // 派生地址失败时不应该下发给 agent
     expect(registry.callAgent).not.toHaveBeenCalled();
   });
 });
