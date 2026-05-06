@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { finalize } from 'rxjs/operators';
-import { timer } from 'rxjs';
+import { catchError, finalize, switchMap, takeWhile } from 'rxjs/operators';
+import { EMPTY, Subscription, of, timer } from 'rxjs';
 
 import {
   MyBotAgentView,
@@ -17,8 +17,6 @@ import { NzDescriptionsModule } from 'ng-zorro-antd/descriptions';
 import { NzDividerModule } from 'ng-zorro-antd/divider';
 import { NzEmptyModule } from 'ng-zorro-antd/empty';
 import { NzIconModule } from 'ng-zorro-antd/icon';
-import { NzMessageService } from 'ng-zorro-antd/message';
-import { NzModalService } from 'ng-zorro-antd/modal';
 import { NzPopconfirmModule } from 'ng-zorro-antd/popconfirm';
 import { NzProgressModule } from 'ng-zorro-antd/progress';
 import { NzSpaceModule } from 'ng-zorro-antd/space';
@@ -85,13 +83,24 @@ export class MyBotComponent implements OnInit {
   /**
    * 正在下发 action 的 licenseId 集合。用于禁用按钮防重复点击。
    * 不用 loading 整体标志：同一页多 agent 时要允许并行操作不同 license。
+   *
+   * 一次 action 的完整生命周期：
+   * 1. 点击 → 加入 actionInFlight，UI 按钮 loading + 本地乐观更新 botStatus
+   * 2. POST /my-bot/:licenseId/start 下发
+   * 3. 从 +2s 开始每 2s 轮询 findMine()，直到：
+   *    - botStatus 进入稳定态（running / stopped / error）
+   *    - 或 20s 超时
+   * 4. 轮询结束 → 从 actionInFlight 移除，按钮恢复可点
+   *
+   * 期间用户点其他按钮（停止/重载）或切走页面：trackedPolls 会被取消。
    */
   readonly actionInFlight = signal<Set<number>>(new Set());
 
+  /** 每个 licenseId 对应正在跑的 poll 订阅，用于在新 action 到来时取消老轮询 */
+  private trackedPolls = new Map<number, Subscription>();
+
   private destroyRef = inject(DestroyRef);
   private dataService = inject(MyBotService);
-  private message = inject(NzMessageService);
-  private modal = inject(NzModalService);
 
   ngOnInit(): void {
     this.loadAgents();
@@ -278,56 +287,145 @@ export class MyBotComponent implements OnInit {
   }
 
   startBot(a: MyBotAgentView): void {
-    this.dispatchAction(a.licenseId, this.dataService.startBot(a.licenseId), '启动指令已下发');
+    this.dispatchAction({
+      licenseId: a.licenseId,
+      obs: this.dataService.startBot(a.licenseId),
+      optimisticStatus: 'starting',
+      terminalStatuses: ['running', 'error'],
+    });
   }
 
   stopBot(a: MyBotAgentView): void {
-    this.dispatchAction(a.licenseId, this.dataService.stopBot(a.licenseId), '停止指令已下发');
+    this.dispatchAction({
+      licenseId: a.licenseId,
+      obs: this.dataService.stopBot(a.licenseId),
+      // bot 端没有 'stopping' 中间态；直接乐观置 stopped 让 UI 立刻反馈
+      optimisticStatus: 'stopped',
+      terminalStatuses: ['stopped', 'error'],
+    });
   }
 
   reloadBot(a: MyBotAgentView): void {
-    this.dispatchAction(a.licenseId, this.dataService.reloadBot(a.licenseId), '重载指令已下发');
+    this.dispatchAction({
+      licenseId: a.licenseId,
+      obs: this.dataService.reloadBot(a.licenseId),
+      // 重载流程：先 stopping → starting → running。乐观先置 starting 让用户看到"动了"
+      optimisticStatus: 'starting',
+      terminalStatuses: ['running', 'error'],
+    });
   }
 
   /**
    * 统一下发路径：
-   * 1. 标记 actionInFlight，防抖
-   * 2. 发 HTTP；BaseHttpService 已处理错误 toast（503 "agent 不在线" 等）
-   * 3. 成功后延迟 2s 再拉列表——给 agent 时间上报新的 bot 状态
    *
-   * 未做乐观 UI 更新：真实状态以心跳回传为准；立即改本地状态会在 agent 启动
-   * 失败时误导用户。
+   * 1. 取消该 license 的旧轮询（若有）
+   * 2. 标记 actionInFlight + 乐观更新本地 botStatus → UI 立刻进入「启动中/已停止」反馈
+   * 3. POST 下发 action
+   * 4. +2s 起每 2s 轮询 findMine()，最多 10 次（合计 22s 窗口）
+   *    - 命中 terminalStatuses（running / stopped / error）→ 立即停止轮询
+   *    - 超时仍未稳定 → 停止轮询（可能 agent 离线，状态保持当前最新值）
+   * 5. 轮询结束 → 移除 actionInFlight + 清理 trackedPolls
+   *
+   * 为什么不直接乐观置终态：bot.start 的真实路径是 stopped → starting → running，
+   * 中间可能因 token 错误停在 error。直接置 running 会误导用户；置 starting
+   * 既给即时反馈又不假装最终成功。
    */
-  private dispatchAction(
-    licenseId: number,
-    obs: ReturnType<MyBotService['startBot']>,
-    _successMsg: string,
-  ): void {
+  private dispatchAction(opts: {
+    licenseId: number;
+    obs: ReturnType<MyBotService['startBot']>;
+    optimisticStatus: 'starting' | 'stopped';
+    terminalStatuses: Array<'running' | 'stopped' | 'error'>;
+  }): void {
+    const { licenseId, obs, optimisticStatus, terminalStatuses } = opts;
+
+    // 1. 取消可能的旧轮询（用户连点多个按钮）
+    this.trackedPolls.get(licenseId)?.unsubscribe();
+    this.trackedPolls.delete(licenseId);
+
+    // 2. 乐观更新 + 标记 in-flight
     const mark = new Set(this.actionInFlight());
     mark.add(licenseId);
     this.actionInFlight.set(mark);
+    this.applyOptimisticBotStatus(licenseId, optimisticStatus);
 
+    // 3. 下发请求
     obs
-      .pipe(
-        finalize(() => {
-          // 2s 后刷新列表（心跳间隔最长 30s，但主动 action 后 agent 会立刻 heartbeat）
-          timer(2000)
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe(() => {
-              this.loadAgents();
-            });
-          // 无论成功失败都解除 in-flight（刷新完成与否与此解耦）
-          const next = new Set(this.actionInFlight());
-          next.delete(licenseId);
-          this.actionInFlight.set(next);
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        // BaseHttpService 的 needSuccessInfo: true 会自动 toast 成功信息，不再手动
-        // 处理。error 分支也由 BaseHttpService 统一 toast，这里只需静默。
-        next: () => { /* no-op */ },
-        error: () => { /* no-op，BaseHttpService 已 toast */ },
+        next: () => {
+          // 4. 开始轮询直到状态稳定或超时
+          const poll$ = timer(2000, 2000).pipe(
+            // 最多 11 个 tick = ~22s（覆盖最长一次 30s 心跳间隔下的两次心跳）
+            takeWhile((_, idx) => idx < 11),
+            switchMap(() =>
+              this.dataService.findMine().pipe(
+                catchError(() => of(null)), // 单次拉取失败不中断轮询
+              ),
+            ),
+            takeWhile(list => {
+              if (!list) return true; // 拉取失败：继续等
+              const found = list.find(x => x.licenseId === licenseId);
+              // 状态进入终态 → 此 tick 接收最新数据后即停（inclusive=true）
+              const isTerminal =
+                !!found && terminalStatuses.includes(found.botStatus as 'running' | 'stopped' | 'error');
+              return !isTerminal;
+            }, true),
+          );
+
+          const sub = poll$
+            .pipe(
+              finalize(() => this.releaseInFlight(licenseId)),
+              takeUntilDestroyed(this.destroyRef),
+            )
+            .subscribe({
+              next: list => {
+                if (list) {
+                  this.agents.set(list);
+                }
+              },
+              error: () => { /* 忽略：finalize 兜底 */ },
+            });
+
+          this.trackedPolls.set(licenseId, sub);
+        },
+        error: () => {
+          // BaseHttpService 已经 toast 错误（如 503 agent 离线、403 权限不足）
+          // 回滚乐观状态：拉一次最新数据覆盖
+          this.releaseInFlight(licenseId);
+          this.dataService
+            .findMine()
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: list => this.agents.set(list ?? []),
+              error: () => EMPTY,
+            });
+        },
       });
+  }
+
+  /**
+   * 乐观更新本地 botStatus，让按钮 + tag 立即反映"已下发"状态。
+   * 真实状态以下一次 findMine() 心跳数据为准会覆盖此处的乐观值。
+   */
+  private applyOptimisticBotStatus(licenseId: number, status: 'starting' | 'stopped'): void {
+    this.agents.update(list =>
+      list.map(a =>
+        a.licenseId === licenseId
+          ? {
+              ...a,
+              botStatus: status,
+              // 乐观置空 lastError，避免上次的红字残留误导
+              botLastError: status === 'starting' ? '' : a.botLastError,
+            }
+          : a,
+      ),
+    );
+  }
+
+  private releaseInFlight(licenseId: number): void {
+    const next = new Set(this.actionInFlight());
+    next.delete(licenseId);
+    this.actionInFlight.set(next);
+    this.trackedPolls.delete(licenseId);
   }
 }
