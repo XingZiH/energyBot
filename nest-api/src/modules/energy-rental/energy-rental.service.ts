@@ -9,6 +9,7 @@ import {
   agentBotConfigsTable,
   agentProfilesTable,
   agentRechargeOrdersTable,
+  agentsTable,
   agentWalletAccountsTable,
   botRuntimeStatusTable,
   energyOrdersTable,
@@ -18,6 +19,7 @@ import {
   energyUserAddressesTable,
   energyWalletTransactionsTable,
   sysUserRoleTable,
+  userTable,
 } from '../../drizzle/schema';
 import {
   CreateEnergyPackageDto,
@@ -790,12 +792,64 @@ export class EnergyRentalService {
       const config = agentBotConfigs.find(
         (item) => Number(item.agentId) === Number(scope.agentId),
       );
+
+      // T12 改造：从 agents 表读取实时运行态，替代已废弃的 bot_runtime_status 死表。
+      // 关联链：scope.agentId (agent_profiles.id) → agent_profiles.userId
+      //         → user.customerId → agents.customerId
+      const agentProfile = agentProfiles.find(
+        (item) => Number(item.id) === Number(scope.agentId),
+      );
+      let runtime: Row | undefined;
+      if (agentProfile) {
+        const userRows = await this.conn
+          .select({ customerId: userTable.customerId })
+          .from(userTable)
+          .where(eq(userTable.id, Number(agentProfile.userId)))
+          .limit(1);
+        const customerId = userRows[0]?.customerId;
+        if (customerId) {
+          const agentRows = await this.conn
+            .select()
+            .from(agentsTable)
+            .where(eq(agentsTable.customerId, customerId));
+          // 取 lastHeartbeatAt 最新的一行（与旧 latestBotRuntimeStatus 逻辑一致）
+          const latestAgent = agentRows.sort(
+            (a, b) =>
+              (b.lastHeartbeatAt?.getTime() ?? 0) -
+              (a.lastHeartbeatAt?.getTime() ?? 0),
+          )[0];
+          if (latestAgent) {
+            // 适配为 buildBotRuntimeStatus 期望的 runtime row shape
+            runtime = {
+              lastHeartbeatAt: latestAgent.lastHeartbeatAt,
+              runtimeStatus: latestAgent.botStatus ?? 'unknown',
+              pollingStatus:
+                latestAgent.botStatus === 'running'
+                  ? 'polling'
+                  : latestAgent.botStatus ?? 'unknown',
+              lastStartedAt:
+                latestAgent.botStatus === 'running' &&
+                latestAgent.botUptimeSeconds != null
+                  ? new Date(
+                      now.getTime() - latestAgent.botUptimeSeconds * 1000,
+                    )
+                  : null,
+              lastStoppedAt: null,
+              lastError: latestAgent.botLastError ?? '',
+              instanceId: latestAgent.hostName
+                ? `${latestAgent.hostName}:${latestAgent.botPid ?? ''}`
+                : '',
+            };
+          }
+        }
+      }
+
       return this.buildBotRuntimeStatus({
         scope: 'agent',
         agentId: scope.agentId ?? null,
         desiredStatus: normalizeBotStatus(config?.botStatus),
         tokenConfigured: hasValue(config?.telegramBotToken),
-        runtime: latestBotRuntimeStatus(runtimeRows, 'agent', scope.agentId),
+        runtime,
         now,
       });
     }
