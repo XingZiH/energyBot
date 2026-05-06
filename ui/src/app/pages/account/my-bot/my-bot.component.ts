@@ -335,16 +335,14 @@ export class MyBotComponent implements OnInit {
   }
 
   /**
-   * 统一下发路径：
+   * 统一下发路径（简化版 —— 全局 loading 遮罩）：
    *
-   * 1. 取消该 license 的旧轮询（若有）
-   * 2. 标记 actionInFlight + 乐观更新本地 botStatus → UI 立刻进入「启动中/已停止」反馈
-   * 3. POST 下发 action
-   * 4. +2s 起每 2s 轮询 findMine()，最多 15 次（合计 32s 窗口，覆盖 30s 心跳间隔）
-   *    - 命中 terminalStatuses（running / stopped / error）→ 立即停止轮询
-   *    - 超时仍未稳定 → 停止轮询（可能 agent 离线，状态保持当前最新值）
-   *    - 轮询期间若 API 返回非终态（如 stopped），保持本地乐观值不被覆盖
-   * 5. 轮询结束 → 移除 actionInFlight + 清理 trackedPolls
+   * 点击操作 → 整个页面进入 loading 状态（nz-card skeleton）
+   * → POST 下发 → 每 2s 轮询 findMine() 直到状态变为终态
+   * → 用真实数据刷新页面 → 退出 loading
+   *
+   * 绝不显示中间态，不误报。用户看到的要么是 loading 遮罩，
+   * 要么是确认过的真实状态。
    */
   private dispatchAction(opts: {
     licenseId: number;
@@ -352,91 +350,70 @@ export class MyBotComponent implements OnInit {
     optimisticStatus: 'starting' | 'stopped';
     terminalStatuses: Array<'running' | 'stopped' | 'error'>;
   }): void {
-    const { licenseId, obs, optimisticStatus, terminalStatuses } = opts;
+    const { licenseId, obs, terminalStatuses } = opts;
 
-    // 1. 取消可能的旧轮询（用户连点多个按钮）
+    // 1. 取消可能的旧轮询
     this.trackedPolls.get(licenseId)?.unsubscribe();
     this.trackedPolls.delete(licenseId);
 
-    // 2. 乐观更新 + 标记 in-flight
-    const mark = new Set(this.actionInFlight());
-    mark.add(licenseId);
-    this.actionInFlight.set(mark);
-    this.applyOptimisticBotStatus(licenseId, optimisticStatus);
+    // 2. 全局 loading 遮罩
+    this.loading.set(true);
 
     // 3. 下发请求
     obs
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          // 4. 开始轮询直到状态稳定或超时
+          // 4. 轮询直到状态变为终态或超时（最多 60s，覆盖两个心跳周期）
           const poll$ = timer(2000, 2000).pipe(
-            // 最多 15 个 tick = ~30s（覆盖一次完整心跳间隔 30s）
-            takeWhile((_, idx) => idx < 15),
+            takeWhile((_, idx) => idx < 30), // 30 ticks × 2s = 60s
             switchMap(() =>
               this.dataService.findMine().pipe(
-                catchError(() => of(null)), // 单次拉取失败不中断轮询
+                catchError(() => of(null)),
               ),
             ),
             takeWhile(list => {
-              if (!list) return true; // 拉取失败：继续等
+              if (!list) return true;
               const found = list.find(x => x.licenseId === licenseId);
-              // 状态进入终态 → 此 tick 接收最新数据后即停（inclusive=true）
               const isTerminal =
                 !!found && terminalStatuses.includes(found.botStatus as 'running' | 'stopped' | 'error');
               return !isTerminal;
-            }, true),
+            }, true), // inclusive: 把命中终态的那次数据也发出来
           );
 
           const sub = poll$
             .pipe(
-              finalize(() => this.releaseInFlight(licenseId)),
+              finalize(() => this.loading.set(false)),
               takeUntilDestroyed(this.destroyRef),
             )
             .subscribe({
               next: list => {
                 if (list) {
-                  // 关键：如果 API 返回的状态还不是终态（例如仍为 stopped），
-                  // 保持乐观的 starting 不被覆盖 —— 避免 UI 抖回 "已停止"
-                  const found = list.find(x => x.licenseId === licenseId);
-                  if (found && !terminalStatuses.includes(found.botStatus as any)) {
-                    // 保持 optimistic 状态不变，只更新其他字段
-                    this.agents.set(
-                      list.map(a =>
-                        a.licenseId === licenseId
-                          ? { ...a, botStatus: optimisticStatus }
-                          : a,
-                      ),
-                    );
-                  } else {
-                    // 已到终态 → 直接使用 API 返回的真实数据
-                    this.agents.set(list);
-                  }
+                  this.agents.set(list);
                 }
               },
-              error: () => { /* 忽略：finalize 兜底 */ },
             });
 
           this.trackedPolls.set(licenseId, sub);
         },
         error: () => {
-          // BaseHttpService 已经 toast 错误（如 503 agent 离线、403 权限不足）
-          // 回滚乐观状态：拉一次最新数据覆盖
-          this.releaseInFlight(licenseId);
+          // POST 失败 → 退出 loading，拉一次最新数据
           this.dataService
             .findMine()
-            .pipe(takeUntilDestroyed(this.destroyRef))
+            .pipe(
+              finalize(() => this.loading.set(false)),
+              takeUntilDestroyed(this.destroyRef),
+            )
             .subscribe({
               next: list => this.agents.set(list ?? []),
-              error: () => EMPTY,
+              error: () => {},
             });
         },
       });
   }
 
   /**
-   * 乐观更新本地 botStatus，让按钮 + tag 立即反映"已下发"状态。
-   * 真实状态以下一次 findMine() 心跳数据为准会覆盖此处的乐观值。
+   * 乐观更新本地 botStatus（保留备用，当前 dispatchAction 使用全局 loading 遮罩）。
    */
   private applyOptimisticBotStatus(licenseId: number, status: 'starting' | 'stopped'): void {
     this.agents.update(list =>
@@ -445,7 +422,6 @@ export class MyBotComponent implements OnInit {
           ? {
               ...a,
               botStatus: status,
-              // 乐观置空 lastError，避免上次的红字残留误导
               botLastError: status === 'starting' ? '' : a.botLastError,
             }
           : a,
