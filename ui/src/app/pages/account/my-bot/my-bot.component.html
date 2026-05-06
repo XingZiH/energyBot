@@ -18,7 +18,8 @@
     @let a = agents()[0];
 
     <!-- 醒目的 Bot 状态横幅 -->
-    <div class="bot-status-banner" [class]="'bot-status-banner bot-status-banner--' + (a.botStatus || 'unknown')">
+    <div [class]="'bot-status-banner bot-status-banner--' + (a.botStatus || 'unknown')"
+         [class.bot-status-banner--starting]="isActionInFlight(a.licenseId)">
       <div class="bot-status-banner__left">
         <div class="bot-status-banner__indicator">
           @if (a.botStatus === 'starting' || isActionInFlight(a.licenseId)) {
@@ -33,7 +34,13 @@
         </div>
         <div class="bot-status-banner__text">
           <div class="bot-status-banner__label">Bot 状态</div>
-          <div class="bot-status-banner__value">{{ botStatusLabel(a.botStatus) }}</div>
+          <div class="bot-status-banner__value">
+            @if (isActionInFlight(a.licenseId) && a.botStatus !== 'running') {
+              启动中...
+            } @else {
+              {{ botStatusLabel(a.botStatus) }}
+            }
+          </div>
         </div>
       </div>
       <div class="bot-status-banner__actions">
