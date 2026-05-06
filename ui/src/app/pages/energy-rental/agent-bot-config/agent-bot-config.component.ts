@@ -265,11 +265,16 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
     if (!ui) {
       return;
     }
-    const payload = {
+    const payload: Record<string, unknown> = {
       welcomeText: patch.welcomeText ?? ui.welcomeText,
       menuConfig: patch.menuConfig ?? ui.menuConfig,
-      messageConfig: patch.messageConfig ?? ui.messageConfig
     };
+    // messageConfig 为 null/undefined 时不传——让后端保留原值，
+    // 否则 @ValidateNested 会对 null 报 "must be a string"。
+    const msgCfg = patch.messageConfig ?? ui.messageConfig;
+    if (msgCfg) {
+      payload['messageConfig'] = msgCfg;
+    }
     this.saving.set(true);
     this.uiConfigService
       .saveUiConfig(payload, ui.updatedAt)
