@@ -81,22 +81,8 @@ export class MyBotComponent implements OnInit {
   readonly expandedIds = signal<Set<number>>(new Set());
 
   /**
-   * 正在下发 action 的 licenseId 集合。用于禁用按钮防重复点击。
-   * 不用 loading 整体标志：同一页多 agent 时要允许并行操作不同 license。
-   *
-   * 一次 action 的完整生命周期：
-   * 1. 点击 → 加入 actionInFlight，UI 按钮 loading + 本地乐观更新 botStatus
-   * 2. POST /my-bot/:licenseId/start 下发
-   * 3. 从 +2s 开始每 2s 轮询 findMine()，直到：
-   *    - botStatus 进入稳定态（running / stopped / error）
-   *    - 或 20s 超时
-   * 4. 轮询结束 → 从 actionInFlight 移除，按钮恢复可点
-   *
-   * 期间用户点其他按钮（停止/重载）或切走页面：trackedPolls 会被取消。
+   * 每个 licenseId 对应正在跑的 poll 订阅，用于在新 action 到来时取消老轮询。
    */
-  readonly actionInFlight = signal<Set<number>>(new Set());
-
-  /** 每个 licenseId 对应正在跑的 poll 订阅，用于在新 action 到来时取消老轮询 */
   private trackedPolls = new Map<number, Subscription>();
 
   private destroyRef = inject(DestroyRef);
@@ -109,20 +95,84 @@ export class MyBotComponent implements OnInit {
 
   /**
    * 每 30s 静默刷新一次 agent 数据（不显示 loading），确保页面始终展示最新状态。
-   * 如果有 action 正在轮询（actionInFlight 非空），跳过本次静默刷新，避免冲突。
+   * 如果正在 loading（有操作进行中），跳过本次静默刷新，避免冲突。
    */
   private startAutoRefresh(): void {
     interval(30_000)
       .pipe(
         switchMap(() => {
-          if (this.actionInFlight().size > 0) return EMPTY;
+          if (this.loading()) return EMPTY;
           return this.dataService.findMine().pipe(catchError(() => EMPTY));
         }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(list => {
-        if (list) this.agents.set(list);
+        if (list) {
+          this.agents.set(list);
+          // 如果刷新后发现有 agent 处于过渡态，自动开始轮询
+          this.checkTransitState(list);
+        }
       });
+  }
+
+  /**
+   * 检查是否有 agent 处于过渡态（starting/stopping），如果有则自动进入
+   * loading + 轮询，确保刷新页面后也能等待操作完成。
+   */
+  private checkTransitState(list: MyBotAgentView[]): void {
+    if (this.loading()) return; // 已经在 loading 了
+    for (const a of list) {
+      if (a.botStatus === 'starting' || a.botStatus === 'stopping') {
+        const terminalStatuses: Array<'running' | 'stopped' | 'error'> =
+          a.botStatus === 'starting' ? ['running', 'error'] : ['stopped', 'error'];
+        this.startPollingUntilTerminal(a.licenseId, terminalStatuses);
+        break; // 单 agent 场景只有一个
+      }
+    }
+  }
+
+  /**
+   * 进入 loading 并轮询直到 bot 状态变为终态。
+   * 由 dispatchAction 和 checkTransitState 共同调用。
+   */
+  private startPollingUntilTerminal(
+    licenseId: number,
+    terminalStatuses: Array<'running' | 'stopped' | 'error'>,
+  ): void {
+    // 取消可能的旧轮询
+    this.trackedPolls.get(licenseId)?.unsubscribe();
+    this.trackedPolls.delete(licenseId);
+
+    this.loading.set(true);
+
+    const poll$ = timer(2000, 2000).pipe(
+      takeWhile((_, idx) => idx < 30), // 30 ticks × 2s = 60s 超时
+      switchMap(() =>
+        this.dataService.findMine().pipe(
+          catchError(() => of(null)),
+        ),
+      ),
+      takeWhile(list => {
+        if (!list) return true;
+        const found = list.find(x => x.licenseId === licenseId);
+        const isTerminal =
+          !!found && terminalStatuses.includes(found.botStatus as 'running' | 'stopped' | 'error');
+        return !isTerminal;
+      }, true),
+    );
+
+    const sub = poll$
+      .pipe(
+        finalize(() => this.loading.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: list => {
+          if (list) this.agents.set(list);
+        },
+      });
+
+    this.trackedPolls.set(licenseId, sub);
   }
 
   loadAgents(): void {
@@ -131,11 +181,22 @@ export class MyBotComponent implements OnInit {
     this.dataService
       .findMine()
       .pipe(
-        finalize(() => this.loading.set(false)),
+        finalize(() => {
+          // 只有在没有活跃轮询时才关 loading（checkTransitState 可能开启新轮询）
+          if (this.trackedPolls.size === 0) {
+            this.loading.set(false);
+          }
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
-        next: list => this.agents.set(list ?? []),
+        next: list => {
+          this.agents.set(list ?? []);
+          // 初始加载后检测是否有 agent 处于过渡态，自动进入轮询
+          if (list?.length) {
+            this.checkTransitState(list);
+          }
+        },
         error: err => {
           // 后端 404（未绑定客户）在本页属于"空状态"，不是 toast 报错
           const msg = err?.error?.msg || err?.message || '加载失败';
@@ -241,6 +302,8 @@ export class MyBotComponent implements OnInit {
         return 'green';
       case 'starting':
         return 'blue';
+      case 'stopping':
+        return 'orange';
       case 'stopped':
         return 'default';
       case 'error':
@@ -257,6 +320,8 @@ export class MyBotComponent implements OnInit {
         return '运行中';
       case 'starting':
         return '启动中';
+      case 'stopping':
+        return '停止中';
       case 'stopped':
         return '已停止';
       case 'error':
@@ -272,23 +337,23 @@ export class MyBotComponent implements OnInit {
 
   /**
    * 启动按钮可点：agent 在线 + bot 为 stopped/error/unknown。
-   * running/starting 时禁用避免重复启动。botStatus===null 也允许点击——
+   * running/starting/stopping 时禁用避免重复启动。botStatus===null 也允许点击——
    * 给客户一个「试一次」的机会，若 agent 不支持后端会 503（dispatcher 未注册）。
    */
   canStart(a: MyBotAgentView): boolean {
     if (a.status !== 'online') return false;
-    if (this.actionInFlight().has(a.licenseId)) return false;
-    return a.botStatus !== 'running' && a.botStatus !== 'starting';
+    if (this.loading()) return false;
+    return a.botStatus !== 'running' && a.botStatus !== 'starting' && a.botStatus !== 'stopping';
   }
 
   /**
-   * 停止按钮可点：agent 在线 + bot 处于 running/starting/error。
-   * stopped/unknown/null 时无意义。
+   * 停止按钮可点：agent 在线 + bot 处于 running/error。
+   * stopped/stopping/unknown/null 时无意义。
    */
   canStop(a: MyBotAgentView): boolean {
     if (a.status !== 'online') return false;
-    if (this.actionInFlight().has(a.licenseId)) return false;
-    return a.botStatus === 'running' || a.botStatus === 'starting' || a.botStatus === 'error';
+    if (this.loading()) return false;
+    return a.botStatus === 'running' || a.botStatus === 'error';
   }
 
   /**
@@ -297,12 +362,8 @@ export class MyBotComponent implements OnInit {
    */
   canReload(a: MyBotAgentView): boolean {
     if (a.status !== 'online') return false;
-    if (this.actionInFlight().has(a.licenseId)) return false;
+    if (this.loading()) return false;
     return a.botStatus === 'running';
-  }
-
-  isActionInFlight(licenseId: number): boolean {
-    return this.actionInFlight().has(licenseId);
   }
 
   startBot(a: MyBotAgentView): void {
@@ -318,8 +379,7 @@ export class MyBotComponent implements OnInit {
     this.dispatchAction({
       licenseId: a.licenseId,
       obs: this.dataService.stopBot(a.licenseId),
-      // bot 端没有 'stopping' 中间态；直接乐观置 stopped 让 UI 立刻反馈
-      optimisticStatus: 'stopped',
+      optimisticStatus: 'stopping',
       terminalStatuses: ['stopped', 'error'],
     });
   }
@@ -347,7 +407,7 @@ export class MyBotComponent implements OnInit {
   private dispatchAction(opts: {
     licenseId: number;
     obs: ReturnType<MyBotService['startBot']>;
-    optimisticStatus: 'starting' | 'stopped';
+    optimisticStatus: 'starting' | 'stopping';
     terminalStatuses: Array<'running' | 'stopped' | 'error'>;
   }): void {
     const { licenseId, obs, terminalStatuses } = opts;
@@ -412,27 +472,4 @@ export class MyBotComponent implements OnInit {
       });
   }
 
-  /**
-   * 乐观更新本地 botStatus（保留备用，当前 dispatchAction 使用全局 loading 遮罩）。
-   */
-  private applyOptimisticBotStatus(licenseId: number, status: 'starting' | 'stopped'): void {
-    this.agents.update(list =>
-      list.map(a =>
-        a.licenseId === licenseId
-          ? {
-              ...a,
-              botStatus: status,
-              botLastError: status === 'starting' ? '' : a.botLastError,
-            }
-          : a,
-      ),
-    );
-  }
-
-  private releaseInFlight(licenseId: number): void {
-    const next = new Set(this.actionInFlight());
-    next.delete(licenseId);
-    this.actionInFlight.set(next);
-    this.trackedPolls.delete(licenseId);
-  }
 }

@@ -11,7 +11,7 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import { DrizzleAsyncProvider } from '../../drizzle/drizzle.provider';
 import * as schema from '../../drizzle/schema';
-import { licensesTable, userTable } from '../../drizzle/schema';
+import { agentsTable, licensesTable, userTable } from '../../drizzle/schema';
 import { AgentApplyConfigService } from './agent-apply-config.service';
 import { AgentRegistry } from './agent.registry';
 
@@ -119,8 +119,16 @@ export class MyBotActionService {
       );
       throw new ServiceUnavailableException('agent 不在线，请稍后重试');
     }
+
+    // 4. 立即写 DB 过渡态，让前端刷新后也能看到正在操作中
+    const transitStatus = method === 'bot.stop' ? 'stopping' : 'starting';
+    await this.conn
+      .update(agentsTable)
+      .set({ botStatus: transitStatus })
+      .where(eq(agentsTable.licenseId, licenseId));
+
     this.logger.log(
-      `dispatch ${method} license=${licenseId} user=${userId} 已下发`,
+      `dispatch ${method} license=${licenseId} user=${userId} 已下发, bot_status→${transitStatus}`,
     );
   }
 }

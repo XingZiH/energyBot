@@ -18,11 +18,10 @@
     @let a = agents()[0];
 
     <!-- 醒目的 Bot 状态横幅 -->
-    <div [class]="'bot-status-banner bot-status-banner--' + (a.botStatus || 'unknown')"
-         [class.bot-status-banner--starting]="isActionInFlight(a.licenseId)">
+    <div [class]="'bot-status-banner bot-status-banner--' + (a.botStatus || 'unknown')">
       <div class="bot-status-banner__left">
         <div class="bot-status-banner__indicator">
-          @if (a.botStatus === 'starting' || isActionInFlight(a.licenseId)) {
+          @if (a.botStatus === 'starting' || a.botStatus === 'stopping') {
             <nz-icon nzType="loading" class="bot-status-banner__spin"></nz-icon>
           } @else if (a.botStatus === 'running') {
             <nz-icon nzType="check-circle" nzTheme="fill"></nz-icon>
@@ -35,11 +34,7 @@
         <div class="bot-status-banner__text">
           <div class="bot-status-banner__label">Bot 状态</div>
           <div class="bot-status-banner__value">
-            @if (isActionInFlight(a.licenseId) && a.botStatus !== 'running') {
-              启动中...
-            } @else {
-              {{ botStatusLabel(a.botStatus) }}
-            }
+            {{ botStatusLabel(a.botStatus) }}
           </div>
         </div>
       </div>
@@ -48,7 +43,7 @@
           nz-button
           nzType="primary"
           [disabled]="!canStart(a)"
-          [nzLoading]="isActionInFlight(a.licenseId)"
+          [nzLoading]="loading()"
           (click)="startBot(a)"
         >
           <nz-icon nzType="play-circle"></nz-icon>
@@ -61,7 +56,7 @@
           nzPopconfirmTitle="确定停止 bot？停止后该主机将不再响应 Telegram 消息。"
           (nzOnConfirm)="stopBot(a)"
           [disabled]="!canStop(a)"
-          [nzLoading]="isActionInFlight(a.licenseId)"
+          [nzLoading]="loading()"
         >
           <nz-icon nzType="pause-circle"></nz-icon>
           <span>停止</span>
@@ -69,7 +64,7 @@
         <button
           nz-button
           [disabled]="!canReload(a)"
-          [nzLoading]="isActionInFlight(a.licenseId)"
+          [nzLoading]="loading()"
           (click)="reloadBot(a)"
         >
           <nz-icon nzType="reload"></nz-icon>
@@ -253,7 +248,7 @@
                   nzType="primary"
                   nzSize="small"
                   [disabled]="!canStart(a)"
-                  [nzLoading]="isActionInFlight(a.licenseId)"
+                  [nzLoading]="loading()"
                   (click)="startBot(a)"
                   nz-tooltip
                   nzTooltipTitle="启动 bot"
@@ -269,7 +264,7 @@
                   nzPopconfirmTitle="确定停止该主机的 bot？"
                   (nzOnConfirm)="stopBot(a)"
                   [disabled]="!canStop(a)"
-                  [nzLoading]="isActionInFlight(a.licenseId)"
+                  [nzLoading]="loading()"
                   nz-tooltip
                   nzTooltipTitle="停止 bot"
                 >
@@ -280,7 +275,7 @@
                   nz-button
                   nzSize="small"
                   [disabled]="!canReload(a)"
-                  [nzLoading]="isActionInFlight(a.licenseId)"
+                  [nzLoading]="loading()"
                   (click)="reloadBot(a)"
                   nz-tooltip
                   nzTooltipTitle="重载 bot"
