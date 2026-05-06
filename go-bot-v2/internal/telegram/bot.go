@@ -191,6 +191,11 @@ type replyKeyboardMarkup struct {
 	InputFieldPlaceholder string             `json:"input_field_placeholder,omitempty"`
 }
 
+// replyKeyboardRemove 主动移除已有的 Reply Keyboard。
+type replyKeyboardRemove struct {
+	RemoveKeyboard bool `json:"remove_keyboard"`
+}
+
 type keyboardButton struct {
 	Text string `json:"text"`
 }
@@ -454,8 +459,7 @@ func (b *Bot) handleCallback(ctx context.Context, query CallbackQuery) error {
 		if err := b.answerCallback(ctx, query.ID, "支付订单已生成"); err != nil {
 			return err
 		}
-		packages, _ := b.listPackages(ctx)
-		return b.sendMessage(ctx, chatID, order.PaymentText, mainReplyKeyboard(packages))
+		return b.sendMessage(ctx, chatID, order.PaymentText, nil)
 	case strings.HasPrefix(query.Data, "menu:back:"):
 		// v2 返回按钮：callback_data = "menu:back:<parentPath>"（见 actions/handlers.go 常量）。
 		// parentPath 空 → 返回根菜单；非空 → 重新定位并 Dispatch 父按钮（重新展开父 submenu）。
@@ -506,17 +510,17 @@ func (b *Bot) sendPackageMenu(ctx context.Context, chatID int64) error {
 			nil,
 			"当前没有启用的能量套餐，请联系管理员。",
 		)
-		return b.sendMessage(ctx, chatID, text, designerConfig.replyKeyboard(packages))
+		return b.sendMessage(ctx, chatID, text, &replyKeyboardRemove{RemoveKeyboard: true})
 	}
 	if designerConfig.hasCustomMenu() {
 		text := strings.TrimSpace(designerConfig.WelcomeText)
 		if text == "" {
 			text = packageMenuText(packages, b.orderPaymentTTL)
 		}
-		return b.sendMessage(ctx, chatID, text, designerConfig.replyKeyboard(packages))
+		return b.sendMessage(ctx, chatID, text, &replyKeyboardRemove{RemoveKeyboard: true})
 	}
 
-	return b.sendMessage(ctx, chatID, packageMenuText(packages, b.orderPaymentTTL), mainReplyKeyboard(packages))
+	return b.sendMessage(ctx, chatID, packageMenuText(packages, b.orderPaymentTTL), &replyKeyboardRemove{RemoveKeyboard: true})
 }
 
 func (b *Bot) handleCustomMenuButton(ctx context.Context, chatID int64, text string) bool {
@@ -648,8 +652,7 @@ func (b *Bot) sendAddressSelection(ctx context.Context, chatID int64, pkg Energy
 	if err != nil {
 		return err
 	}
-	packages, _ := b.listPackages(ctx)
-	return b.sendMessage(ctx, chatID, addressSelectionText(pkg, addresses), addressSelectionKeyboard(pkg.ID, addresses, mainReplyKeyboard(packages)))
+	return b.sendMessage(ctx, chatID, addressSelectionText(pkg, addresses), addressSelectionKeyboard(pkg.ID, addresses, nil))
 }
 
 func (b *Bot) sendAddressManagement(ctx context.Context, chatID int64) error {
