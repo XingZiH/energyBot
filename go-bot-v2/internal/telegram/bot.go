@@ -513,15 +513,23 @@ func (b *Bot) sendPackageMenu(ctx context.Context, chatID int64) error {
 		)
 		return b.sendMessage(ctx, chatID, text, &replyKeyboardRemove{RemoveKeyboard: true})
 	}
-	if designerConfig.hasCustomMenu() {
-		text := strings.TrimSpace(designerConfig.WelcomeText)
+
+	// 判断是否使用设计器路径：有自定义菜单 OR 有自定义 WelcomeText
+	customWelcome := strings.TrimSpace(designerConfig.WelcomeText)
+	hasMenu := designerConfig.hasCustomMenu()
+
+	if hasMenu || customWelcome != "" {
+		// 优先使用设计器的 WelcomeText，为空时降级为硬编码套餐文案
+		text := customWelcome
 		if text == "" {
 			text = packageMenuText(packages, b.orderPaymentTTL)
 		}
-		// 渲染设计器根菜单为 Inline Keyboard
-		keyboard := b.buildRootInlineKeyboard(designerConfig, packages)
-		if keyboard != nil {
-			return b.sendMessage(ctx, chatID, text, keyboard)
+		// 有菜单按钮时渲染为 Inline Keyboard，否则只发纯文案
+		if hasMenu {
+			keyboard := b.buildRootInlineKeyboard(designerConfig, packages)
+			if keyboard != nil {
+				return b.sendMessage(ctx, chatID, text, keyboard)
+			}
 		}
 		return b.sendMessage(ctx, chatID, text, &replyKeyboardRemove{RemoveKeyboard: true})
 	}
