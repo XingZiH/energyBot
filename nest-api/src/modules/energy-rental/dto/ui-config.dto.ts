@@ -206,6 +206,12 @@ export class UiConfigDto {
   @MaxLength(4096)
   welcomeText?: string;
 
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  packageGroupText?: string;
+
   @ApiProperty({ required: false, type: () => [MenuRowDto] })
   @IsOptional()
   @IsArray()

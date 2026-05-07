@@ -57,11 +57,12 @@ type platformConfigInput struct {
 }
 
 type botConfigInput struct {
-	Token         string `json:"token"`
-	Username      string `json:"username"`
-	WelcomeText   string `json:"welcomeText"`
-	MenuConfig    string `json:"menuConfig"`    // 整个 JSON 字符串原样存
-	MessageConfig string `json:"messageConfig"` // 整个 JSON 字符串原样存
+	Token            string `json:"token"`
+	Username         string `json:"username"`
+	WelcomeText      string `json:"welcomeText"`
+	MenuConfig       string `json:"menuConfig"`    // 整个 JSON 字符串原样存
+	MessageConfig    string `json:"messageConfig"` // 整个 JSON 字符串原样存
+	PackageGroupText string `json:"packageGroupText"`
 }
 
 // packageInput 对应 nest-api 下发的 energy_packages 行数据（单 agent 的 user_package）。
@@ -183,6 +184,7 @@ UPDATE bot_config SET
   welcome_text = ?,
   menu_config = ?,
   message_config = ?,
+  package_group_text = ?,
   applied_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id = 1`
 
@@ -197,6 +199,7 @@ WHERE id = 1`
 		b.WelcomeText,
 		b.MenuConfig,
 		b.MessageConfig,
+		b.PackageGroupText,
 	)
 	return err
 }

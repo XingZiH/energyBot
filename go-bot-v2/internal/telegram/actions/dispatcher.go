@@ -46,6 +46,9 @@ type BotAPI interface {
 	// 已知命令由实现方路由到具体业务；未知命令由实现方决定友好提示策略。
 	// 调用方传入前应保证 cmd 非空且已 trim（Dispatcher.handleCommand 已负责此契约）。
 	RunCommand(ctx context.Context, chatID int64, cmd string) error
+	// GetPackageGroupText 返回设计器中配置的套餐组提示文案。
+	// 空串表示未配置，调用方应回落到默认文案。
+	GetPackageGroupText(ctx context.Context) string
 }
 
 // PackageInfo 是 actions 包内部使用的套餐信息结构，专供套餐组展开消费。

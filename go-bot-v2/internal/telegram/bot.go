@@ -78,8 +78,9 @@ type BotDesignerConfig struct {
 	WelcomeText string
 	// MessageConfig 是设计器 v2 的 9 场景消息模板集合（任务 12）。
 	// v1 的 map[string]string 已迁移为强类型 MessageTemplates，渲染通过 Bot.renderMessage 完成。
-	MessageConfig MessageTemplates
-	MenuRows      []DesignerMenuRow
+	MessageConfig    MessageTemplates
+	MenuRows         []DesignerMenuRow
+	PackageGroupText string
 }
 
 type DesignerMenuRow struct {
@@ -675,13 +676,13 @@ func (b *Bot) packageButtonTextByID(ctx context.Context) map[int]string {
 }
 
 func (b *Bot) loadDesignerConfig(ctx context.Context) (BotDesignerConfig, error) {
-	var welcomeText, messageConfigRaw, menuConfigRaw string
+	var welcomeText, messageConfigRaw, menuConfigRaw, packageGroupText string
 	// B3 客户机：bot 设计器配置统一存 bot_config 单例（id=1）
 	err := b.db.QueryRowContext(ctx, `
-select coalesce(welcome_text, ''), coalesce(message_config, ''), coalesce(menu_config, '')
+select coalesce(welcome_text, ''), coalesce(message_config, ''), coalesce(menu_config, ''), coalesce(package_group_text, '')
 from bot_config
 where id = 1
-limit 1`).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
+limit 1`).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw, &packageGroupText)
 	if err != nil {
 		return BotDesignerConfig{}, err
 	}
@@ -696,11 +697,17 @@ limit 1`).Scan(&welcomeText, &messageConfigRaw, &menuConfigRaw)
 		tpl = MessageTemplates{}
 	}
 	config := BotDesignerConfig{
-		WelcomeText:   strings.TrimSpace(welcomeText),
-		MessageConfig: tpl,
-		MenuRows:      rows,
+		WelcomeText:      strings.TrimSpace(welcomeText),
+		MessageConfig:    tpl,
+		MenuRows:         rows,
+		PackageGroupText: strings.TrimSpace(packageGroupText),
 	}
 	return config, nil
+}
+
+func (b *Bot) GetPackageGroupText(ctx context.Context) string {
+	cfg, _ := b.loadDesignerConfig(ctx)
+	return cfg.PackageGroupText
 }
 
 func (b *Bot) sendAddressSelection(ctx context.Context, chatID int64, pkg EnergyPackage) error {

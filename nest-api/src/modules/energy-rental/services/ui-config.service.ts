@@ -161,6 +161,7 @@ export class UiConfigService {
    */
   async loadUiConfig(agentId: number): Promise<{
     welcomeText: string;
+    packageGroupText: string;
     menuConfig: MenuRowDto[];
     messageConfig: MessageTemplatesDto;
     updatedAt: string;
@@ -178,6 +179,7 @@ export class UiConfigService {
     if (!row) {
       return {
         welcomeText: '',
+        packageGroupText: '',
         menuConfig: [],
         messageConfig: this.emptyTemplates(),
         updatedAt: new Date(0).toISOString(),
@@ -185,6 +187,7 @@ export class UiConfigService {
     }
     return {
       welcomeText: row.welcomeText ?? '',
+      packageGroupText: row.packageGroupText ?? '',
       menuConfig: this.parseJsonArray(row.menuConfig),
       messageConfig:
         this.parseMessageConfig(row.messageConfig),
@@ -216,6 +219,7 @@ export class UiConfigService {
     const now = new Date();
     const nextValues: Record<string, unknown> = {
       welcomeText: dto.welcomeText ?? '',
+      packageGroupText: dto.packageGroupText ?? '',
       menuConfig: dto.menuConfig?.length ? JSON.stringify(dto.menuConfig) : null,
       updatedAt: now,
     };

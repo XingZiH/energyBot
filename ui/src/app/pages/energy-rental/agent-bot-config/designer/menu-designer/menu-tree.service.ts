@@ -24,6 +24,7 @@ export interface BreadcrumbItem {
 interface HistorySnapshot {
   rootMenu: MenuRow[];
   welcomeText: string;
+  packageGroupText: string;
 }
 
 /**
@@ -54,6 +55,12 @@ export class MenuTreeService {
    * （例如 blur 时再快照一次）。
    */
   readonly $welcomeText = signal<string>('');
+
+  /**
+   * 套餐组提示文案（所有套餐组共享，用户点击套餐组按钮时展示的文案）。
+   * 与 $welcomeText 同模式：高频输入不进历史栈，blur 时走 setPackageGroupTextWithHistory。
+   */
+  readonly $packageGroupText = signal<string>('');
 
   readonly $currentMenu = computed<MenuRow[]>(() => {
     const crumbs = this.$breadcrumb();
@@ -200,6 +207,22 @@ export class MenuTreeService {
     this.$welcomeText.set(value);
   }
 
+  /**
+   * 直接写入 packageGroupText（不进历史栈）。
+   */
+  setPackageGroupText(value: string): void {
+    this.$packageGroupText.set(value);
+  }
+
+  /**
+   * 把 packageGroupText 变更当作一步可撤销操作记入历史。
+   */
+  setPackageGroupTextWithHistory(value: string): void {
+    if (this.$packageGroupText() === value) return;
+    this.pushHistory();
+    this.$packageGroupText.set(value);
+  }
+
   // ---------- 拖拽写操作 ----------
 
   /**
@@ -307,12 +330,14 @@ export class MenuTreeService {
     return {
       rootMenu: structuredClone(this.$rootMenu()),
       welcomeText: this.$welcomeText(),
+      packageGroupText: this.$packageGroupText(),
     };
   }
 
   private applySnapshot(s: HistorySnapshot): void {
     this.$rootMenu.set(s.rootMenu);
     this.$welcomeText.set(s.welcomeText);
+    this.$packageGroupText.set(s.packageGroupText);
   }
 
   /**

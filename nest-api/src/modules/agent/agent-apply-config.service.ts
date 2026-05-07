@@ -115,6 +115,7 @@ export class AgentApplyConfigService {
         welcomeText: agentBotConfigsTable.welcomeText,
         menuConfig: agentBotConfigsTable.menuConfig,
         messageConfig: agentBotConfigsTable.messageConfig,
+        packageGroupText: agentBotConfigsTable.packageGroupText,
       })
       .from(agentBotConfigsTable)
       .where(eq(agentBotConfigsTable.agentId, agentProfileId))
@@ -237,6 +238,7 @@ export class AgentApplyConfigService {
         welcomeText: botCfg.welcomeText ?? '',
         menuConfig: botCfg.menuConfig ?? '',
         messageConfig: botCfg.messageConfig ?? '',
+        packageGroupText: botCfg.packageGroupText ?? '',
       },
       packages,
     };

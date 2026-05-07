@@ -68,6 +68,7 @@ export interface MessageTemplates {
 
 export interface BotDesignerConfig {
   welcomeText: string;
+  packageGroupText: string;
   menuConfig: MenuRow[];
   messageConfig: MessageTemplates;
   /** 由后端 GET 返回的最后修改时间戳（ISO8601），前端写入时不需要传 */

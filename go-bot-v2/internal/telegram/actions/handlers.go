@@ -270,7 +270,11 @@ func (d *Dispatcher) handleEnergyPackageGroup(ctx context.Context, chatID int64,
 	}
 	rows = append(rows, []InlineButton{{Text: submenuBackText, CallbackData: backData}})
 
-	return d.bot.SendMessageWithInline(ctx, chatID, packageGroupPrompt, rows)
+	prompt := d.bot.GetPackageGroupText(ctx)
+	if prompt == "" {
+		prompt = packageGroupPrompt
+	}
+	return d.bot.SendMessageWithInline(ctx, chatID, prompt, rows)
 }
 
 // sortPackages 按 sortBy 就地稳定排序 packages。

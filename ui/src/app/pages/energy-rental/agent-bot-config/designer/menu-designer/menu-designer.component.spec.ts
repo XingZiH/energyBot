@@ -67,6 +67,7 @@ function row(id: string, buttons: MenuButton[]): MenuRow {
     <app-menu-designer
       [initialMenu]="initialMenu"
       [initialWelcomeText]="initialWelcomeText"
+      [initialPackageGroupText]="initialPackageGroupText"
       [agentId]="agentId"
       (designerChange)="onDesignerChange($event)"
     ></app-menu-designer>
@@ -75,6 +76,7 @@ function row(id: string, buttons: MenuButton[]): MenuRow {
 class HostComponent {
   initialMenu: MenuRow[] = [];
   initialWelcomeText = '';
+  initialPackageGroupText = '';
   agentId: number | null = null;
   emitted: DesignerChange | null = null;
 

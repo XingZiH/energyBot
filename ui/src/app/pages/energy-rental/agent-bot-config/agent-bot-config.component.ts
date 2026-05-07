@@ -92,6 +92,8 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
   readonly initialMenu = signal<MenuRow[]>([]);
   /** 传入 MenuDesignerComponent 的初始 welcomeText（同样独立 signal，便于父组件 patch 后同步） */
   readonly initialWelcomeText = signal<string>('');
+  /** 传入 MenuDesignerComponent 的初始 packageGroupText */
+  readonly initialPackageGroupText = signal<string>('');
   /** getUiConfig 是否加载失败，用于菜单设计 tab 的降级 UI */
   readonly uiConfigLoadError = signal(false);
 
@@ -206,6 +208,7 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
         this.uiConfig.set(ui);
         this.initialMenu.set(ui?.menuConfig ?? []);
         this.initialWelcomeText.set(ui?.welcomeText ?? '');
+        this.initialPackageGroupText.set(ui?.packageGroupText ?? '');
         this.form.patchValue({
           telegramBotToken: '',
           telegramBotUsername: config.telegramBotUsername || '',
@@ -260,6 +263,7 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
     menuConfig?: MenuRow[];
     messageConfig?: MessageTemplates;
     welcomeText?: string;
+    packageGroupText?: string;
   }): void {
     const ui = this.uiConfig();
     if (!ui) {
@@ -267,6 +271,7 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
     }
     const payload: Record<string, unknown> = {
       welcomeText: patch.welcomeText ?? ui.welcomeText,
+      packageGroupText: patch.packageGroupText ?? ui.packageGroupText,
       menuConfig: patch.menuConfig ?? ui.menuConfig,
     };
     // 只有调用方显式传入 messageConfig 时才携带——
@@ -291,6 +296,9 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
         if (patch.welcomeText !== undefined) {
           this.initialWelcomeText.set(patch.welcomeText);
         }
+        if (patch.packageGroupText !== undefined) {
+          this.initialPackageGroupText.set(patch.packageGroupText);
+        }
       });
   }
 
@@ -305,6 +313,7 @@ export class EnergyRentalAgentBotConfigComponent implements OnInit {
     this.saveUiConfigPatch({
       welcomeText: change.welcomeText,
       menuConfig: change.menuConfig,
+      packageGroupText: change.packageGroupText,
     });
   }
 

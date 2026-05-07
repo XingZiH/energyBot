@@ -128,6 +128,10 @@ func (m *mockBot) RunCommand(_ context.Context, chatID int64, cmd string) error 
 	return nil
 }
 
+func (m *mockBot) GetPackageGroupText(_ context.Context) string {
+	return ""
+}
+
 // lastText 返回最后一条被发送的消息文本；没有则返回空串。
 func (m *mockBot) lastText() string {
 	if len(m.sent) == 0 {

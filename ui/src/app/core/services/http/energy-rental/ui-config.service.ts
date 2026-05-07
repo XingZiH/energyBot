@@ -33,6 +33,7 @@ import type { MenuRow, MessageTemplates } from '../../../../pages/energy-rental/
  */
 export interface UiConfig {
   welcomeText: string;
+  packageGroupText: string;
   menuConfig: MenuRow[];
   messageConfig: MessageTemplates;
   updatedAt: string;
@@ -43,6 +44,7 @@ export interface UiConfig {
  */
 export interface UiConfigPayload {
   welcomeText?: string;
+  packageGroupText?: string;
   menuConfig?: MenuRow[];
   messageConfig?: MessageTemplates;
 }

@@ -71,6 +71,23 @@
     ></textarea>
   </div>
 
+  <!-- 套餐组文案编辑区 -->
+  <div class="designer-welcome">
+    <label class="welcome-label" for="designer-pkg-group-text-input">
+      <span nz-icon nzType="shopping" nzTheme="outline"></span>
+      套餐组文案（用户点击套餐组按钮时展示的提示语）
+    </label>
+    <textarea
+      id="designer-pkg-group-text-input"
+      nz-input
+      rows="2"
+      placeholder="例如：请选择套餐："
+      [ngModel]="tree.$packageGroupText()"
+      (ngModelChange)="onPackageGroupTextInput($event)"
+      (blur)="onPackageGroupTextBlur()"
+    ></textarea>
+  </div>
+
   <!-- 三栏布局 -->
   <div class="designer-body">
     <app-component-palette class="panel-palette"></app-component-palette>

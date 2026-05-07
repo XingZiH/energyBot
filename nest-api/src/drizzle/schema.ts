@@ -143,6 +143,7 @@ export const agentBotConfigsTable = pgTable('agent_bot_configs', {
   welcomeText: text('welcome_text'),
   messageConfig: text('message_config'),
   menuConfig: text('menu_config'),
+  packageGroupText: text('package_group_text'),
   remark: text(),
   createdAt: timestamp('created_at')
     .defaultNow()
