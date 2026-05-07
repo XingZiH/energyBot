@@ -164,12 +164,13 @@ func (b *Bot) ShowOrders(ctx context.Context, chatID int64) error {
 //   - PackageGroup 逐字段拷贝；nil 透传。
 func buildButtonSpec(btn DesignerMenuButton, path string) actions.ButtonSpec {
 	spec := actions.ButtonSpec{
-		Action:  string(btn.Action),
-		Text:    btn.Text,
-		URL:     btn.URL,
-		Message: btn.Message,
-		Command: btn.Command,
-		Path:    path,
+		Action:      string(btn.Action),
+		Text:        btn.Text,
+		URL:         btn.URL,
+		Message:     btn.Message,
+		Command:     btn.Command,
+		SubmenuText: btn.SubmenuText,
+		Path:        path,
 	}
 	if len(btn.Submenu) > 0 {
 		spec.Submenu = make([]actions.RowSpec, 0, len(btn.Submenu))

@@ -87,6 +87,7 @@ type ButtonSpec struct {
 	Command      string
 	PackageID    int // v1 遗留字段；v2 骨架不使用，保留以支持后续 v1→v2 迁移路径。
 	Submenu      []RowSpec
+	SubmenuText  string
 	PackageGroup *PackageGroupSpec
 
 	// Path 是按钮在菜单树中的坐标，用于 submenu 子按钮拼接 callback_data。

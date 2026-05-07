@@ -100,6 +100,7 @@ type DesignerMenuButton struct {
 	// 新版解析路径（parseMenuRowsV2 + actions.Dispatcher）不再读此字段。
 	PackageID    int                 `json:"packageId,omitempty"`
 	Submenu      []DesignerMenuRow   `json:"submenu,omitempty"`
+	SubmenuText  string              `json:"submenuText,omitempty"`
 	PackageGroup *PackageGroupConfig `json:"packageGroup,omitempty"`
 }
 

@@ -257,6 +257,14 @@ export class PropertyPanelComponent {
     this.patchPackageGroup({ textTemplate: value });
   }
 
+  // -------- SUBMENU 专用 --------
+
+  updateSubmenuText(value: string): void {
+    const btn = this.$selectedButton();
+    if (!btn) return;
+    this.tree.updateButton(btn.id, { submenuText: value });
+  }
+
   /** 进入子菜单：要求 action=SUBMENU。 */
   enterSubmenu(): void {
     const btn = this.$selectedButton();

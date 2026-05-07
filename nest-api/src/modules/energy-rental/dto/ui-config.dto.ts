@@ -141,6 +141,12 @@ export class MenuButtonDto {
   @Type(() => PackageGroupDto)
   packageGroup?: PackageGroupDto;
 
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  submenuText?: string;
+
   @ApiProperty({ required: false, type: () => ButtonStyleDto })
   @IsOptional()
   @ValidateNested()

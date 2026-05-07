@@ -385,9 +385,10 @@ func TestDispatch_Routing(t *testing.T) {
 		bot := &mockBot{}
 		d := NewDispatcher(bot)
 		err := d.Dispatch(context.Background(), chatID, ButtonSpec{
-			Action: ActionSubmenu,
-			Text:   "请选一个：",
-			Path:   "row0.btn1",
+			Action:      ActionSubmenu,
+			Text:        "子菜单按钮",
+			SubmenuText: "请选一个：",
+			Path:        "row0.btn1",
 			Submenu: []RowSpec{
 				{Buttons: []ButtonSpec{
 					{Action: ActionURL, Text: "官网", URL: "https://x"},

@@ -192,7 +192,9 @@ func (d *Dispatcher) handleSubmenu(ctx context.Context, chatID int64, spec Butto
 	}
 	rows = append(rows, []InlineButton{{Text: submenuBackText, CallbackData: backData}})
 
-	prompt := strings.TrimSpace(spec.Text)
+	// 优先使用 SubmenuText（用户自定义引导语），其次 fallback 到默认值。
+	// 不再用 spec.Text（那是按钮上的文字，不适合做引导语）。
+	prompt := strings.TrimSpace(spec.SubmenuText)
 	if prompt == "" {
 		prompt = submenuDefaultPrompt
 	}

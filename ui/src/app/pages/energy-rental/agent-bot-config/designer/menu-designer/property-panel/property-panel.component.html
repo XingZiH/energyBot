@@ -102,6 +102,19 @@
 
       <!-- SUBMENU 动作 -->
       <ng-container *ngIf="btn.action === ButtonAction.SUBMENU">
+        <nz-form-item>
+          <nz-form-label>子菜单引导语</nz-form-label>
+          <nz-form-control>
+            <textarea
+              nz-input
+              rows="2"
+              [ngModel]="btn.submenuText || ''"
+              (ngModelChange)="updateSubmenuText($event)"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="用户点击该按钮后显示的提示文案，留空默认「请选择：」"
+            ></textarea>
+          </nz-form-control>
+        </nz-form-item>
         <div class="property-note">
           此按钮承载一个子菜单，请点击下方按钮进入子菜单编辑。
         </div>

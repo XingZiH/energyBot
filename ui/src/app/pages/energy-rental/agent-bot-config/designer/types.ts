@@ -45,6 +45,8 @@ export interface MenuButton {
   command?: string;
   /** action === 'submenu' 时必填 */
   submenu?: MenuRow[];
+  /** action === 'submenu' 时可选：子菜单展开后的引导语，空值 fallback 为"请选择：" */
+  submenuText?: string;
   /** action === 'energy_package_group' 时必填 */
   packageGroup?: PackageGroup;
 }
