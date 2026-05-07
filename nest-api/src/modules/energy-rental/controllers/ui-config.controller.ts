@@ -25,6 +25,7 @@ import {
   Controller,
   Get,
   Headers,
+  Logger,
   Put,
   Query,
   Req,
@@ -35,6 +36,7 @@ import { ResultData } from '../../../common/result/result';
 import { Permission } from '../../../decorators/permission.decorator';
 import { AuthGuard } from '../../../guards/auth.guard';
 import { JwtGuard } from '../../../guards/jwt.guard';
+import { AgentApplyConfigService } from '../../agent/agent-apply-config.service';
 import { UiConfigDto } from '../dto/ui-config.dto';
 import { EnergyRentalService } from '../energy-rental.service';
 import { UiConfigService } from '../services/ui-config.service';
@@ -47,9 +49,12 @@ const PERM_BOT_CONFIG = 'default:energy-rental:bot-config';
 @ApiTags('能量租赁-UI配置')
 @Controller('energy-rental/ui-config')
 export class UiConfigController {
+  private readonly logger = new Logger(UiConfigController.name);
+
   constructor(
     private readonly uiConfigService: UiConfigService,
     private readonly energyRentalService: EnergyRentalService,
+    private readonly applyConfigSvc: AgentApplyConfigService,
   ) {}
 
   @Get()
@@ -91,6 +96,18 @@ export class UiConfigController {
       dto,
       ifUnmodifiedSince,
     );
+
+    // 保存成功后，静默推送最新配置到 agent（如果 bot 正在运行则实时生效）。
+    // 使用 fire-and-forget + catch，不阻塞响应——applyConfigSilent 内部已有 warn 日志。
+    const userId = req.user?.userId;
+    if (userId) {
+      this.applyConfigSvc.applyConfigSilent(userId).catch((err) => {
+        this.logger.warn(
+          `保存 UI 配置后推送失败 user=${userId}: ${err?.message ?? err}`,
+        );
+      });
+    }
+
     return ResultData.success(result);
   }
 }

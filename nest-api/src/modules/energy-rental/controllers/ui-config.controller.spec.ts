@@ -22,13 +22,18 @@ describe('UiConfigController', () => {
   const mockEnergyRentalService = {
     resolveAgentId: jest.fn(),
   };
+  const mockApplyConfigSvc = {
+    applyConfigSilent: jest.fn().mockResolvedValue(undefined),
+  };
   let controller: UiConfigController;
 
   beforeEach(() => {
     jest.resetAllMocks();
+    mockApplyConfigSvc.applyConfigSilent.mockResolvedValue(undefined);
     controller = new UiConfigController(
       mockUiConfigService as any,
       mockEnergyRentalService as any,
+      mockApplyConfigSvc as any,
     );
   });
 
@@ -235,6 +240,60 @@ describe('UiConfigController', () => {
       ).rejects.toThrow(BadRequestException);
       expect(mockUiConfigService.validate).not.toHaveBeenCalled();
       expect(mockUiConfigService.saveUiConfig).not.toHaveBeenCalled();
+    });
+
+    it('保存成功后静默调用 applyConfigSilent 推送配置到 agent', async () => {
+      mockEnergyRentalService.resolveAgentId.mockResolvedValue(100);
+      mockUiConfigService.validate.mockResolvedValue(undefined);
+      mockUiConfigService.saveUiConfig.mockResolvedValue({
+        updatedAt: '2026-05-07T00:00:00.000Z',
+      });
+
+      await controller.updateUiConfig(
+        { user: { userId: 3 } },
+        validDto as any,
+        'false',
+        undefined,
+      );
+
+      // applyConfigSilent 应以 userId 调用（fire-and-forget）
+      expect(mockApplyConfigSvc.applyConfigSilent).toHaveBeenCalledWith(3);
+    });
+
+    it('applyConfigSilent 失败不影响保存结果', async () => {
+      mockEnergyRentalService.resolveAgentId.mockResolvedValue(100);
+      mockUiConfigService.validate.mockResolvedValue(undefined);
+      mockUiConfigService.saveUiConfig.mockResolvedValue({
+        updatedAt: '2026-05-07T00:00:00.000Z',
+      });
+      mockApplyConfigSvc.applyConfigSilent.mockRejectedValue(
+        new Error('agent offline'),
+      );
+
+      // 即使推送失败，保存仍然成功返回
+      const res = await controller.updateUiConfig(
+        { user: { userId: 3 } },
+        validDto as any,
+        'false',
+        undefined,
+      );
+
+      expect(res.code).toBe(200);
+      expect(res.data.updatedAt).toBe('2026-05-07T00:00:00.000Z');
+    });
+
+    it('dryRun=true 不触发 applyConfigSilent', async () => {
+      mockEnergyRentalService.resolveAgentId.mockResolvedValue(100);
+      mockUiConfigService.validate.mockResolvedValue(undefined);
+
+      await controller.updateUiConfig(
+        { user: { userId: 3 } },
+        validDto as any,
+        'true',
+        undefined,
+      );
+
+      expect(mockApplyConfigSvc.applyConfigSilent).not.toHaveBeenCalled();
     });
   });
 });
