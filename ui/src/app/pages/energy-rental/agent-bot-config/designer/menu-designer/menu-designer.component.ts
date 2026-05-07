@@ -90,8 +90,6 @@ export class MenuDesignerComponent {
   readonly initialMenu = input<MenuRow[]>([]);
   /** 父容器传入的初始 welcomeText；与 menu 一起纳入脏态对比 */
   readonly initialWelcomeText = input<string>('');
-  /** 父容器传入的初始 packageGroupText */
-  readonly initialPackageGroupText = input<string>('');
   /** 当前 agent id，透传给 PropertyPanel（ENERGY_PACKAGE_GROUP 加载套餐时用） */
   readonly agentId = input<number | null>(null);
 
@@ -105,8 +103,6 @@ export class MenuDesignerComponent {
   readonly $savedMenuSnapshot = signal<MenuRow[]>([]);
   /** 最近一次"已保存/初始化"的 welcomeText 快照 */
   readonly $savedWelcomeText = signal<string>('');
-  /** 最近一次"已保存/初始化"的 packageGroupText 快照 */
-  readonly $savedPackageGroupText = signal<string>('');
 
   /** 校验失败时的错误文案；null 表示无错误 */
   readonly $validationError = signal<string | null>(null);
@@ -121,24 +117,19 @@ export class MenuDesignerComponent {
     const menuChanged =
       JSON.stringify(this.tree.$rootMenu()) !== JSON.stringify(this.$savedMenuSnapshot());
     const textChanged = this.tree.$welcomeText() !== this.$savedWelcomeText();
-    const pkgGroupTextChanged = this.tree.$packageGroupText() !== this.$savedPackageGroupText();
-    return menuChanged || textChanged || pkgGroupTextChanged;
+    return menuChanged || textChanged;
   });
 
   constructor() {
     effect(() => {
-      // 依赖 3 个 input——任一变化都重新初始化
       const menu = this.initialMenu();
       const welcome = this.initialWelcomeText();
-      const pkgGroupText = this.initialPackageGroupText();
       const clonedMenu = structuredClone(menu);
       untracked(() => {
         this.tree.setRootMenu(clonedMenu);
         this.tree.setWelcomeText(welcome);
-        this.tree.setPackageGroupText(pkgGroupText);
         this.$savedMenuSnapshot.set(structuredClone(clonedMenu));
         this.$savedWelcomeText.set(welcome);
-        this.$savedPackageGroupText.set(pkgGroupText);
         this.$validationError.set(null);
       });
     });
@@ -164,13 +155,14 @@ export class MenuDesignerComponent {
 
   /**
    * packageGroupText 输入框的双向绑定钩子（与 welcomeText 同模式）。
+   * @deprecated 全局 packageGroupText 已移至按钮级，保留方法避免编译错误。
    */
   onPackageGroupTextInput(value: string): void {
     this.tree.setPackageGroupText(value);
   }
 
   /**
-   * 失去焦点时把当前 packageGroupText 以"一步"进历史栈。
+   * @deprecated 全局 packageGroupText 已移至按钮级。
    */
   onPackageGroupTextBlur(): void {
     this.tree.setPackageGroupTextWithHistory(this.tree.$packageGroupText());
@@ -190,16 +182,13 @@ export class MenuDesignerComponent {
     this.$validationError.set(null);
     const menuSnap = structuredClone(this.tree.$rootMenu());
     const textSnap = this.tree.$welcomeText();
-    const pkgGroupTextSnap = this.tree.$packageGroupText();
     this.$savedMenuSnapshot.set(menuSnap);
     this.$savedWelcomeText.set(textSnap);
-    this.$savedPackageGroupText.set(pkgGroupTextSnap);
-    this.designerChange.emit({ welcomeText: textSnap, menuConfig: menuSnap, packageGroupText: pkgGroupTextSnap });
+    this.designerChange.emit({ welcomeText: textSnap, menuConfig: menuSnap, packageGroupText: '' });
   }
 
   /**
-   * 确认后恢复到最近 snapshot；清空校验错误。直接 setRootMenu 也会清空 undo/redo
-   * 历史栈——这符合"重置 = 放弃所有未保存改动"的用户预期。
+   * 确认后恢复到最近 snapshot；清空校验错误。
    */
   reset(): void {
     this.modal.confirm({
@@ -210,7 +199,6 @@ export class MenuDesignerComponent {
       nzOnOk: () => {
         this.tree.setRootMenu(structuredClone(this.$savedMenuSnapshot()));
         this.tree.setWelcomeText(this.$savedWelcomeText());
-        this.tree.setPackageGroupText(this.$savedPackageGroupText());
         this.$validationError.set(null);
       },
     });

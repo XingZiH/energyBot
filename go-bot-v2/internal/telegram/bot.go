@@ -98,10 +98,11 @@ type DesignerMenuButton struct {
 	Command string       `json:"command,omitempty"`
 	// PackageID 是 v1 遗留字段，保留以反序列化旧数据，v2 已由 PackageGroup 替代。
 	// 新版解析路径（parseMenuRowsV2 + actions.Dispatcher）不再读此字段。
-	PackageID    int                 `json:"packageId,omitempty"`
-	Submenu      []DesignerMenuRow   `json:"submenu,omitempty"`
-	SubmenuText  string              `json:"submenuText,omitempty"`
-	PackageGroup *PackageGroupConfig `json:"packageGroup,omitempty"`
+	PackageID        int                 `json:"packageId,omitempty"`
+	Submenu          []DesignerMenuRow   `json:"submenu,omitempty"`
+	SubmenuText      string              `json:"submenuText,omitempty"`
+	PackageGroup     *PackageGroupConfig `json:"packageGroup,omitempty"`
+	PackageGroupText string              `json:"packageGroupText,omitempty"`
 }
 
 type tronAddressRequest struct {

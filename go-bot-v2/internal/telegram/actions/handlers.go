@@ -272,7 +272,12 @@ func (d *Dispatcher) handleEnergyPackageGroup(ctx context.Context, chatID int64,
 	}
 	rows = append(rows, []InlineButton{{Text: submenuBackText, CallbackData: backData}})
 
-	prompt := d.bot.GetPackageGroupText(ctx)
+	// 优先使用按钮级 PackageGroupText（用户在设计器中为该按钮设定的引导语），
+	// 其次 fallback 到全局 GetPackageGroupText，最后 fallback 到默认值。
+	prompt := strings.TrimSpace(spec.PackageGroupText)
+	if prompt == "" {
+		prompt = d.bot.GetPackageGroupText(ctx)
+	}
 	if prompt == "" {
 		prompt = packageGroupPrompt
 	}

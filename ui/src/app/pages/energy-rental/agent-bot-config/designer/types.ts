@@ -49,6 +49,8 @@ export interface MenuButton {
   submenuText?: string;
   /** action === 'energy_package_group' 时必填 */
   packageGroup?: PackageGroup;
+  /** action === 'energy_package_group' 时可选：套餐列表上方的引导语，空值 fallback 为"请选择套餐：" */
+  packageGroupText?: string;
 }
 
 export interface MenuRow {

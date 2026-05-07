@@ -134,6 +134,20 @@
       <!-- ENERGY_PACKAGE_GROUP 动作 -->
       <ng-container *ngIf="btn.action === ButtonAction.ENERGY_PACKAGE_GROUP">
         <nz-form-item>
+          <nz-form-label>套餐组引导语</nz-form-label>
+          <nz-form-control>
+            <textarea
+              nz-input
+              rows="2"
+              [ngModel]="btn.packageGroupText || ''"
+              (ngModelChange)="updatePackageGroupText($event)"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="用户点击该按钮后显示的提示文案，留空默认「请选择套餐：」"
+            ></textarea>
+          </nz-form-control>
+        </nz-form-item>
+
+        <nz-form-item>
           <nz-form-label>套餐列表</nz-form-label>
           <nz-form-control>
             <app-package-group-selector

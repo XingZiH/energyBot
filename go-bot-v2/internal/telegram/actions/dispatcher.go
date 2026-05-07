@@ -80,21 +80,18 @@ type InlineButton struct {
 // 字段集合对应 telegram.DesignerMenuButton 的子集。独立声明避免循环 import。
 // 调用方（bot.go）负责把 DesignerMenuButton 的字段逐一映射到本结构体。
 type ButtonSpec struct {
-	Action       string
-	Text         string
-	URL          string
-	Message      string
-	Command      string
-	PackageID    int // v1 遗留字段；v2 骨架不使用，保留以支持后续 v1→v2 迁移路径。
-	Submenu      []RowSpec
-	SubmenuText  string
-	PackageGroup *PackageGroupSpec
+	Action           string
+	Text             string
+	URL              string
+	Message          string
+	Command          string
+	PackageID        int // v1 遗留字段；v2 骨架不使用，保留以支持后续 v1→v2 迁移路径。
+	Submenu          []RowSpec
+	SubmenuText      string
+	PackageGroup     *PackageGroupSpec
+	PackageGroupText string
 
 	// Path 是按钮在菜单树中的坐标，用于 submenu 子按钮拼接 callback_data。
-	// 格式：row{i}.btn{j}[.row{i}.btn{j}]*
-	//   - 根层 row0 的第 1 个按钮：Path = "row0.btn1"
-	//   - 上述按钮的 submenu 里 row0 第 2 个按钮：Path = "row0.btn1.row0.btn2"
-	// 由调用方（bot.go）在分发前按按钮遍历位置赋值；其它 action 可以不设。
 	Path string
 }
 

@@ -241,6 +241,12 @@ export class PropertyPanelComponent {
 
   // -------- ENERGY_PACKAGE_GROUP 专用 --------
 
+  updatePackageGroupText(value: string): void {
+    const btn = this.$selectedButton();
+    if (!btn) return;
+    this.tree.updateButton(btn.id, { packageGroupText: value });
+  }
+
   /**
    * 来自 PackageGroupSelector 的 packageIdsChange。
    * 保留 sortBy / textTemplate，覆盖 packageIds。
